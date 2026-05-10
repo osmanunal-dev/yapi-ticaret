@@ -1,0 +1,4541 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d0e0c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>YAPI TİCARET — İstanbul İnşaat Malzemeleri Simülasyonu</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Bebas+Neue&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0d0e0c;
+    --panel: #161814;
+    --panel-2: #1d201a;
+    --border: #2a2e25;
+    --ink: #d4d0c0;
+    --ink-dim: #8a8775;
+    --accent: #f4a020;
+    --accent-2: #c44a1e;
+    --green: #7fb069;
+    --red: #d96c5e;
+    --blue: #5a8ca8;
+    --purple: #9a7fb0;
+  }
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(244,160,32,0.04), transparent 50%),
+      radial-gradient(circle at 80% 90%, rgba(196,74,30,0.04), transparent 50%);
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg,
+      rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px,
+      transparent 1px, transparent 3px);
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  .app {
+    display: grid;
+    grid-template-rows: 56px 1fr 28px;
+    height: 100vh;
+  }
+
+  /* HEADER */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #1a1d17, #131512);
+    gap: 18px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+  .logo-circle {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #1a1610;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px; font-weight: 700;
+    border: 2px solid var(--accent);
+  }
+  .brand-text {
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 2px;
+    font-size: 16px;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+  }
+  .stats {
+    display: flex;
+    gap: 22px;
+    align-items: center;
+    flex: 1;
+    justify-content: flex-end;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.1;
+  }
+  .stat .label {
+    font-size: 9px;
+    color: var(--ink-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .stat .value {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .stat.cash .value { color: var(--green); }
+  .stat.debt .value { color: var(--red); }
+  .stat.rep .value { color: var(--accent); }
+  .stat.lvl .value { color: var(--purple); }
+  .next-day {
+    background: var(--accent);
+    color: #1a1610;
+    border: none;
+    padding: 9px 16px;
+    font-family: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 1px;
+    font-size: 11px;
+    text-transform: uppercase;
+    transition: all 0.15s;
+  }
+  .next-day:hover { background: #ffb733; transform: translateY(-1px); }
+
+  /* MAIN GRID */
+  main {
+    display: grid;
+    grid-template-columns: 220px 1fr 320px;
+    overflow: hidden;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .nav-section {
+    padding: 14px 16px 6px;
+    font-size: 9px;
+    color: var(--ink-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .nav-item {
+    padding: 9px 16px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.1s;
+    user-select: none;
+    font-size: 12px;
+  }
+  .nav-item:hover { background: var(--panel-2); }
+  .nav-item.active {
+    background: var(--panel-2);
+    border-left-color: var(--accent);
+    color: var(--accent);
+  }
+  .badge {
+    background: var(--accent-2);
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-weight: 700;
+  }
+  .badge.warn { background: var(--red); }
+  .badge.info { background: var(--blue); }
+
+  .level-bar {
+    margin: 14px 16px;
+    padding: 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    font-size: 10px;
+  }
+  .level-bar .lvl-row {
+    display: flex; justify-content: space-between;
+    margin-bottom: 4px;
+    color: var(--ink-dim);
+  }
+  .level-bar .lvl-num {
+    color: var(--purple);
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .lvl-progress {
+    height: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .lvl-progress-fill {
+    height: 100%;
+    background: var(--purple);
+    transition: width 0.3s;
+  }
+
+  /* CENTER */
+  .center {
+    overflow-y: auto;
+    padding: 20px 28px;
+  }
+  .center h2 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 3px;
+    margin-bottom: 4px;
+  }
+  .center .subtitle {
+    color: var(--ink-dim);
+    font-size: 11px;
+    margin-bottom: 20px;
+    letter-spacing: 1px;
+  }
+
+  /* CARDS / GRIDS */
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px;
+  }
+  .card h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .card .loc {
+    font-size: 10px;
+    color: var(--ink-dim);
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+
+  /* EMAIL LIST */
+  .email-list { display: flex; flex-direction: column; gap: 10px; }
+  .email {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--blue);
+    padding: 14px 18px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .email:hover { background: var(--panel-2); border-left-color: var(--accent); }
+  .email.unread { border-left-color: var(--accent); }
+  .email.unread .from { color: var(--accent); }
+  .email .top { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .email .from { font-weight: 700; }
+  .email .date { color: var(--ink-dim); font-size: 11px; }
+  .email .subject { font-size: 12px; color: var(--ink); margin-bottom: 4px; }
+  .email .preview { font-size: 11px; color: var(--ink-dim); }
+  .email .deadline {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 10px;
+    background: var(--accent-2);
+    color: white;
+    padding: 2px 8px;
+    letter-spacing: 1px;
+  }
+
+  /* DETAIL */
+  .email-detail { background: var(--panel); border: 1px solid var(--border); padding: 24px; }
+  .email-detail .meta {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+    margin-bottom: 18px;
+  }
+  .email-detail h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .meta-row { display: flex; gap: 14px; font-size: 11px; margin-bottom: 4px; }
+  .meta-row .k { color: var(--ink-dim); width: 110px; text-transform: uppercase; letter-spacing: 1px; }
+  .body-text { line-height: 1.7; margin-bottom: 20px; font-size: 12px; }
+  .body-text p { margin-bottom: 10px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  .data-table th {
+    text-align: left;
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    font-weight: 500;
+  }
+  .data-table td {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .data-table .have { color: var(--green); }
+  .data-table .miss { color: var(--red); }
+  .data-table tfoot td {
+    background: var(--panel-2);
+    border-top: 2px solid var(--accent);
+  }
+  .data-table .num { text-align: right; }
+
+  /* Search bar */
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: stretch;
+  }
+  .search-input {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 10px 14px 10px 36px;
+    font-family: inherit;
+    font-size: 13px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8775' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
+    background-repeat: no-repeat;
+    background-position: 10px center;
+    background-size: 16px;
+    min-height: 40px;
+  }
+  .search-input:focus { outline: none; border-color: var(--accent); }
+  .search-clear {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--ink-dim);
+    padding: 0 14px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    min-height: 40px;
+  }
+  .search-clear:hover { color: var(--ink); border-color: var(--accent); }
+  .filter-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .filter-chip {
+    padding: 6px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--ink-dim);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .filter-chip:hover { border-color: var(--accent); color: var(--ink); }
+  .filter-chip.active {
+    background: var(--accent);
+    color: #1a1610;
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+  .search-result-count {
+    font-size: 10px;
+    color: var(--ink-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .search-result-count .hi { color: var(--accent); font-weight: 700; }
+  .empty-search {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 12px;
+    border: 1px dashed var(--border);
+    background: var(--panel);
+  }
+
+  /* Demand badge - aktif sözleşmeden kalan ihtiyaç */
+  .demand-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    background: rgba(217, 108, 94, 0.18);
+    border: 1px solid var(--red);
+    color: var(--red);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .demand-badge.satisfied {
+    background: rgba(127, 176, 105, 0.15);
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .demand-tooltip {
+    font-size: 9px;
+    color: var(--ink-dim);
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+  .demand-tooltip .urgent { color: var(--red); }
+  .quick-fill-btn {
+    background: var(--accent-2);
+    color: white;
+    border: none;
+    padding: 3px 8px;
+    font-family: inherit;
+    font-size: 9px;
+    cursor: pointer;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-left: 4px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .quick-fill-btn:hover { background: #e85a30; }
+  .supplier-prod.has-demand {
+    background: rgba(244, 160, 32, 0.04);
+    border-radius: 2px;
+    padding-left: 4px;
+    padding-right: 4px;
+    margin-left: -4px;
+    margin-right: -4px;
+  }
+
+  /* Teklif satır renk geri bildirimi (offer feedback) */
+  .data-table tr.offer-empty td { background: var(--panel); }
+  .data-table tr.offer-good td {
+    background: rgba(127, 176, 105, 0.08);
+    border-left: 3px solid var(--green);
+  }
+  .data-table tr.offer-good td:first-child {
+    box-shadow: inset 3px 0 0 var(--green);
+  }
+  .data-table tr.offer-risky td {
+    background: rgba(244, 160, 32, 0.08);
+    border-left: 3px solid var(--accent);
+  }
+  .data-table tr.offer-risky td:first-child {
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .data-table tr.offer-bad td {
+    background: rgba(217, 108, 94, 0.08);
+    border-left: 3px solid var(--red);
+  }
+  .data-table tr.offer-bad td:first-child {
+    box-shadow: inset 3px 0 0 var(--red);
+  }
+  .offer-status-bar {
+    margin-top: 14px;
+    padding: 14px 18px;
+    text-align: center;
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 3px;
+    font-size: 18px;
+    border: 2px solid var(--border);
+    transition: all 0.25s ease;
+  }
+  .offer-status-bar.empty {
+    color: var(--ink-dim);
+    background: var(--panel);
+  }
+  .offer-status-bar.good {
+    color: var(--green);
+    background: rgba(127, 176, 105, 0.1);
+    border-color: var(--green);
+  }
+  .offer-status-bar.risky {
+    color: var(--accent);
+    background: rgba(244, 160, 32, 0.1);
+    border-color: var(--accent);
+  }
+  .offer-status-bar.bad {
+    color: var(--red);
+    background: rgba(217, 108, 94, 0.1);
+    border-color: var(--red);
+  }
+  .offer-status-bar .sub {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--ink-dim);
+    margin-top: 4px;
+    text-transform: none;
+  }
+  .relation-bar {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    background: var(--panel-2);
+    border: 1px dashed var(--border);
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+  .relation-bar .rb-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 110px;
+  }
+  .relation-bar .rb-label {
+    font-size: 9px;
+    color: var(--ink-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .relation-bar .rb-val {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 13px;
+  }
+  .relation-bar .rb-mini {
+    font-size: 9px;
+    color: var(--ink-dim);
+  }
+
+  /* Nakliye hesap tablosu */
+  .shipping-box {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--blue);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .shipping-box h4 {
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 2px;
+    font-size: 14px;
+    color: var(--blue);
+    margin-bottom: 10px;
+  }
+  .shipping-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .shipping-summary .ss-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .shipping-summary .ss-label {
+    font-size: 9px;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  .shipping-summary .ss-val {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .shipping-summary .ss-val.heavy { color: var(--accent); }
+  .shipping-table {
+    width: 100%;
+    font-size: 11px;
+  }
+  .shipping-table th {
+    text-align: left;
+    padding: 6px 8px;
+    color: var(--ink-dim);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+  }
+  .shipping-table th.num { text-align: right; }
+  .shipping-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .shipping-table td.num { text-align: right; font-family: 'JetBrains Mono', monospace; }
+  .shipping-table tr.recommended {
+    background: rgba(127, 176, 105, 0.1);
+  }
+  .shipping-table tr.recommended td:first-child {
+    box-shadow: inset 3px 0 0 var(--green);
+    font-weight: 700;
+    color: var(--green);
+  }
+  .shipping-table tr.selectable {
+    cursor: pointer;
+    transition: background 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .shipping-table tr.selectable:hover {
+    background: var(--panel);
+  }
+  .shipping-table tr.selected {
+    background: rgba(244, 160, 32, 0.12) !important;
+  }
+  .shipping-table tr.selected td:first-child {
+    box-shadow: inset 3px 0 0 var(--accent);
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .shipping-radio {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    vertical-align: middle;
+    margin-right: 6px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .shipping-table tr.selected .shipping-radio {
+    border-color: var(--accent);
+  }
+  .shipping-table tr.selected .shipping-radio::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .shipping-table .veh-name { font-weight: 700; }
+  .shipping-table .trips-bad { color: var(--red); }
+  .shipping-table .trips-good { color: var(--green); }
+  .shipping-table .trips-mid { color: var(--accent); }
+  @media (max-width: 900px) {
+    .shipping-summary {
+      grid-template-columns: 1fr 1fr;
+    }
+    .shipping-table th:nth-child(3),
+    .shipping-table td:nth-child(3) { display: none; } /* hide tonaj on mobile */
+  }
+
+  .unit-input, .qty-input, .text-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    padding: 5px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    width: 110px;
+    font-weight: 700;
+  }
+  .qty-input { width: 70px; color: var(--ink); text-align: center; font-weight: 500; }
+  .text-input { color: var(--ink); width: 100%; font-weight: 500; }
+  input:focus { outline: none; border-color: var(--accent); }
+
+  /* Dual-input: fiyat/yüzde yan yana */
+  .price-margin-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 120px;
+  }
+  .price-margin-pair .pmp-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 0 6px;
+    height: 30px;
+  }
+  .price-margin-pair .pmp-row:focus-within { border-color: var(--accent); }
+  .price-margin-pair input {
+    background: transparent;
+    border: none;
+    padding: 4px 2px;
+    width: 100%;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12px;
+    font-family: inherit;
+    -moz-appearance: textfield;
+  }
+  .price-margin-pair input::-webkit-outer-spin-button,
+  .price-margin-pair input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .price-margin-pair input:focus { outline: none; }
+  .price-margin-pair .pmp-prefix,
+  .price-margin-pair .pmp-suffix {
+    color: var(--ink-dim);
+    font-size: 10px;
+    font-weight: 500;
+    user-select: none;
+  }
+  .price-margin-pair input.pmp-derived {
+    color: var(--ink-dim);
+    font-weight: 500;
+  }
+  .price-margin-pair input.pmp-derived::placeholder {
+    color: var(--ink-dim);
+    opacity: 0.6;
+  }
+
+  /* BUTTONS */
+  .btn {
+    padding: 9px 16px;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--ink);
+    transition: all 0.15s;
+  }
+  .btn:hover:not(:disabled) { background: var(--panel-2); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.primary {
+    background: var(--accent);
+    color: #1a1610;
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+  .btn.primary:hover:not(:disabled) { background: #ffb733; }
+  .btn.success {
+    background: var(--green);
+    color: #0d0e0c;
+    border-color: var(--green);
+    font-weight: 700;
+  }
+  .btn.danger { color: var(--red); border-color: var(--red); }
+  .btn.danger:hover:not(:disabled) { background: var(--red); color: white; }
+  .btn.small { padding: 4px 10px; font-size: 10px; letter-spacing: 1px; }
+  .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+  /* RIGHT PANEL */
+  .right-panel {
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 14px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    background: var(--panel-2);
+    display: flex;
+    justify-content: space-between;
+  }
+  .panel-section { overflow-y: auto; max-height: 33%; }
+  .panel-section.flex { flex: 1; }
+  .item-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    padding: 6px 16px;
+    font-size: 11px;
+    border-bottom: 1px solid var(--border);
+    gap: 8px;
+    align-items: center;
+  }
+  .item-row .name { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-row .qty { color: var(--accent); font-weight: 700; min-width: 35px; text-align: right; }
+  .item-row .unit { color: var(--ink-dim); font-size: 10px; min-width: 22px; }
+  .empty-mini { padding: 14px 16px; color: var(--ink-dim); font-size: 11px; text-align: center; font-style: italic; }
+
+  /* FOOTER */
+  footer {
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    font-size: 10px;
+    color: var(--ink-dim);
+    letter-spacing: 1px;
+    gap: 24px;
+  }
+  footer .blink { animation: blink 1.2s infinite; color: var(--green); }
+  @keyframes blink { 50% { opacity: 0.3; } }
+
+  /* TOAST */
+  .toast-container {
+    position: fixed; top: 70px; right: 20px;
+    z-index: 1000;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .toast {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 10px 14px;
+    font-size: 12px;
+    min-width: 280px;
+    animation: slidein 0.25s;
+  }
+  .toast.success { border-left-color: var(--green); }
+  .toast.error { border-left-color: var(--red); }
+  .toast.info { border-left-color: var(--blue); }
+  @keyframes slidein {
+    from { transform: translateX(20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* MODAL */
+  .modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 500;
+    padding: 20px;
+  }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    padding: 32px 36px;
+    max-width: 600px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 0 40px rgba(244,160,32,0.2);
+  }
+  .modal h2 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 32px;
+    letter-spacing: 4px;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .modal h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    color: var(--ink);
+  }
+  .modal p { line-height: 1.6; margin-bottom: 12px; font-size: 12px; }
+  .modal label { display: block; font-size: 10px; color: var(--ink-dim); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 4px; margin-top: 12px; }
+  .modal input[type="text"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 14px;
+  }
+  .logo-picker {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .logo-option {
+    aspect-ratio: 1;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    font-size: 22px;
+    transition: all 0.15s;
+  }
+  .logo-option:hover { border-color: var(--accent); }
+  .logo-option.selected { border-color: var(--accent); background: var(--panel-2); box-shadow: 0 0 8px rgba(244,160,32,0.3); }
+  .color-picker {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .color-option {
+    aspect-ratio: 1;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .color-option.selected { border-color: var(--ink); transform: scale(1.1); }
+  .preview-logo {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px;
+    background: var(--bg);
+    border: 1px dashed var(--border);
+    margin-top: 14px;
+  }
+
+  /* TABS */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* SUPPLIER PRODUCT */
+  .supplier-prod {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 8px;
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+    align-items: center;
+    font-size: 12px;
+  }
+  .supplier-prod .name { color: var(--ink); }
+  .supplier-prod .price { color: var(--accent); font-weight: 700; min-width: 90px; text-align: right; }
+  .price-trend { font-size: 9px; margin-left: 4px; }
+  .price-trend.up { color: var(--red); }
+  .price-trend.down { color: var(--green); }
+
+  /* MARKET TABLE */
+  .market-table { font-size: 12px; }
+  .market-table .best { background: rgba(127, 176, 105, 0.1); }
+  .market-table .price-cell { font-weight: 700; }
+
+  /* EMPLOYEE */
+  .emp-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 14px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: center;
+  }
+  .emp-avatar {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    border: 2px solid var(--border);
+  }
+  .emp-card.driver .emp-avatar { border-color: var(--blue); }
+  .emp-card.sales .emp-avatar { border-color: var(--purple); }
+  .emp-info .emp-name { font-weight: 700; font-size: 14px; }
+  .emp-info .emp-role { color: var(--ink-dim); font-size: 11px; margin: 2px 0; }
+  .emp-info .emp-stats { font-size: 10px; color: var(--ink-dim); }
+  .emp-info .stars { color: var(--accent); letter-spacing: 1px; }
+
+  /* PROGRESS */
+  .progress-bar {
+    height: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    transition: width 0.3s;
+  }
+  .progress-fill.purple { background: var(--purple); }
+  .progress-fill.blue { background: var(--blue); }
+  .progress-fill.accent { background: var(--accent); }
+  .progress-fill.green { background: var(--green); }
+
+  /* CUSTOMER ACCOUNT */
+  .customer-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--blue);
+    padding: 14px;
+  }
+  .customer-card .trust-bar { margin-top: 8px; }
+  .customer-card .balance.positive { color: var(--green); }
+  .customer-card .balance.negative { color: var(--red); }
+  .customer-card .balance { font-weight: 700; }
+
+  /* IRSALIYE */
+  .irsaliye {
+    background: white;
+    color: black;
+    padding: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    border: 2px solid #444;
+    margin: 14px 0;
+  }
+  .irsaliye h3 { color: black; font-size: 16px; }
+  .irsaliye .ir-header {
+    border-bottom: 2px solid black;
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .irsaliye table { border-collapse: collapse; width: 100%; font-size: 11px; }
+  .irsaliye th, .irsaliye td {
+    border: 1px solid #888;
+    padding: 5px 8px;
+    color: black;
+  }
+  .irsaliye th { background: #ddd; }
+  .irsaliye .stamp {
+    margin-top: 16px;
+    border: 2px dashed #888;
+    padding: 8px;
+    width: 200px;
+    text-align: center;
+    color: #555;
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+
+  /* LEVEL UP */
+  .levelup-flash {
+    position: fixed; inset: 0;
+    background: radial-gradient(circle, rgba(154,127,176,0.2), transparent 60%);
+    z-index: 800;
+    pointer-events: none;
+    animation: flash 1.2s ease-out;
+  }
+  @keyframes flash {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
+  }
+
+  /* Empty / Stats */
+  .empty {
+    padding: 40px; text-align: center;
+    color: var(--ink-dim); font-size: 12px;
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .stat-tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 14px;
+  }
+  .stat-tile .stat-label { font-size: 9px; color: var(--ink-dim); letter-spacing: 2px; text-transform: uppercase; }
+  .stat-tile .stat-val { font-size: 22px; font-weight: 700; margin-top: 4px; font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: var(--panel); }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ink-dim); }
+
+  /* ============================================================
+     MOBILE LAYOUT (≤ 900px)
+     ============================================================ */
+
+  /* Mobile bottom nav & FAB - hidden on desktop */
+  .mobile-bottom-nav { display: none; }
+  .mobile-side-toggle { display: none; }
+  .mobile-only { display: none !important; }
+
+  @media (max-width: 900px) {
+    html, body {
+      font-size: 13px;
+      overflow: auto;
+      height: auto;
+      min-height: 100vh;
+    }
+    body {
+      /* iOS safe area */
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    body::before { display: none; } /* scanlines off on mobile, perf */
+
+    .desktop-only { display: none !important; }
+    .mobile-only { display: initial !important; }
+
+    .app {
+      grid-template-rows: auto 1fr auto;
+      height: auto;
+      min-height: 100vh;
+    }
+
+    /* HEADER - 2 rows on mobile */
+    header {
+      flex-wrap: wrap;
+      padding: 8px 12px;
+      gap: 8px;
+      height: auto;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand {
+      flex: 1;
+      gap: 8px;
+    }
+    .logo-circle {
+      width: 32px; height: 32px;
+      font-size: 16px;
+    }
+    .brand-text {
+      font-size: 13px;
+      letter-spacing: 1.5px;
+      max-width: 140px;
+    }
+    .stats {
+      width: 100%;
+      order: 3;
+      gap: 0;
+      justify-content: space-between;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+    .stats .stat {
+      flex: 1;
+      align-items: center;
+      min-width: 0;
+    }
+    .stats .stat .label {
+      font-size: 8px;
+    }
+    .stats .stat .value {
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    /* Hide debt if zero on small screens */
+    .stat.debt { display: none; }
+    .stat.debt.has-debt { display: flex; }
+
+    .next-day {
+      order: 2;
+      padding: 8px 12px;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+    }
+
+    /* MAIN - single column */
+    main {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr;
+      overflow: visible;
+    }
+
+    /* SIDEBAR → bottom nav */
+    .sidebar {
+      display: none;
+    }
+    .sidebar.mobile-drawer-open {
+      display: flex;
+      position: fixed;
+      top: 0; left: 0;
+      width: 80%;
+      max-width: 300px;
+      height: 100vh;
+      z-index: 700;
+      box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+      overflow-y: auto;
+    }
+    .drawer-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 690;
+    }
+    .drawer-overlay.show { display: block; }
+
+    /* CENTER */
+    .center {
+      padding: 14px 14px 80px; /* bottom space for nav */
+      overflow-y: visible;
+    }
+    .center h2 {
+      font-size: 22px;
+      letter-spacing: 2px;
+    }
+
+    /* RIGHT PANEL → bottom sheet */
+    .right-panel {
+      display: none;
+    }
+    .right-panel.mobile-sheet-open {
+      display: flex;
+      position: fixed;
+      bottom: 56px;
+      left: 0; right: 0;
+      max-height: 70vh;
+      border-left: none;
+      border-top: 2px solid var(--accent);
+      z-index: 600;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+    }
+
+    /* BOTTOM NAV */
+    .mobile-bottom-nav {
+      display: flex;
+      position: fixed;
+      bottom: 0;
+      left: 0; right: 0;
+      height: 56px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      z-index: 500;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    .mb-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--ink-dim);
+      font-size: 9px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 6px 2px;
+      position: relative;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mb-item.active {
+      color: var(--accent);
+    }
+    .mb-item .mb-icon {
+      font-size: 20px;
+      margin-bottom: 2px;
+    }
+    .mb-item .mb-badge {
+      position: absolute;
+      top: 4px;
+      right: calc(50% - 18px);
+      background: var(--accent-2);
+      color: white;
+      font-size: 9px;
+      padding: 0 5px;
+      border-radius: 8px;
+      font-weight: 700;
+      min-width: 14px;
+      text-align: center;
+      line-height: 14px;
+    }
+    .mb-item .mb-badge.warn { background: var(--red); }
+
+    /* FOOTER - hide details, simplify */
+    footer {
+      display: none;
+    }
+
+    /* GRIDS - stack on mobile */
+    .grid-2, .grid-3 {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .stat-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .stat-tile { padding: 10px; }
+    .stat-tile .stat-val { font-size: 18px; }
+
+    /* CARDS */
+    .card {
+      padding: 12px;
+    }
+    .card h3 {
+      font-size: 16px;
+    }
+
+    /* EMAIL DETAIL */
+    .email-detail {
+      padding: 14px;
+    }
+    .email-detail h3 {
+      font-size: 18px;
+      letter-spacing: 1.5px;
+    }
+    .meta-row {
+      flex-wrap: wrap;
+      font-size: 11px;
+    }
+    .meta-row .k { width: 90px; }
+
+    /* DATA TABLES - horizontal scroll on mobile */
+    .data-table {
+      font-size: 11px;
+    }
+    .data-table th, .data-table td {
+      padding: 6px 6px;
+    }
+    /* Wrap tables in scroll container automatically via display: block */
+    .table-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin: 0 -14px;
+      padding: 0 14px;
+    }
+
+    /* BUTTONS - bigger touch targets */
+    .btn {
+      padding: 12px 16px;
+      font-size: 12px;
+      letter-spacing: 1px;
+      min-height: 44px;
+    }
+    .btn.small {
+      padding: 8px 12px;
+      font-size: 11px;
+      min-height: 36px;
+    }
+    .actions {
+      flex-direction: column;
+      gap: 8px;
+    }
+    .actions .btn {
+      width: 100%;
+    }
+
+    /* INPUTS - bigger */
+    .unit-input, .qty-input, .text-input {
+      padding: 10px 10px;
+      font-size: 14px;
+      min-height: 40px;
+    }
+    .qty-input { width: 80px; }
+    .unit-input { width: 100%; max-width: 130px; }
+
+    /* SUPPLIER PROD - stack on mobile */
+    .supplier-prod {
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas:
+        "name name"
+        "price price"
+        "qty btn";
+      gap: 6px;
+      padding: 10px 0;
+    }
+    .supplier-prod .name { grid-area: name; font-weight: 700; }
+    .supplier-prod .price { grid-area: price; text-align: left; }
+    .supplier-prod .qty-input { grid-area: qty; width: 100%; }
+    .supplier-prod .btn { grid-area: btn; width: 100%; }
+
+    /* MODALS */
+    .modal-bg {
+      padding: 0;
+      align-items: stretch;
+    }
+    .modal {
+      max-height: 100vh;
+      max-width: 100%;
+      width: 100%;
+      padding: 18px 16px;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+    }
+    .modal h2 {
+      font-size: 24px;
+      letter-spacing: 2px;
+    }
+
+    /* LOGO/COLOR PICKERS */
+    .logo-picker {
+      grid-template-columns: repeat(5, 1fr);
+    }
+    .color-picker {
+      grid-template-columns: repeat(6, 1fr);
+    }
+
+    /* IRSALIYE - readable on mobile */
+    .irsaliye {
+      padding: 14px;
+      font-size: 11px;
+    }
+    .irsaliye .ir-header {
+      flex-direction: column;
+      gap: 8px;
+    }
+    .irsaliye table { font-size: 10px; }
+    .irsaliye th, .irsaliye td { padding: 4px 6px; }
+
+    /* MARKET TABLE - simplified on mobile */
+    .market-table th:nth-child(2),
+    .market-table td:nth-child(2) { display: none; } /* hide unit col */
+
+    /* TOAST */
+    .toast-container {
+      top: auto;
+      bottom: 70px;
+      right: 10px;
+      left: 10px;
+    }
+    .toast {
+      min-width: 0;
+    }
+
+    /* HR / EMPLOYEE CARDS */
+    .emp-card {
+      grid-template-columns: auto 1fr;
+      gap: 10px;
+      padding: 12px;
+    }
+    .emp-card > div:last-child {
+      grid-column: 1 / -1;
+    }
+    .emp-card > div:last-child .btn {
+      width: 100%;
+    }
+
+    /* CUSTOMER CARDS */
+    .customer-card {
+      padding: 12px;
+    }
+
+    /* TABS */
+    .tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .tab {
+      white-space: nowrap;
+      padding: 10px 12px;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+    }
+
+    /* PANEL HEADER (right panel section) */
+    .panel-header {
+      padding: 14px 16px;
+      font-size: 14px;
+    }
+    .panel-section { max-height: 200px; }
+
+    /* SHEET CLOSE BUTTON */
+    .sheet-close {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px; height: 36px;
+      cursor: pointer;
+      font-size: 18px;
+      color: var(--ink-dim);
+    }
+  }
+
+  /* Small phones */
+  @media (max-width: 380px) {
+    html, body { font-size: 12px; }
+    .brand-text { font-size: 12px; max-width: 100px; }
+    .stats .stat .value { font-size: 11px; }
+    .next-day { padding: 6px 10px; font-size: 9px; }
+    .center { padding: 12px 10px 80px; }
+    .mb-item .mb-icon { font-size: 18px; }
+    .mb-item { font-size: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <button class="mobile-side-toggle mobile-only" onclick="toggleDrawer()" style="background: transparent; border: none; color: var(--accent); font-size: 22px; cursor: pointer; padding: 4px 8px;">☰</button>
+    <div class="brand">
+      <div class="logo-circle" id="brand-logo">Y</div>
+      <div class="brand-text" id="brand-text">YAPI TİCARET</div>
+    </div>
+    <div class="stats">
+      <div class="stat lvl"><span class="label">Sv</span><span class="value" id="stat-lvl">1</span></div>
+      <div class="stat"><span class="label">Gün</span><span class="value" id="stat-day">1</span></div>
+      <div class="stat rep"><span class="label">İtibar</span><span class="value" id="stat-rep">50</span></div>
+      <div class="stat cash"><span class="label">Kasa</span><span class="value" id="stat-cash">₺500.000</span></div>
+      <div class="stat debt"><span class="label">Borç</span><span class="value" id="stat-debt">₺0</span></div>
+      <button class="next-day" onclick="nextDay()">Gün ▶</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="sidebar" id="sidebar">
+      <div class="panel-header mobile-only" style="background: var(--accent); color: #1a1610;">
+        <span>MENÜ</span>
+        <span class="sheet-close" onclick="toggleDrawer()" style="color: #1a1610;">✕</span>
+      </div>
+      <div class="nav-section">Operasyon</div>
+      <div class="nav-item active" data-view="inbox" onclick="setView('inbox')">
+        <span>📨 Gelen Kutusu</span><span class="badge" id="badge-inbox" style="display:none">0</span>
+      </div>
+      <div class="nav-item" data-view="market" onclick="setView('market')">
+        <span>🛒 Malzeme Piyasası</span>
+      </div>
+      <div class="nav-item" data-view="suppliers" onclick="setView('suppliers')">
+        <span>🚚 Tedarikçiler</span>
+      </div>
+      <div class="nav-item" data-view="contracts" onclick="setView('contracts')">
+        <span>📋 Sözleşmeler</span><span class="badge" id="badge-contracts" style="display:none">0</span>
+      </div>
+
+      <div class="nav-section">Lojistik & Personel</div>
+      <div class="nav-item" data-view="fleet" onclick="setView('fleet')">
+        <span>🚛 Filo & Sevkiyat</span><span class="badge info" id="badge-fleet" style="display:none">0</span>
+      </div>
+      <div class="nav-item" data-view="hr" onclick="setView('hr')">
+        <span>👷 Personel</span>
+      </div>
+
+      <div class="nav-section">Müşteri & Pazarlama</div>
+      <div class="nav-item" data-view="customers" onclick="setView('customers')">
+        <span>🏢 Müşteriler / Cari</span>
+      </div>
+      <div class="nav-item" data-view="visits" onclick="setView('visits')">
+        <span>📍 Saha Ziyaretleri</span>
+      </div>
+
+      <div class="nav-section">Finans</div>
+      <div class="nav-item" data-view="bank" onclick="setView('bank')">
+        <span>🏦 Banka</span><span class="badge warn" id="badge-bank" style="display:none">!</span>
+      </div>
+      <div class="nav-item" data-view="archive" onclick="setView('archive')">
+        <span>📁 Arşiv</span>
+      </div>
+
+      <div class="level-bar">
+        <div class="lvl-row"><span>SEVİYE</span><span class="lvl-num" id="side-lvl">1</span></div>
+        <div class="lvl-row"><span id="side-xp">0 / 100 XP</span><span id="side-title">Çırak</span></div>
+        <div class="lvl-progress"><div class="lvl-progress-fill" id="lvl-progress" style="width: 0%"></div></div>
+      </div>
+    </aside>
+
+    <section class="center" id="center"></section>
+
+    <aside class="right-panel" id="right-panel">
+      <div class="panel-header mobile-only" style="background: var(--accent); color: #1a1610;">
+        <span>DEPO & DURUM</span>
+        <span class="sheet-close" onclick="toggleSheet()" style="color: #1a1610;">✕</span>
+      </div>
+      <div class="panel-header"><span>DEPO</span><span id="depo-count" style="font-size:10px;color:var(--ink-dim)">0 kalem</span></div>
+      <div class="panel-section flex" id="inventory"></div>
+
+      <div class="panel-header"><span>AKTİF SÖZLEŞMELER</span></div>
+      <div class="panel-section" id="contracts-mini"></div>
+
+      <div class="panel-header"><span>BUGÜNKÜ AJANDA</span></div>
+      <div class="panel-section" id="agenda"></div>
+    </aside>
+  </main>
+
+  <footer>
+    <span class="blink">●</span>
+    <span>YAPI-TİCARET v2.0 İSTANBUL</span>
+    <span id="ticker">Piyasa: stabil</span>
+    <span style="margin-left:auto" id="hint">Hazırsan, "Sonraki Gün" tuşuna bas.</span>
+  </footer>
+
+  <!-- Mobile bottom navigation -->
+  <nav class="mobile-bottom-nav mobile-only">
+    <div class="mb-item active" data-view="inbox" onclick="setView('inbox'); closeDrawer()">
+      <span class="mb-icon">📨</span>
+      <span>Gelen</span>
+      <span class="mb-badge" id="mb-badge-inbox" style="display:none">0</span>
+    </div>
+    <div class="mb-item" data-view="market" onclick="setView('market'); closeDrawer()">
+      <span class="mb-icon">🛒</span>
+      <span>Piyasa</span>
+    </div>
+    <div class="mb-item" data-view="contracts" onclick="setView('contracts'); closeDrawer()">
+      <span class="mb-icon">📋</span>
+      <span>İşler</span>
+      <span class="mb-badge" id="mb-badge-contracts" style="display:none">0</span>
+    </div>
+    <div class="mb-item" data-view="bank" onclick="setView('bank'); closeDrawer()">
+      <span class="mb-icon">🏦</span>
+      <span>Banka</span>
+    </div>
+    <div class="mb-item" onclick="toggleSheet()">
+      <span class="mb-icon">📦</span>
+      <span>Depo</span>
+    </div>
+  </nav>
+
+  <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer(); closeSheet()"></div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+<div id="modals"></div>
+
+<script>
+'use strict';
+
+// ============================================================
+// CONFIG / DATA
+// ============================================================
+
+// 24 farklı malzeme
+const PRODUCTS = {
+  cement:    { name: 'Çimento',           unit: 'çuval', cat: 'temel',    weight: 50    },   // kg per unit
+  sand:      { name: 'Kum',               unit: 'm³',    cat: 'temel',    weight: 1500  },
+  gravel:    { name: 'Çakıl',             unit: 'm³',    cat: 'temel',    weight: 1800  },
+  brick:     { name: 'Tuğla',             unit: 'adet',  cat: 'temel',    weight: 2.5   },
+  briket:    { name: 'Briket',            unit: 'adet',  cat: 'temel',    weight: 14    },
+  rebar:     { name: 'İnşaat Demiri',     unit: 'ton',   cat: 'demir',    weight: 1000  },
+  hasir:     { name: 'Hasır Çelik',       unit: 'rulo',  cat: 'demir',    weight: 80    },
+  profil:    { name: 'Profil Demir',      unit: 'metre', cat: 'demir',    weight: 6     },
+  tile:      { name: 'Seramik',           unit: 'm²',    cat: 'kaplama',  weight: 22    },
+  granit:    { name: 'Granit',            unit: 'm²',    cat: 'kaplama',  weight: 60    },
+  parke:     { name: 'Laminat Parke',     unit: 'm²',    cat: 'kaplama',  weight: 8     },
+  paint:     { name: 'İç Cephe Boya',     unit: 'kova',  cat: 'boya',     weight: 18    },
+  discephe:  { name: 'Dış Cephe Boya',    unit: 'kova',  cat: 'boya',     weight: 20    },
+  vernik:    { name: 'Vernik',            unit: 'kutu',  cat: 'boya',     weight: 4     },
+  insul:     { name: 'XPS Yalıtım',       unit: 'm²',    cat: 'yalitim',  weight: 1.5   },
+  taşyunu:   { name: 'Taş Yünü',          unit: 'paket', cat: 'yalitim',  weight: 12    },
+  membran:   { name: 'Su Yalıtım Membr.', unit: 'rulo',  cat: 'yalitim',  weight: 35    },
+  plaster:   { name: 'Alçı',              unit: 'çuval', cat: 'sıva',     weight: 25    },
+  alcipan:   { name: 'Alçıpan',           unit: 'levha', cat: 'sıva',     weight: 22    },
+  pipe:      { name: 'PVC Boru',          unit: 'metre', cat: 'tesisat',  weight: 1.2   },
+  pprc:      { name: 'PPRC Boru',         unit: 'metre', cat: 'tesisat',  weight: 0.6   },
+  kablo:     { name: 'Elektrik Kablosu',  unit: 'metre', cat: 'elektrik', weight: 0.3   },
+  pano:      { name: 'Sigorta Panosu',    unit: 'adet',  cat: 'elektrik', weight: 8     },
+  cam:       { name: 'Cam (4mm)',         unit: 'm²',    cat: 'kaplama',  weight: 10    }
+};
+
+// Gerçekçi 2026 İstanbul piyasa fiyatları (toptan, KDV dahil yaklaşık)
+const BASE_PRICE = {
+  cement: 200, sand: 500, gravel: 550, brick: 6, briket: 25,
+  rebar: 35000, hasir: 2200, profil: 220,
+  tile: 350, granit: 2500, parke: 450,
+  paint: 1400, discephe: 1800, vernik: 550,
+  insul: 180, taşyunu: 450, membran: 1500,
+  plaster: 220, alcipan: 350,
+  pipe: 95, pprc: 85,
+  kablo: 55, pano: 2500,
+  cam: 550
+};
+
+// İstanbul ilçeleri ve mesafeleri (depodan ~ km olarak; merkez = Maltepe varsayım)
+const ILCELER = {
+  kadikoy:    { name: 'Kadıköy',        side: 'A', km: 8  },
+  uskudar:    { name: 'Üsküdar',        side: 'A', km: 12 },
+  atasehir:   { name: 'Ataşehir',       side: 'A', km: 6  },
+  pendik:     { name: 'Pendik',         side: 'A', km: 18 },
+  tuzla:      { name: 'Tuzla',          side: 'A', km: 28 },
+  maltepe:    { name: 'Maltepe',        side: 'A', km: 2  },
+  umraniye:   { name: 'Ümraniye',       side: 'A', km: 14 },
+  sancaktepe: { name: 'Sancaktepe',     side: 'A', km: 16 },
+  beykoz:     { name: 'Beykoz',         side: 'A', km: 32 },
+  gebze:      { name: 'Gebze',          side: 'A', km: 35 },
+  besiktas:   { name: 'Beşiktaş',       side: 'V', km: 22 },
+  sisli:      { name: 'Şişli',          side: 'V', km: 24 },
+  beyoglu:    { name: 'Beyoğlu',        side: 'V', km: 26 },
+  fatih:      { name: 'Fatih',          side: 'V', km: 28 },
+  bahcelv:    { name: 'Bahçelievler',   side: 'V', km: 36 },
+  bakirkoy:   { name: 'Bakırköy',       side: 'V', km: 32 },
+  beylikd:    { name: 'Beylikdüzü',     side: 'V', km: 52 },
+  esenyurt:   { name: 'Esenyurt',       side: 'V', km: 54 },
+  basaksehir: { name: 'Başakşehir',     side: 'V', km: 48 },
+  sariyer:    { name: 'Sarıyer',        side: 'V', km: 38 },
+  maslak:     { name: 'Maslak',         side: 'V', km: 30 },
+  zeytinburnu:{ name: 'Zeytinburnu',    side: 'V', km: 30 },
+  avcilar:    { name: 'Avcılar',        side: 'V', km: 46 }
+};
+
+// 18 müşteri firması (ilçelere dağılmış)
+const CUSTOMERS_INIT = [
+  { id: 'atilim',     name: 'Atılım İnşaat A.Ş.',         ilce: 'kadikoy'   },
+  { id: 'vizyon',     name: 'Vizyon Yapı',                 ilce: 'maslak'    },
+  { id: 'ufuk',       name: 'Ufuk Müteahhitlik',           ilce: 'beylikd'   },
+  { id: 'sahil',      name: 'Sahil Yapı Ltd.',             ilce: 'pendik'    },
+  { id: 'bogaz',      name: 'Boğaz İnşaat',                ilce: 'sariyer'   },
+  { id: 'toki',       name: 'Star Müteahhitlik',           ilce: 'esenyurt'  },
+  { id: 'yildiz',     name: 'Yıldız İnşaat',               ilce: 'atasehir'  },
+  { id: 'aile',       name: 'Aile Yapı Kooperatifi',       ilce: 'bahcelv'   },
+  { id: 'mega',       name: 'Mega Holding İnşaat',         ilce: 'besiktas'  },
+  { id: 'tarihi',     name: 'Tarihi Yarımada Restorasyon', ilce: 'fatih'     },
+  { id: 'bosphorus',  name: 'Bosphorus Construction',      ilce: 'beykoz'    },
+  { id: 'gebze',      name: 'Gebze Sanayi Yapı',           ilce: 'gebze'     },
+  { id: 'alfa',       name: 'Alfa Konut',                  ilce: 'umraniye'  },
+  { id: 'beta',       name: 'Beta Yapı Endüstri',          ilce: 'sancaktepe'},
+  { id: 'cinar',      name: 'Çınar Müteahhitlik',          ilce: 'tuzla'     },
+  { id: 'galata',     name: 'Galata Yapı',                 ilce: 'beyoglu'   },
+  { id: 'orient',     name: 'Orient Construction',         ilce: 'sisli'     },
+  { id: 'avcilar',    name: 'Avcılar Yapı Kooperatifi',    ilce: 'avcilar'   },
+  { id: 'basaks',     name: 'Başakşehir Toplu Konut Ltd.', ilce: 'basaksehir'},
+  { id: 'zeytin',     name: 'Zeytinburnu İnşaat',          ilce: 'zeytinburnu'},
+  { id: 'bakir',      name: 'Bakırköy Yapı Sanayi',        ilce: 'bakirkoy'  },
+  { id: 'maltepe',    name: 'Maltepe Müteahhitlik',        ilce: 'maltepe'   }
+];
+
+// 14 tedarikçi (aynı malzemeyi farklı fiyatlarla satabilen)
+const SUPPLIERS = [
+  { id: 'aksel',     name: 'AKSEL Yapı Malzemeleri',  ilce: 'tuzla',    priceMod: 1.00,
+    products: ['cement','sand','gravel','brick','briket','plaster'] },
+  { id: 'demir1',    name: 'Demir Çelik A.Ş.',          ilce: 'gebze',    priceMod: 0.93,
+    products: ['rebar','hasir','profil','pipe'] },
+  { id: 'estetik',   name: 'Estetik Yapı Market',       ilce: 'umraniye', priceMod: 1.12,
+    products: ['tile','granit','parke','paint','discephe','vernik'] },
+  { id: 'merkez',    name: 'Merkez Toptan',             ilce: 'esenyurt', priceMod: 0.91,
+    products: ['cement','brick','sand','pipe','briket','kablo'] },
+  { id: 'yalitim',   name: 'Yalıtım Dünyası',           ilce: 'bakirkoy', priceMod: 1.05,
+    products: ['insul','taşyunu','membran','alcipan'] },
+  { id: 'cam',       name: 'Cam ve Aydınlatma',         ilce: 'sisli',    priceMod: 1.08,
+    products: ['cam','vernik','pano','kablo'] },
+  { id: 'anadolu',   name: 'Anadolu Yapı',              ilce: 'pendik',   priceMod: 0.97,
+    products: ['cement','plaster','alcipan','tile','paint'] },
+  { id: 'avrupa',    name: 'Avrupa Toptan İnşaat',      ilce: 'beylikd',  priceMod: 0.95,
+    products: ['rebar','cement','sand','gravel','brick'] },
+  { id: 'tesisat',   name: 'Tesisat Profesyonel',       ilce: 'kadikoy',  priceMod: 1.03,
+    products: ['pipe','pprc','kablo','pano'] },
+  { id: 'lider',     name: 'Lider Yapı Market',         ilce: 'maslak',   priceMod: 1.15,
+    products: ['paint','discephe','vernik','parke','granit','tile','cam'] },
+  { id: 'ekonomik',  name: 'Ekonomik Malzeme',          ilce: 'avcilar',  priceMod: 0.88,
+    products: ['cement','brick','briket','plaster','insul','sand'] },
+  { id: 'demir2',    name: 'Çelikoğlu Demir',           ilce: 'sancaktepe',priceMod:0.96,
+    products: ['rebar','hasir','profil'] },
+  { id: 'asya',      name: 'Asya Yapı Toptan',          ilce: 'atasehir', priceMod: 0.99,
+    products: ['cement','tile','plaster','alcipan','paint','pipe'] },
+  { id: 'butik',     name: 'Butik Dekor',               ilce: 'besiktas', priceMod: 1.20,
+    products: ['parke','granit','vernik','cam'] }
+];
+
+// Araç tipleri - 2026 İstanbul ticari araç piyasası
+const VEHICLE_TYPES = {
+  kamyonet: { name: 'Kamyonet (Pick-up)', tonaj: 2,   cost: 950000,   speed: 1.0, fuelPerKm: 4 },
+  kucuk:    { name: 'Küçük Kamyon',       tonaj: 5,   cost: 2400000,  speed: 0.9, fuelPerKm: 9 },
+  orta:     { name: 'Orta Boy Kamyon',    tonaj: 10,  cost: 4800000,  speed: 0.8, fuelPerKm: 14 },
+  buyuk:    { name: 'Büyük Tır',          tonaj: 25,  cost: 12500000, speed: 0.7, fuelPerKm: 22 }
+};
+const FUEL_PRICE = 52; // TL/litre (2026 Mayıs İstanbul motorin)
+
+// İsim havuzları
+const NAMES_M = ['Mehmet','Ahmet','Mustafa','Ali','Hasan','Hüseyin','İbrahim','Murat','Emre','Burak','Cem','Serkan','Tolga','Onur','Kemal','Selim','Yusuf','Kerem','Tarık','Bora','Volkan','Eren','Furkan'];
+const NAMES_F = ['Ayşe','Fatma','Zeynep','Elif','Merve','Sevgi','Pınar','Selin','Deniz','Esra','Burcu','Tuğba','Yasemin','Damla'];
+const SURNAMES = ['Yılmaz','Kaya','Demir','Şahin','Çelik','Yıldız','Yıldırım','Öztürk','Aydın','Özdemir','Arslan','Doğan','Kılıç','Aslan','Çetin','Kara','Koç','Kurt','Özkan','Şimşek','Polat','Tunç','Erdoğan','Karaca'];
+
+const TITLES = ['Çırak', 'Kalfa', 'Usta', 'Toptancı', 'Tüccar', 'Tacir Bey', 'İş İnsanı', 'Holding Patronu', 'Sektör Lideri', 'Efsane'];
+
+// ============================================================
+// STATE
+// ============================================================
+
+const state = {
+  day: 1,
+  cash: 500000,
+  level: 1,
+  xp: 0,
+  reputation: 50,
+  totalProfit: 0,
+  contractsCompleted: 0,
+  contractsFailed: 0,
+  view: 'inbox',
+  selectedEmail: null,
+
+  company: { name: 'YAPI TİCARET', logo: 'Y', color: '#f4a020' },
+
+  // Daily price multipliers per product (volatility)
+  priceMod: {},     // {productId: 1.0..} resets each day
+  prevPriceMod: {}, // for trend arrows
+
+  inventory: {},      // {productId: qty}
+  inbox: [],          // pending tenders/emails
+  archive: [],        // resolved emails/contracts
+
+  contracts: [],      // { id, customerId, items, unitPrices, total, deadline, deliveries:[], delivered, paid }
+  customers: [],      // { id, name, ilce, balance, trust, totalRevenue, totalContracts }
+
+  vehicles: [],       // { id, type, busyUntil, deliveringContractId }
+  drivers: [],        // { id, name, salary, level, xp, hireDay, vehicleId }
+  salesReps: [],      // { id, name, salary, level, xp, hireDay, ilce, busyUntil, visitingCustomerId }
+
+  // Bank
+  loans: [],          // { id, principal, remaining, interestRate, dailyPayment, daysLeft, takenDay }
+
+  // Pending visits scheduled
+  pendingVisits: [],  // {repId, customerId, dueDay}
+
+  // Payroll - maaşlar her 30 günde bir ödenir
+  lastPayrollDay: 0,  // son ödeme günü (gün 30, 60, 90...)
+
+  // Aylık rapor takibi
+  lastReportDay: 0,           // son rapor günü
+  monthStartCash: 500000,     // ay başı kasa
+  monthStartContracts: 0,     // ay başı tamamlanan sözleşme
+  monthStartFailed: 0,        // ay başı başarısız sözleşme
+  monthStartLevel: 1,
+  monthStartReputation: 50,
+  monthlyContractsWon: 0,     // bu ay kazanılan ihale (yarışta kazanılan)
+  monthlyContractsLost: 0,    // bu ay kaybedilen
+  monthlyRevenue: 0,          // bu ay tahsil edilen
+  monthlyExpenses: 0,         // bu ay yapılan harcama (alış+yakıt+maaş+taksit)
+  pastReports: [],            // {month, ...metrics} listesi
+
+  // Search filters (yeni)
+  marketSearch: '',
+  marketCategory: 'all',
+  supplierSearch: '',
+
+  // Notifications buffer for the day
+  agenda: []
+};
+
+// init inventory
+Object.keys(PRODUCTS).forEach(p => state.inventory[p] = 0);
+// init customers
+state.customers = CUSTOMERS_INIT.map(c => ({
+  ...c, balance: 0, trust: 30 + Math.random() * 20, totalRevenue: 0, totalContracts: 0, knownSince: 1
+}));
+// init prices
+function rollPrices() {
+  state.prevPriceMod = { ...state.priceMod };
+  Object.keys(PRODUCTS).forEach(p => {
+    const drift = (Math.random() - 0.5) * 0.10; // ±5%
+    const prev = state.priceMod[p] || 1.0;
+    let next = prev * (1 + drift);
+    next = Math.max(0.75, Math.min(1.35, next));
+    state.priceMod[p] = next;
+  });
+}
+rollPrices();
+
+// Starting vehicle (free 1.5t pickup)
+state.vehicles.push({
+  id: 'v1', type: 'kamyonet', busyUntil: 0, deliveringContractId: null, name: 'Pikabımız'
+});
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+const $ = id => document.getElementById(id);
+const fmt = n => '₺' + Math.round(n).toLocaleString('tr-TR');
+const rand = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+const choice = arr => arr[Math.floor(Math.random() * arr.length)];
+const uid = () => Math.random().toString(36).slice(2, 9);
+let _emailIdCounter = 1000;
+
+function fullName() {
+  const first = Math.random() < 0.85 ? choice(NAMES_M) : choice(NAMES_F);
+  return first + ' ' + choice(SURNAMES);
+}
+
+function toast(msg, type = 'info') {
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  $('toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; }, 4000);
+  setTimeout(() => t.remove(), 4500);
+}
+
+function currentPrice(productId) {
+  return BASE_PRICE[productId] * (state.priceMod[productId] || 1);
+}
+function supplierPrice(supplier, productId) {
+  return Math.round(currentPrice(productId) * supplier.priceMod);
+}
+
+// Bir malzeme için piyasada bulunan en ucuz tedarikçi fiyatı
+// Returns: { price, supplier } | null
+function cheapestSupplier(productId) {
+  const sellers = SUPPLIERS.filter(s => s.products.includes(productId));
+  if (sellers.length === 0) return null;
+  let best = { price: supplierPrice(sellers[0], productId), supplier: sellers[0] };
+  for (const s of sellers) {
+    const p = supplierPrice(s, productId);
+    if (p < best.price) best = { price: p, supplier: s };
+  }
+  return best;
+}
+
+// Teklifteki seçili nakliyenin ağırlık oranıyla kalemlere dağılımı
+// Returns: kalem başına ek maliyet (TL/kalem birimi olarak)
+// itemShippingPerUnit[idx] = (kalemToplamAğırlığı / toplamAğırlık) × toplamNakliye / kalemMiktarı
+function shippingShareByItem(items, totalShipping) {
+  const totalWeightKg = items.reduce((s, it) => s + PRODUCTS[it.productId].weight * it.qty, 0);
+  if (totalWeightKg <= 0 || totalShipping <= 0) return items.map(() => 0);
+  return items.map(it => {
+    const itemWeight = PRODUCTS[it.productId].weight * it.qty;
+    const itemShipShare = (itemWeight / totalWeightKg) * totalShipping;
+    return itemShipShare / it.qty; // birim başına nakliye TL'si
+  });
+}
+function priceTrend(productId) {
+  const cur = state.priceMod[productId] || 1;
+  const prev = state.prevPriceMod[productId] || 1;
+  if (cur > prev * 1.005) return 'up';
+  if (cur < prev * 0.995) return 'down';
+  return 'flat';
+}
+
+function totalDebt() {
+  return state.loans.reduce((s, l) => s + l.remaining, 0);
+}
+
+function getCustomer(id) { return state.customers.find(c => c.id === id); }
+
+function inventoryWeight(items) {
+  return items.reduce((s, it) => s + (PRODUCTS[it.productId].weight * it.qty), 0) / 1000; // tons
+}
+
+// Nakliye hesabı: bir teklif için tüm araç seçeneklerini değerlendirir
+// Returns: { totalWeightKg, distanceKm, options: [{type, name, tonaj, trips, fuelTotal, owned}] }
+function computeShippingOptions(items, customerId) {
+  const cust = getCustomer(customerId);
+  const distanceKm = ILCELER[cust.ilce].km;
+  const totalWeightKg = items.reduce((s, it) => s + (PRODUCTS[it.productId].weight * it.qty), 0);
+  const totalWeightT = totalWeightKg / 1000;
+
+  const options = Object.entries(VEHICLE_TYPES).map(([type, t]) => {
+    const trips = Math.max(1, Math.ceil(totalWeightT / t.tonaj));
+    const fuelPerTrip = t.fuelPerKm * distanceKm * 2 * FUEL_PRICE;
+    const fuelTotal = Math.round(fuelPerTrip * trips);
+    const owned = state.vehicles.filter(v => v.type === type).length;
+    return {
+      type,
+      name: t.name,
+      tonaj: t.tonaj,
+      trips,
+      fuelTotal,
+      owned
+    };
+  });
+
+  // En uygun seçeneği bul: tek seferde tamamlayan en küçük araç
+  let recommendedIdx = -1;
+  // Önce sahip olduğu ve tek seferde götürebilen en küçük araç
+  const ownedSingleTrip = options.filter(o => o.owned > 0 && o.trips === 1);
+  if (ownedSingleTrip.length > 0) {
+    // En küçük tonaj seç (en ekonomik)
+    ownedSingleTrip.sort((a, b) => a.tonaj - b.tonaj);
+    recommendedIdx = options.indexOf(ownedSingleTrip[0]);
+  } else {
+    // Tek seferde götürecek en küçük araç (sahip olunmasa da)
+    const singleTrip = options.filter(o => o.trips === 1);
+    if (singleTrip.length > 0) {
+      singleTrip.sort((a, b) => a.tonaj - b.tonaj);
+      recommendedIdx = options.indexOf(singleTrip[0]);
+    } else {
+      // Hiçbiri tek seferde götüremez — en az yakıt maliyetli olan
+      let minIdx = 0;
+      options.forEach((o, i) => { if (o.fuelTotal < options[minIdx].fuelTotal) minIdx = i; });
+      recommendedIdx = minIdx;
+    }
+  }
+
+  return { totalWeightKg, totalWeightT, distanceKm, options, recommendedIdx };
+}
+
+function availableVehicles(now) {
+  return state.vehicles.filter(v => v.busyUntil <= now && !v.deliveringContractId);
+}
+
+// Kasa hareketi helper'ları — aylık rapor için gelir/gider takibi yapıyor
+function spend(amount, category) {
+  state.cash -= amount;
+  if (category !== 'noop') state.monthlyExpenses += amount;
+}
+function earn(amount, category) {
+  state.cash += amount;
+  if (category !== 'noop') state.monthlyRevenue += amount;
+}
+
+// Aktif sözleşmelerde her productId için kalan toplam ihtiyaç
+// Stok düşmüş ve depodaki miktar dikkate alınmaz; sadece "henüz teslim edilmemiş" miktar.
+// stockShortage: depo varlığını da düşerek "kaç tane daha SATIN ALMAM lazım"
+function contractDemand(productId) {
+  let pending = 0;
+  for (const ct of state.contracts) {
+    if (ct.delivered) continue;
+    for (const it of ct.items) {
+      if (it.productId !== productId) continue;
+      const delivered = ct.deliveries.reduce((s, d) =>
+        s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+      pending += Math.max(0, it.qty - delivered);
+    }
+  }
+  return pending;
+}
+
+// Bu malzemeden henüz teslim edilmemiş tüm sözleşmeler için ne kadar SATIN ALMA gerekiyor?
+// = (kalan teslimat ihtiyacı) - (mevcut depo stoğu)
+function purchaseShortfall(productId) {
+  const need = contractDemand(productId);
+  const stock = state.inventory[productId] || 0;
+  return Math.max(0, need - stock);
+}
+
+// Aktif sözleşmelerde productId için detay (hangi sözleşmeler ve miktarlar)
+function contractDemandDetails(productId) {
+  const details = [];
+  for (const ct of state.contracts) {
+    if (ct.delivered) continue;
+    for (const it of ct.items) {
+      if (it.productId !== productId) continue;
+      const delivered = ct.deliveries.reduce((s, d) =>
+        s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+      const remaining = it.qty - delivered;
+      if (remaining > 0) {
+        const cust = getCustomer(ct.customerId);
+        details.push({
+          contractId: ct.id,
+          customerName: cust ? cust.name : '?',
+          deadline: ct.deadline,
+          remaining
+        });
+      }
+    }
+  }
+  return details;
+}
+
+// ============================================================
+// XP / LEVEL
+// ============================================================
+
+const XP_REQ = lvl => Math.round(100 * Math.pow(1.45, lvl - 1));
+
+function addXP(amount, reason) {
+  state.xp += amount;
+  while (state.xp >= XP_REQ(state.level)) {
+    state.xp -= XP_REQ(state.level);
+    state.level++;
+    onLevelUp();
+  }
+  if (reason) toast(`+${amount} XP — ${reason}`, 'info');
+}
+
+function onLevelUp() {
+  toast(`🎊 SEVİYE ATLADIN: ${state.level}!`, 'success');
+  // Reward: bonus cash + reputation
+  const bonus = state.level * 50000;
+  state.cash += bonus;
+  state.reputation = Math.min(100, state.reputation + 2);
+  // Flash overlay
+  const fl = document.createElement('div');
+  fl.className = 'levelup-flash';
+  document.body.appendChild(fl);
+  setTimeout(() => fl.remove(), 1300);
+  toast(`💰 Seviye bonusu: ${fmt(bonus)} ve +2 itibar`, 'success');
+}
+
+// ============================================================
+// EMAIL / TENDER GENERATION
+// ============================================================
+
+function generateTender() {
+  const customer = choice(state.customers);
+  const trustBonus = customer.trust > 60 ? 1.05 : 1.0; // trusted customers tend to send bigger jobs
+
+  // Determine "scale" by trust + randomness
+  const r = Math.random() * (customer.trust + 30);
+  const scale = r > 70 ? 'large' : r > 35 ? 'medium' : 'small';
+  const scaleMult = { small: 1, medium: 2.5, large: 5 }[scale];
+
+  // Pick 2-5 products
+  const allProducts = Object.keys(PRODUCTS);
+  const numItems = rand(2, scale === 'large' ? 5 : 4);
+  const items = [];
+  const used = new Set();
+  for (let i = 0; i < numItems; i++) {
+    let pid;
+    let tries = 0;
+    do { pid = choice(allProducts); tries++; }
+    while (used.has(pid) && tries < 10);
+    used.add(pid);
+    let qty;
+    switch (pid) {
+      case 'cement': qty = Math.round(rand(20, 80) * scaleMult); break;
+      case 'sand':   qty = Math.round(rand(5, 20) * scaleMult); break;
+      case 'gravel': qty = Math.round(rand(5, 20) * scaleMult); break;
+      case 'brick':  qty = Math.round(rand(500, 2000) * scaleMult); break;
+      case 'briket': qty = Math.round(rand(200, 800) * scaleMult); break;
+      case 'rebar':  qty = Math.max(1, Math.round(rand(1, 5) * scaleMult)); break;
+      case 'hasir':  qty = Math.round(rand(5, 20) * scaleMult); break;
+      case 'profil': qty = Math.round(rand(50, 200) * scaleMult); break;
+      case 'tile':   qty = Math.round(rand(50, 200) * scaleMult); break;
+      case 'granit': qty = Math.round(rand(20, 80) * scaleMult); break;
+      case 'parke':  qty = Math.round(rand(40, 150) * scaleMult); break;
+      case 'paint':  qty = Math.round(rand(10, 30) * scaleMult); break;
+      case 'discephe':qty= Math.round(rand(8, 25) * scaleMult); break;
+      case 'vernik': qty = Math.round(rand(5, 15) * scaleMult); break;
+      case 'insul':  qty = Math.round(rand(50, 200) * scaleMult); break;
+      case 'taşyunu':qty = Math.round(rand(20, 60) * scaleMult); break;
+      case 'membran':qty = Math.round(rand(3, 12) * scaleMult); break;
+      case 'plaster':qty = Math.round(rand(15, 50) * scaleMult); break;
+      case 'alcipan':qty = Math.round(rand(20, 80) * scaleMult); break;
+      case 'pipe':   qty = Math.round(rand(20, 100) * scaleMult); break;
+      case 'pprc':   qty = Math.round(rand(20, 100) * scaleMult); break;
+      case 'kablo':  qty = Math.round(rand(50, 300) * scaleMult); break;
+      case 'pano':   qty = Math.round(rand(1, 4) * scaleMult); break;
+      case 'cam':    qty = Math.round(rand(10, 40) * scaleMult); break;
+      default: qty = 10;
+    }
+    items.push({ productId: pid, qty });
+  }
+
+  // Fair total = sum of base prices (not market mod). Customer expects close to this.
+  const fairTotal = items.reduce((s, it) => s + BASE_PRICE[it.productId] * it.qty, 0);
+
+  // Müşteri nakliye dahil bütçe ayırır. Orta-boy araç (tek sefer) varsayımı:
+  // Pratikte oyuncu daha küçük araç da seçebilir, daha az yakıt yakar — kâr edebilir.
+  const distanceKm = ILCELER[customer.ilce].km;
+  const totalWeightKg = items.reduce((s, it) => s + (PRODUCTS[it.productId].weight * it.qty), 0);
+  const totalWeightT = totalWeightKg / 1000;
+  // Yüke uygun en uygun araç tipini seç — 2t altı pikap, 5t altı küçük, 10t altı orta, üstü tır
+  let assumedFuelPerKm;
+  if (totalWeightT <= 2)        assumedFuelPerKm = VEHICLE_TYPES.kamyonet.fuelPerKm;
+  else if (totalWeightT <= 5)   assumedFuelPerKm = VEHICLE_TYPES.kucuk.fuelPerKm;
+  else if (totalWeightT <= 10)  assumedFuelPerKm = VEHICLE_TYPES.orta.fuelPerKm;
+  else                          assumedFuelPerKm = VEHICLE_TYPES.buyuk.fuelPerKm;
+  // Tek sefer için yakıt; çok ağırsa da kabaca yeterli sayıda seferi varsayarız
+  const tripsAssumed = Math.max(1, Math.ceil(totalWeightT / (totalWeightT <= 2 ? 2 : totalWeightT <= 5 ? 5 : totalWeightT <= 10 ? 10 : 25)));
+  const fairShipping = Math.round(distanceKm * 2 * assumedFuelPerKm * FUEL_PRICE * tripsAssumed);
+
+  // Müşterinin nakliye dahil "fair" baz tutarı
+  const fairTotalWithShipping = fairTotal + fairShipping;
+
+  // Buyer's max budget — depends on trust. High-trust customers tolerate higher offers.
+  const trustFactor = 0.85 + (customer.trust / 100) * 0.6; // 0.85..1.45
+  const budgetMult = 1.10 + (Math.random() * 0.20) * trustFactor;
+  const maxBudget = Math.round(fairTotalWithShipping * budgetMult);
+
+  // Hidden competitor offer (also includes their shipping, similar logic)
+  const competitorMult = 1.05 + Math.random() * 0.18;
+  const competitorPrice = Math.round(fairTotalWithShipping * competitorMult);
+
+  const deadline = state.day + rand(4, 9);
+
+  const subjects = ['Malzeme Talebi', 'İhale Talebi', 'Teklif İsteği', 'Sipariş Talebi'];
+  const subj = choice(subjects) + ' — ' + customer.name;
+
+  const greetings = [
+    'Merhaba,\n\nÖnümüzdeki dönem şantiyemizde kullanmak üzere aşağıdaki malzemelere ihtiyacımız vardır. Tarafınızdan en uygun teklifin tarafımıza iletilmesini rica ederiz.',
+    `Sayın yetkili,\n\n${ILCELER[customer.ilce].name} ilçesindeki projemizin aktif fazı için aşağıdaki kalemleri tedarik etmek durumundayız.`,
+    `İyi günler,\n\nFirmamızın ${ILCELER[customer.ilce].name} şantiyesinde kullanılmak üzere aşağıdaki kalemler için fiyat teklifi bekliyoruz.`
+  ];
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'tender',
+    customerId: customer.id,
+    items,
+    fairTotal,
+    fairShipping,
+    fairTotalWithShipping,
+    maxBudget,
+    competitorPrice,
+    deadline,
+    receivedDay: state.day,
+    expiresDay: state.day + 2,
+    subject: subj,
+    body: choice(greetings) + `\n\nTermin: Gün ${deadline}\n\nSaygılarımızla,\n${customer.name}`,
+    unread: true,
+    answered: false
+  };
+}
+
+// ============================================================
+// VIEWS
+// ============================================================
+
+function setView(v) {
+  state.view = v;
+  document.querySelectorAll('.nav-item').forEach(n => {
+    n.classList.toggle('active', n.dataset.view === v);
+  });
+  // Mobile bottom nav (only some views are in bottom nav; others come from drawer)
+  document.querySelectorAll('.mb-item').forEach(n => {
+    n.classList.toggle('active', n.dataset.view === v);
+  });
+  state.selectedEmail = null;
+  // Auto-scroll to top on mobile
+  const center = $('center');
+  if (center) center.scrollTop = 0;
+  window.scrollTo(0, 0);
+  render();
+}
+
+// Mobile drawer (sidebar) controls
+function toggleDrawer() {
+  const sb = $('sidebar');
+  const ov = $('drawer-overlay');
+  const isOpen = sb.classList.contains('mobile-drawer-open');
+  if (isOpen) closeDrawer();
+  else {
+    sb.classList.add('mobile-drawer-open');
+    ov.classList.add('show');
+    // Make sure sheet is closed
+    closeSheet();
+  }
+}
+function closeDrawer() {
+  $('sidebar').classList.remove('mobile-drawer-open');
+  if (!$('right-panel').classList.contains('mobile-sheet-open')) {
+    $('drawer-overlay').classList.remove('show');
+  }
+}
+
+// Mobile right-panel sheet (depot)
+function toggleSheet() {
+  const rp = $('right-panel');
+  const ov = $('drawer-overlay');
+  const isOpen = rp.classList.contains('mobile-sheet-open');
+  if (isOpen) closeSheet();
+  else {
+    rp.classList.add('mobile-sheet-open');
+    ov.classList.add('show');
+    closeDrawer();
+  }
+}
+function closeSheet() {
+  $('right-panel').classList.remove('mobile-sheet-open');
+  if (!$('sidebar').classList.contains('mobile-drawer-open')) {
+    $('drawer-overlay').classList.remove('show');
+  }
+}
+
+function render() {
+  // Brand
+  $('brand-logo').textContent = state.company.logo;
+  $('brand-logo').style.background = state.company.color;
+  $('brand-logo').style.borderColor = state.company.color;
+  $('brand-text').textContent = state.company.name;
+
+  // Stats
+  $('stat-day').textContent = state.day;
+  $('stat-rep').textContent = Math.round(state.reputation);
+  $('stat-cash').textContent = fmt(state.cash);
+  $('stat-debt').textContent = fmt(totalDebt());
+  $('stat-lvl').textContent = state.level;
+
+  // Sidebar level bar
+  const need = XP_REQ(state.level);
+  $('side-lvl').textContent = state.level;
+  $('side-xp').textContent = `${state.xp} / ${need} XP`;
+  $('side-title').textContent = TITLES[Math.min(state.level - 1, TITLES.length - 1)];
+  $('lvl-progress').style.width = (state.xp / need * 100) + '%';
+
+  // Badges
+  const unread = state.inbox.filter(e => e.unread).length;
+  $('badge-inbox').style.display = unread > 0 ? 'inline-block' : 'none';
+  $('badge-inbox').textContent = unread;
+
+  $('badge-contracts').style.display = state.contracts.length > 0 ? 'inline-block' : 'none';
+  $('badge-contracts').textContent = state.contracts.length;
+
+  const enRoute = state.vehicles.filter(v => v.busyUntil > state.day).length;
+  $('badge-fleet').style.display = enRoute > 0 ? 'inline-block' : 'none';
+  $('badge-fleet').textContent = enRoute;
+
+  $('badge-bank').style.display = state.loans.length > 0 ? 'inline-block' : 'none';
+
+  // Mobile bottom nav badges
+  const mbi = $('mb-badge-inbox');
+  if (mbi) {
+    mbi.style.display = unread > 0 ? 'inline-block' : 'none';
+    mbi.textContent = unread;
+  }
+  const mbc = $('mb-badge-contracts');
+  if (mbc) {
+    mbc.style.display = state.contracts.length > 0 ? 'inline-block' : 'none';
+    mbc.textContent = state.contracts.length;
+  }
+
+  // Show debt stat only if has debt (mobile compact)
+  const debtStat = document.querySelector('.stat.debt');
+  if (debtStat) debtStat.classList.toggle('has-debt', totalDebt() > 0);
+
+  // Right panel
+  renderInventoryPanel();
+  renderContractsMini();
+  renderAgenda();
+
+  // Center
+  if (state.selectedEmail) renderEmailDetail();
+  else if (state.view === 'inbox') renderInbox();
+  else if (state.view === 'market') renderMarket();
+  else if (state.view === 'suppliers') renderSuppliers();
+  else if (state.view === 'contracts') renderContractsView();
+  else if (state.view === 'fleet') renderFleet();
+  else if (state.view === 'hr') renderHR();
+  else if (state.view === 'customers') renderCustomers();
+  else if (state.view === 'visits') renderVisits();
+  else if (state.view === 'bank') renderBank();
+  else if (state.view === 'archive') renderArchive();
+}
+
+// ----- RIGHT PANEL -----
+
+function renderInventoryPanel() {
+  const inv = $('inventory');
+  const items = Object.entries(state.inventory).filter(([k, v]) => v > 0);
+  $('depo-count').textContent = items.length + ' kalem';
+  if (items.length === 0) {
+    inv.innerHTML = '<div class="empty-mini">Depo boş.<br>Piyasa veya tedarikçilerden malzeme al.</div>';
+    return;
+  }
+  inv.innerHTML = items.map(([pid, qty]) => `
+    <div class="item-row">
+      <span class="name">${PRODUCTS[pid].name}</span>
+      <span class="qty">${qty}</span>
+      <span class="unit">${PRODUCTS[pid].unit}</span>
+    </div>
+  `).join('');
+}
+
+function renderContractsMini() {
+  const c = $('contracts-mini');
+  if (state.contracts.length === 0) {
+    c.innerHTML = '<div class="empty-mini">Aktif sözleşme yok.</div>';
+    return;
+  }
+  c.innerHTML = state.contracts.slice(0, 4).map(ct => {
+    const cust = getCustomer(ct.customerId);
+    const daysLeft = ct.deadline - state.day;
+    const pendingItems = ct.items.filter(it => {
+      const delivered = ct.deliveries.reduce((s, d) =>
+        s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+      return delivered < it.qty;
+    }).length;
+    return `
+      <div class="item-row" style="grid-template-columns: 1fr; padding: 8px 12px;">
+        <div style="display: flex; justify-content: space-between; font-size:11px;">
+          <span style="color: var(--ink); font-weight: 700; overflow:hidden; text-overflow: ellipsis; white-space:nowrap; max-width: 180px;">${cust.name}</span>
+          <span style="color: ${daysLeft <= 1 ? 'var(--red)' : 'var(--accent)'}">${daysLeft >= 0 ? daysLeft + 'g' : 'GEÇMİŞ'}</span>
+        </div>
+        <div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">
+          ${pendingItems > 0 ? pendingItems + ' kalem teslim bekliyor' : 'Tümü teslim edildi'} · ${fmt(ct.total)}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderAgenda() {
+  const a = $('agenda');
+  // Sonraki rapor günü
+  const nextReportDay = (Math.floor(state.lastReportDay / 30) + 1) * 30;
+  const daysToReport = nextReportDay - state.day;
+  const reportLine = `<div class="item-row" style="grid-template-columns: 1fr; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border);">
+    <div style="font-size: 10px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Ay Sonu Raporu</div>
+    <div style="font-size: 12px; color: ${daysToReport <= 5 ? 'var(--accent)' : 'var(--ink)'}; font-weight: 700; margin-top: 2px;">
+      Gün ${nextReportDay} · ${daysToReport} gün kaldı
+    </div>
+  </div>`;
+
+  if (state.agenda.length === 0) {
+    a.innerHTML = reportLine + '<div class="empty-mini">Bekleyen olay yok.</div>';
+    return;
+  }
+  a.innerHTML = reportLine + state.agenda.slice(0, 5).map(ev => `
+    <div class="item-row" style="grid-template-columns: 1fr; padding: 6px 12px;">
+      <div style="font-size: 11px;">${ev}</div>
+    </div>
+  `).join('');
+}
+
+// ----- INBOX -----
+
+function renderInbox() {
+  const c = $('center');
+  if (state.inbox.length === 0) {
+    c.innerHTML = `<h2>GELEN KUTUSU</h2>
+      <div class="subtitle">Müşterilerden gelen ihale talepleri</div>
+      <div class="empty">Şu anda yeni e-posta yok. "Sonraki Gün" tuşuna bas, ya da Saha Ziyaretleri ile yeni iş kovala.</div>`;
+    return;
+  }
+  c.innerHTML = `<h2>GELEN KUTUSU</h2>
+    <div class="subtitle">Müşterilerden gelen ihale talepleri · ${state.inbox.length} talep</div>
+    <div class="email-list">
+      ${state.inbox.map(e => {
+        const cust = getCustomer(e.customerId);
+        const expIn = e.expiresDay - state.day;
+        return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
+          <div class="top">
+            <span class="from">${cust.name}</span>
+            <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce].name}</span>
+          </div>
+          <div class="subject">${e.subject}</div>
+          <div class="preview">${e.items.length} kalem · Termin: Gün ${e.deadline} · Güven: ${Math.round(cust.trust)}/100</div>
+          <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function openEmail(id) {
+  const e = state.inbox.find(x => x.id === id);
+  if (!e) return;
+  e.unread = false;
+  state.selectedEmail = e;
+  render();
+}
+
+// Tek bir teklif değerlendirme mantığı (hem live preview hem nextDay aynısını kullanır)
+// returns: { status: 'good'|'risky'|'bad', willAccept: bool, reason: string }
+function evaluateOffer(userOffer, email) {
+  const cust = getCustomer(email.customerId);
+  const repBonus = (state.reputation - 50) * 0.003;
+  const trustBonus = (cust.trust - 50) * 0.004;
+  const effOffer = userOffer * (1 - repBonus - trustBonus);
+  const underBudget = userOffer <= email.maxBudget;
+  const beatsCompetitor = effOffer <= email.competitorPrice;
+  const willAccept = underBudget && beatsCompetitor;
+
+  let status, reason;
+  if (willAccept) {
+    status = 'good';
+    reason = 'Müşteri kabul edecek';
+  } else if (!underBudget && !beatsCompetitor) {
+    status = 'bad';
+    reason = 'Bütçenin üstünde + rakipten yüksek';
+  } else if (!underBudget) {
+    status = 'bad';
+    reason = 'Müşterinin bütçesini aşıyor';
+  } else {
+    // beatsCompetitor false; near competitor → risky
+    const margin = (effOffer - email.competitorPrice) / email.competitorPrice;
+    if (margin < 0.05) {
+      status = 'risky';
+      reason = 'Rakip teklif çok yakın — risk var';
+    } else {
+      status = 'bad';
+      reason = 'Rakip belirgin şekilde daha uygun';
+    }
+  }
+  return { status, willAccept, reason, underBudget, beatsCompetitor };
+}
+
+function renderEmailDetail() {
+  const e = state.selectedEmail;
+  const c = $('center');
+  const cust = getCustomer(e.customerId);
+
+  // Seçili nakliyeyi (varsayılan: önerilen) önceden hesapla — kalem maliyetlerine pay düşelim
+  const ship = computeShippingOptions(e.items, e.customerId);
+  if (e.selectedShippingType === undefined || e.selectedShippingType === null) {
+    e.selectedShippingType = ship.options[ship.recommendedIdx].type;
+  }
+  const selectedShipOpt = ship.options.find(o => o.type === e.selectedShippingType) || ship.options[ship.recommendedIdx];
+  const totalShipping = selectedShipOpt ? selectedShipOpt.fuelTotal : 0;
+  const shipPerUnitArr = shippingShareByItem(e.items, totalShipping);
+
+  const itemRowsHTML = e.items.map((it, idx) => {
+    const have = state.inventory[it.productId] || 0;
+    const ok = have >= it.qty;
+    const unitVal = e.answered ? e.unitPrices[idx] : '';
+    const lineTotal = e.answered ? unitVal * it.qty : 0;
+    const weightKg = PRODUCTS[it.productId].weight * it.qty;
+    const weightStr = weightKg >= 1000 ? (weightKg / 1000).toFixed(2) + ' t' : Math.round(weightKg) + ' kg';
+
+    // En ucuz tedarikçi fiyatı + nakliye payı = full unit cost
+    const best = cheapestSupplier(it.productId);
+    const matCost = best ? best.price : BASE_PRICE[it.productId];
+    const shipPerUnit = shipPerUnitArr[idx] || 0;
+    const fullUnitCost = Math.round(matCost + shipPerUnit);
+
+    const minPriceCell = best
+      ? `<div style="font-weight: 700; color: var(--green); font-size: 12px;">${fmt(fullUnitCost)}</div>
+         <div style="font-size: 9px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px;">
+           ${fmt(matCost)} mal + ${fmt(Math.round(shipPerUnit))} nak
+         </div>`
+      : `<span style="color: var(--ink-dim);">—</span>`;
+
+    return `<tr id="row-${e.id}-${idx}">
+      <td>${PRODUCTS[it.productId].name}</td>
+      <td>${it.qty} ${PRODUCTS[it.productId].unit}</td>
+      <td class="${ok ? 'have' : 'miss'}">${have}</td>
+      <td style="color: var(--ink-dim); font-size: 11px;">${weightStr}</td>
+      <td>${minPriceCell}</td>
+      <td>${e.answered
+        ? `<div style="font-weight: 700; color: var(--accent);">${fmt(unitVal)}</div>
+           ${fullUnitCost > 0 ? `<div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">+%${(((unitVal / fullUnitCost) - 1) * 100).toFixed(0)} kâr</div>` : ''}`
+        : `<div class="price-margin-pair" data-cost="${fullUnitCost}" data-idx="${idx}" data-eid="${e.id}">
+            <div class="pmp-row">
+              <span class="pmp-prefix">₺</span>
+              <input type="number" class="pmp-price" id="unit-${e.id}-${idx}" placeholder="${fullUnitCost || 'Fiyat'}" min="0" step="1" oninput="onPriceInput(${e.id}, ${idx})">
+            </div>
+            <div class="pmp-row">
+              <input type="number" class="pmp-margin" id="margin-${e.id}-${idx}" placeholder="kâr" step="1" oninput="onMarginInput(${e.id}, ${idx})">
+              <span class="pmp-suffix">%</span>
+            </div>
+          </div>`
+      }</td>
+      <td class="num"><span class="line-total" id="line-${e.id}-${idx}">${e.answered ? fmt(lineTotal) : '—'}</span></td>
+    </tr>`;
+  }).join('');
+
+  // Müşteri ile bağlılık göstergesi
+  const trustLabel = cust.trust >= 75 ? 'Çok Yüksek' : cust.trust >= 55 ? 'İyi' : cust.trust >= 35 ? 'Orta' : 'Zayıf';
+  const trustColor = cust.trust >= 75 ? 'var(--green)' : cust.trust >= 55 ? 'var(--accent)' : cust.trust >= 35 ? '#d4d0c0' : 'var(--red)';
+
+  c.innerHTML = `<div style="margin-bottom: 14px;">
+      <button class="btn" onclick="state.selectedEmail=null; render()">← Geri</button>
+    </div>
+    <div class="email-detail">
+      <div class="meta">
+        <h3>${e.subject}</h3>
+        <div class="meta-row"><span class="k">Kimden</span><span>${cust.name} &lt;ihale@${cust.id}.com.tr&gt;</span></div>
+        <div class="meta-row"><span class="k">İlçe</span><span>${ILCELER[cust.ilce].name} (${ILCELER[cust.ilce].km} km, ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'})</span></div>
+        <div class="meta-row"><span class="k">Tarih</span><span>Gün ${e.receivedDay}</span></div>
+        <div class="meta-row"><span class="k">Termin</span><span style="color: var(--accent); font-weight:700">Gün ${e.deadline} (${e.deadline - state.day} gün)</span></div>
+      </div>
+      <div class="body-text">${e.body.split('\n').map(p => '<p>' + (p || '&nbsp;') + '</p>').join('')}</div>
+
+      ${e.answered ? `<div style="background: var(--panel-2); padding: 12px 14px; border-left: 3px solid var(--blue); margin-bottom: 16px;">
+          <strong>Bu ihaleye teklif verildi.</strong> Müşterinin değerlendirmesi sonraki gün belli olacak.
+        </div>` : `
+        <div class="relation-bar">
+          <div class="rb-item">
+            <span class="rb-label">Müşteri Güveni</span>
+            <span class="rb-val" style="color: ${trustColor}">${Math.round(cust.trust)}/100 · ${trustLabel}</span>
+            <span class="rb-mini">Yüksek güven = daha fazla esneme</span>
+          </div>
+          <div class="rb-item">
+            <span class="rb-label">Senin İtibarın</span>
+            <span class="rb-val">${Math.round(state.reputation)}/100</span>
+            <span class="rb-mini">Yüksek itibar = rekabette avantaj</span>
+          </div>
+          <div class="rb-item">
+            <span class="rb-label">Geçmiş İş</span>
+            <span class="rb-val">${cust.totalContracts} sözleşme</span>
+            <span class="rb-mini">Toplam: ${fmt(cust.totalRevenue)}</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent);">
+          <strong style="color: var(--accent); letter-spacing: 1px; font-size: 11px;">KALEM KALEM TEKLİF</strong>
+          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px; line-height: 1.5;">
+            Her kalem için <strong style="color: var(--ink);">fiyat</strong> ya da <strong style="color: var(--ink);">kâr yüzdesi</strong> gir — diğeri otomatik hesaplanır. Maliyet referansı "Min Alış" sütunundadır.
+            <span style="color: var(--green);">●</span> kabul edilir
+            · <span style="color: var(--accent);">●</span> sınırda
+            · <span style="color: var(--red);">●</span> reddedilir.
+          </div>
+          <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 10px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Tümüne uygula:</span>
+            <button class="btn small" onclick="applyMarginToAll(${e.id}, 10)">+%10</button>
+            <button class="btn small" onclick="applyMarginToAll(${e.id}, 15)">+%15</button>
+            <button class="btn small" onclick="applyMarginToAll(${e.id}, 20)">+%20</button>
+            <button class="btn small" onclick="applyMarginToAll(${e.id}, 30)">+%30</button>
+            <button class="btn small" onclick="applyMarginToAll(${e.id}, 50)">+%50</button>
+          </div>
+        </div>`}
+
+      <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th>Malzeme</th><th>Talep</th><th>Stok</th><th>Ağırlık</th><th>Min (Mal+Nak)</th><th>Birim Fiyat</th><th class="num">Tutar</th></tr></thead>
+        <tbody>${itemRowsHTML}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="6" style="text-align: right; font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">Nakliye <span id="shipping-label" style="font-size: 9px; text-transform: none;"></span></td>
+            <td class="num" style="font-size: 11px; color: var(--blue);"><span id="shipping-total">${e.answered ? fmt(e.shippingCost || 0) : '—'}</span></td>
+          </tr>
+          <tr style="border-top: 2px solid var(--accent);">
+            <td colspan="6" style="text-align: right; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; font-size: 12px;">Toplam Teklif (Net)</td>
+            <td class="num" style="font-weight: 700; color: var(--accent); font-size: 15px;">
+              <span id="grand-total">${e.answered ? fmt(e.userOffer) : '—'}</span>
+            </td>
+          </tr>
+          <tr>
+            <td colspan="6" style="text-align: right; font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">Tahmini Min Maliyet</td>
+            <td class="num" style="font-size: 11px; color: var(--green);"><span id="min-cost-total">—</span></td>
+          </tr>
+          <tr>
+            <td colspan="6" style="text-align: right; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-dim);">Tahmini Marj</td>
+            <td class="num" style="font-weight: 700;">
+              <span id="profit-preview">—</span>
+              <span id="profit-margin" style="font-size: 10px; color: var(--ink-dim); font-weight: normal; margin-left: 6px;"></span>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+      </div>
+
+      ${(() => {
+        const ship = computeShippingOptions(e.items, e.customerId);
+        const totalT = ship.totalWeightT;
+        const weightDisplay = totalT >= 1
+          ? totalT.toFixed(2) + ' ton'
+          : Math.round(ship.totalWeightKg) + ' kg';
+
+        // Varsayılan seçim: önerilen araç (eğer henüz seçilmemişse)
+        if (e.selectedShippingType === undefined || e.selectedShippingType === null) {
+          e.selectedShippingType = ship.options[ship.recommendedIdx].type;
+        }
+
+        return `<div class="shipping-box">
+          <h4>🚛 NAKLİYE HESABI ${e.answered ? '' : '· Tıklayarak Seç'}</h4>
+          <div class="shipping-summary">
+            <div class="ss-item">
+              <span class="ss-label">Toplam Ağırlık</span>
+              <span class="ss-val ${totalT >= 5 ? 'heavy' : ''}">${weightDisplay}</span>
+            </div>
+            <div class="ss-item">
+              <span class="ss-label">Mesafe</span>
+              <span class="ss-val">${ship.distanceKm} km</span>
+            </div>
+            <div class="ss-item">
+              <span class="ss-label">${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası</span>
+              <span class="ss-val" style="font-size: 12px;">${ILCELER[cust.ilce].name}</span>
+            </div>
+          </div>
+          <table class="shipping-table">
+            <thead>
+              <tr>
+                <th>Araç</th>
+                <th class="num">Sahip</th>
+                <th class="num">Kapasite</th>
+                <th class="num">Sefer</th>
+                <th class="num">Yakıt Toplam</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${ship.options.map((o, i) => {
+                const tripsClass = o.trips === 1 ? 'trips-good' : o.trips <= 3 ? 'trips-mid' : 'trips-bad';
+                const ownedDisplay = o.owned > 0 ? `<span style="color: var(--green);">✓ ${o.owned}</span>` : '<span style="color: var(--ink-dim);">—</span>';
+                const isSelected = e.selectedShippingType === o.type;
+                const isRecommended = i === ship.recommendedIdx;
+                const classes = [];
+                if (!e.answered) classes.push('selectable');
+                if (isSelected) classes.push('selected');
+                else if (isRecommended) classes.push('recommended');
+                const onclick = e.answered ? '' : `onclick="selectShipping(${e.id}, '${o.type}')"`;
+                return `<tr class="${classes.join(' ')}" ${onclick}>
+                  <td>${!e.answered ? '<span class="shipping-radio"></span>' : ''}<span class="veh-name">${o.name}</span>${isRecommended ? ' ★' : ''}</td>
+                  <td class="num">${ownedDisplay}</td>
+                  <td class="num">${o.tonaj} t</td>
+                  <td class="num"><span class="${tripsClass}">${o.trips}×</span></td>
+                  <td class="num">${fmt(o.fuelTotal)}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+          <div style="margin-top: 8px; font-size: 10px; color: var(--ink-dim); line-height: 1.5;">
+            ★ <strong style="color: var(--green);">Önerilen</strong> · Seçtiğin aracın yakıt maliyeti teklif toplamına eklenir. Yakıt = mesafe × 2 × tüketim × ${fmt(FUEL_PRICE)}/L.
+          </div>
+        </div>`;
+      })()}
+
+      ${e.answered ? '' : `
+      <div class="offer-status-bar empty" id="offer-status">
+        FİYAT GİRİLMEDİ
+        <span class="sub">Birim fiyatlarını yaz, durumu canlı göster</span>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="submit-btn" onclick="submitOffer(${e.id})">Teklif Gönder</button>
+        <button class="btn danger" onclick="declineOffer(${e.id})">Reddet</button>
+      </div>`}
+    </div>`;
+
+  setTimeout(() => updateOfferPreview(e.id), 0);
+}
+
+// Fiyat girilince yüzdeyi otomatik hesapla
+function onPriceInput(eid, idx) {
+  const priceInp = $(`unit-${eid}-${idx}`);
+  const marginInp = $(`margin-${eid}-${idx}`);
+  if (!priceInp || !marginInp) return;
+  const wrapper = priceInp.closest('.price-margin-pair');
+  const cost = parseFloat(wrapper?.dataset?.cost || '0');
+  const price = parseFloat(priceInp.value);
+  marginInp.classList.add('pmp-derived');
+  priceInp.classList.remove('pmp-derived');
+  if (!isNaN(price) && cost > 0) {
+    const m = (price / cost - 1) * 100;
+    marginInp.value = m.toFixed(0);
+  } else if (priceInp.value === '') {
+    marginInp.value = '';
+  }
+  updateOfferPreview(eid);
+}
+
+// Yüzde girilince fiyatı otomatik hesapla
+function onMarginInput(eid, idx) {
+  const priceInp = $(`unit-${eid}-${idx}`);
+  const marginInp = $(`margin-${eid}-${idx}`);
+  if (!priceInp || !marginInp) return;
+  const wrapper = priceInp.closest('.price-margin-pair');
+  const cost = parseFloat(wrapper?.dataset?.cost || '0');
+  const m = parseFloat(marginInp.value);
+  priceInp.classList.add('pmp-derived');
+  marginInp.classList.remove('pmp-derived');
+  if (!isNaN(m) && cost > 0) {
+    const p = Math.round(cost * (1 + m / 100));
+    priceInp.value = p;
+  } else if (marginInp.value === '') {
+    priceInp.value = '';
+  }
+  updateOfferPreview(eid);
+}
+
+// Tüm kalemlere aynı yüzdeyi uygula (hızlı doldur)
+function applyMarginToAll(eid, percent) {
+  const e = state.inbox.find(x => x.id === eid);
+  if (!e) return;
+  e.items.forEach((it, idx) => {
+    const marginInp = $(`margin-${eid}-${idx}`);
+    if (marginInp) {
+      marginInp.value = percent;
+      onMarginInput(eid, idx);
+    }
+  });
+}
+
+// Nakliye için araç seç
+function selectShipping(eid, vehicleType) {
+  const e = state.inbox.find(x => x.id === eid);
+  if (!e || e.answered) return;
+  e.selectedShippingType = vehicleType;
+  // UI güncelle: tıklanan satıra selected ver
+  document.querySelectorAll('.shipping-table tr.selectable').forEach(tr => tr.classList.remove('selected'));
+  // Re-render the offer detail to update everything
+  renderEmailDetail();
+}
+
+function updateOfferPreview(id) {
+  const e = state.inbox.find(x => x.id === id);
+  if (!e) return;
+
+  let total = 0;  // toplam teklif (nakliye dahil çünkü kalem fiyatına dağıtıldı)
+  let anyFilled = false;
+  let allFilled = true;
+
+  e.items.forEach((it, idx) => {
+    const inp = $(`unit-${e.id}-${idx}`);
+    const raw = inp ? inp.value : '';
+    const unit = e.answered ? e.unitPrices[idx] : (parseFloat(raw) || 0);
+    if (!e.answered) {
+      if (raw === '' || isNaN(parseFloat(raw))) allFilled = false;
+      else anyFilled = true;
+    }
+    const line = unit * it.qty;
+    total += line;
+    const el = $(`line-${e.id}-${idx}`);
+    if (el) el.textContent = unit > 0 ? fmt(line) : '—';
+  });
+
+  // Seçili nakliye (kalem fiyatlarına nakliyenin payı dahildir; bilgi amaçlı görünür)
+  const ship = computeShippingOptions(e.items, e.customerId);
+  const selectedOpt = ship.options.find(o => o.type === e.selectedShippingType) || ship.options[ship.recommendedIdx];
+  const shippingCost = selectedOpt ? selectedOpt.fuelTotal : 0;
+
+  // Per-row color (toplam teklif üzerinden değerlendirilir)
+  e.items.forEach((it, idx) => {
+    const inp = $(`unit-${e.id}-${idx}`);
+    const raw = inp ? inp.value : '';
+    const unit = e.answered ? e.unitPrices[idx] : (parseFloat(raw) || 0);
+    const line = unit * it.qty;
+    const row = $(`row-${e.id}-${idx}`);
+    if (row && !e.answered) {
+      row.classList.remove('offer-empty', 'offer-good', 'offer-risky', 'offer-bad');
+      if (raw === '' || unit <= 0) {
+        row.classList.add('offer-empty');
+      } else {
+        // Bu kalemin bütçeden payı: ağırlık-bazlı (nakliyenin de pay aldığı gibi)
+        const baseRef = e.fairTotalWithShipping || e.fairTotal;
+        const itemBudgetShare = (BASE_PRICE[it.productId] * it.qty + (selectedOpt ? selectedOpt.fuelTotal * (PRODUCTS[it.productId].weight * it.qty / e.items.reduce((s, ii) => s + PRODUCTS[ii.productId].weight * ii.qty, 0)) : 0)) / baseRef;
+        const itemMaxBudget = e.maxBudget * itemBudgetShare;
+        const itemCompetitor = e.competitorPrice * itemBudgetShare;
+        const cust = getCustomer(e.customerId);
+        const repBonus = (state.reputation - 50) * 0.003;
+        const trustBonus = (cust.trust - 50) * 0.004;
+        const effLine = line * (1 - repBonus - trustBonus);
+        const underB = line <= itemMaxBudget;
+        const beats = effLine <= itemCompetitor;
+        if (underB && beats) row.classList.add('offer-good');
+        else if (underB || (effLine - itemCompetitor) / itemCompetitor < 0.05) row.classList.add('offer-risky');
+        else row.classList.add('offer-bad');
+      }
+    }
+  });
+
+  // Footer alanları
+  const shEl = $('shipping-total');
+  if (shEl) shEl.textContent = fmt(shippingCost);
+  const shLabel = $('shipping-label');
+  if (shLabel && selectedOpt) shLabel.textContent = '· ' + selectedOpt.name + ' · ' + selectedOpt.trips + ' sefer · birim fiyatlara dağılmış';
+
+  const gt = $('grand-total');
+  if (gt) gt.textContent = total > 0 ? fmt(total) : '—';
+
+  // Min Maliyet = malzeme min + nakliye (full cost zaten satırlarda gösteriliyor)
+  const matMinCost = e.items.reduce((s, it) => {
+    const best = cheapestSupplier(it.productId);
+    return s + (best ? best.price * it.qty : BASE_PRICE[it.productId] * it.qty);
+  }, 0);
+  const minCost = matMinCost + shippingCost;
+  const minCostEl = $('min-cost-total');
+  if (minCostEl) minCostEl.textContent = fmt(minCost);
+
+  // Marj
+  const profit = total - minCost;
+  const margin = minCost > 0 ? (profit / minCost * 100) : 0;
+  const pp = $('profit-preview'), mr = $('profit-margin');
+  if (pp) {
+    if (total > 0) {
+      pp.style.color = profit >= 0 ? 'var(--green)' : 'var(--red)';
+      pp.textContent = fmt(profit);
+      if (mr) mr.textContent = '(' + (margin >= 0 ? '+' : '') + margin.toFixed(1) + '%)';
+    } else {
+      pp.textContent = '—';
+      pp.style.color = 'var(--ink-dim)';
+      if (mr) mr.textContent = '';
+    }
+  }
+
+  // Status bar — total müşteri tarafından değerlendirilir
+  const sb = $('offer-status');
+  const submitBtn = $('submit-btn');
+  if (sb && !e.answered) {
+    sb.classList.remove('empty', 'good', 'risky', 'bad');
+    if (!anyFilled) {
+      sb.classList.add('empty');
+      sb.innerHTML = 'FİYAT GİRİLMEDİ<span class="sub">Birim fiyatlarını yaz, durumu canlı göster</span>';
+      if (submitBtn) submitBtn.disabled = true;
+    } else if (!allFilled) {
+      sb.classList.add('risky');
+      sb.innerHTML = 'EKSİK FİYATLAR<span class="sub">Tüm kalemler için fiyat girilmeli</span>';
+      if (submitBtn) submitBtn.disabled = true;
+    } else {
+      const ev = evaluateOffer(total, e);
+      if (submitBtn) submitBtn.disabled = false;
+      if (ev.status === 'good') {
+        sb.classList.add('good');
+        sb.innerHTML = '🟢 KABUL EDİLECEK<span class="sub">' + ev.reason + ' · Toplam ' + fmt(total) + '</span>';
+      } else if (ev.status === 'risky') {
+        sb.classList.add('risky');
+        sb.innerHTML = '🟡 SINIRDA — RİSKLİ<span class="sub">' + ev.reason + ' · Daha küçük araçla yakıt düşebilir</span>';
+      } else {
+        sb.classList.add('bad');
+        sb.innerHTML = '🔴 REDDEDİLECEK<span class="sub">' + ev.reason + '</span>';
+      }
+    }
+  }
+}
+
+function submitOffer(id) {
+  const e = state.inbox.find(x => x.id === id);
+  if (!e) return;
+  const unitPrices = [];
+  let total = 0;
+  for (let idx = 0; idx < e.items.length; idx++) {
+    const inp = $(`unit-${e.id}-${idx}`);
+    const u = inp ? (parseFloat(inp.value) || 0) : 0;
+    if (u <= 0) { toast(`${PRODUCTS[e.items[idx].productId].name} için birim fiyat gir.`, 'error'); return; }
+    unitPrices.push(u);
+    total += u * e.items[idx].qty;
+  }
+
+  // Seçili nakliye aracı ve maliyeti (kayıt için tutuyoruz; toplam zaten nakliye dahil)
+  const ship = computeShippingOptions(e.items, e.customerId);
+  const selectedOpt = ship.options.find(o => o.type === e.selectedShippingType) || ship.options[ship.recommendedIdx];
+  const shippingCost = selectedOpt ? selectedOpt.fuelTotal : 0;
+
+  e.answered = true;
+  e.unitPrices = unitPrices;
+  e.materialsTotal = total - shippingCost;  // bilgi amaçlı; toplam - nakliye payı
+  e.shippingCost = shippingCost;
+  e.userOffer = total;  // birim fiyatların toplamı (nakliye birim fiyatlara dağıldı)
+  toast(`Teklifin (${fmt(total)}, nakliye dahil) ${getCustomer(e.customerId).name} firmasına iletildi.`, 'info');
+  state.selectedEmail = null;
+  render();
+}
+
+function declineOffer(id) {
+  const idx = state.inbox.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  state.archive.push({ ...e, status: 'declined' });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+  toast('İhale reddedildi.', 'info');
+  render();
+}
+
+// ----- MARKET (best price finder) -----
+
+function renderMarket() {
+  const c = $('center');
+
+  // Get all categories
+  const cats = ['all', ...new Set(Object.values(PRODUCTS).map(p => p.cat))];
+  const catLabels = {
+    all: 'Tümü', temel: 'Temel', demir: 'Demir', kaplama: 'Kaplama',
+    boya: 'Boya', yalitim: 'Yalıtım', sıva: 'Sıva',
+    tesisat: 'Tesisat', elektrik: 'Elektrik'
+  };
+
+  // Filter products by search & category
+  const q = state.marketSearch.toLowerCase().trim();
+  const filteredPids = Object.keys(PRODUCTS).filter(pid => {
+    const p = PRODUCTS[pid];
+    if (state.marketCategory !== 'all' && p.cat !== state.marketCategory) return false;
+    if (q) {
+      const matches =
+        p.name.toLowerCase().includes(q) ||
+        p.cat.toLowerCase().includes(q) ||
+        p.unit.toLowerCase().includes(q) ||
+        // Also match supplier names
+        SUPPLIERS.filter(s => s.products.includes(pid)).some(s => s.name.toLowerCase().includes(q));
+      if (!matches) return false;
+    }
+    return true;
+  });
+
+  const rows = filteredPids.map(pid => {
+    const sellers = SUPPLIERS.filter(s => s.products.includes(pid));
+    const offers = sellers.map(s => ({ supplier: s, price: supplierPrice(s, pid) })).sort((a, b) => a.price - b.price);
+    return { pid, offers };
+  });
+
+  c.innerHTML = `<h2>MALZEME PİYASASI</h2>
+    <div class="subtitle">Tüm tedarikçilerin güncel fiyatları · En uygunu vurgulandı · Fiyatlar günlük değişir</div>
+
+    <div class="search-row">
+      <input type="text" class="search-input" id="market-search" placeholder="Malzeme veya tedarikçi ara... (örn: çimento, demir, AKSEL)" value="${state.marketSearch}" oninput="updateMarketSearch(this.value)">
+      ${state.marketSearch ? '<button class="search-clear" onclick="clearMarketSearch()">TEMİZLE</button>' : ''}
+    </div>
+
+    <div class="filter-chips">
+      ${cats.map(cat => `
+        <div class="filter-chip ${state.marketCategory === cat ? 'active' : ''}" onclick="setMarketCategory('${cat}')">
+          ${catLabels[cat] || cat}
+        </div>
+      `).join('')}
+    </div>
+
+    ${(q || state.marketCategory !== 'all') ? `<div class="search-result-count">
+      <span class="hi">${rows.length}</span> sonuç bulundu${q ? ` · "${state.marketSearch}"` : ''}${state.marketCategory !== 'all' ? ` · ${catLabels[state.marketCategory]}` : ''}
+    </div>` : `<div style="margin-bottom: 12px; padding: 10px 14px; background: var(--panel); border: 1px dashed var(--border); font-size: 11px; color: var(--ink-dim);">
+      💡 İpucu: Fiyatlar her gün dalgalanır. Ok işaretleri dünden bu yana değişimi gösterir.
+    </div>`}
+
+    ${rows.length === 0 ? `<div class="empty-search">Aradığın kriterlere uygun malzeme bulunamadı.<br><span style="color: var(--accent); cursor: pointer; text-decoration: underline;" onclick="clearMarketSearch()">Filtreleri temizle</span></div>` : `
+    <div class="table-scroll">
+    <table class="data-table market-table">
+      <thead><tr><th>Malzeme</th><th>Birim</th><th class="num">Piyasa</th><th>Trend</th><th>İhtiyaç</th><th>Tedarikçiler & Fiyatları</th></tr></thead>
+      <tbody>
+        ${rows.map(r => {
+          const trend = priceTrend(r.pid);
+          const arrow = trend === 'up' ? '<span class="price-trend up">▲</span>' : trend === 'down' ? '<span class="price-trend down">▼</span>' : '<span class="price-trend">―</span>';
+          const market = currentPrice(r.pid);
+
+          // İhtiyaç hesabı
+          const demand = contractDemand(r.pid);
+          const stock = state.inventory[r.pid] || 0;
+          const shortfall = Math.max(0, demand - stock);
+          let demandCell = '<span style="color: var(--ink-dim); font-size: 10px;">—</span>';
+          if (demand > 0) {
+            if (shortfall > 0) {
+              const details = contractDemandDetails(r.pid);
+              const minDl = Math.min(...details.map(d => d.deadline));
+              const daysLeft = minDl - state.day;
+              demandCell = `<span class="demand-badge" style="margin: 0;" title="Sözleşmelerden eksik: ${shortfall} ${PRODUCTS[r.pid].unit}">${shortfall} EKSİK</span><div style="font-size: 9px; color: ${daysLeft <= 3 ? 'var(--red)' : 'var(--ink-dim)'}; margin-top: 2px;">Termin: G${minDl} (${daysLeft}g)</div>`;
+            } else {
+              demandCell = `<span class="demand-badge satisfied" style="margin: 0;">✓ YETER</span><div style="font-size: 9px; color: var(--ink-dim); margin-top: 2px;">İhtiyaç: ${demand}, Stok: ${stock}</div>`;
+            }
+          }
+
+          return `<tr>
+            <td><strong>${PRODUCTS[r.pid].name}</strong> <span style="color:var(--ink-dim); font-size:10px;">[${PRODUCTS[r.pid].cat}]</span></td>
+            <td>${PRODUCTS[r.pid].unit}</td>
+            <td class="num">${fmt(market)}</td>
+            <td>${arrow}</td>
+            <td>${demandCell}</td>
+            <td>
+              ${r.offers.map((o, i) => `
+                <span class="${i === 0 ? 'best' : ''}" style="display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; background: ${i === 0 ? 'rgba(127,176,105,0.15)' : 'var(--panel-2)'}; border: 1px solid ${i === 0 ? 'var(--green)' : 'var(--border)'}; font-size: 11px; white-space: nowrap;" title="${o.supplier.name}">
+                  ${o.supplier.name.slice(0, 14)}: <strong>${fmt(o.price)}</strong>
+                </span>
+              `).join('')}
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+    `}`;
+
+  // Restore focus on search input if user was typing
+  const sInp = $('market-search');
+  if (sInp && state.marketSearchFocused) {
+    sInp.focus();
+    const len = sInp.value.length;
+    sInp.setSelectionRange(len, len);
+  }
+}
+
+function updateMarketSearch(val) {
+  state.marketSearch = val;
+  state.marketSearchFocused = true;
+  renderMarket();
+  state.marketSearchFocused = false;
+}
+function clearMarketSearch() {
+  state.marketSearch = '';
+  state.marketCategory = 'all';
+  renderMarket();
+}
+function setMarketCategory(cat) {
+  state.marketCategory = cat;
+  renderMarket();
+}
+
+// ----- SUPPLIERS -----
+
+function renderSuppliers() {
+  const c = $('center');
+  const q = state.supplierSearch.toLowerCase().trim();
+
+  // Filter logic:
+  // - Match supplier name, ilce name OR
+  // - Any of their products' name/category matches query
+  let filteredSuppliers = SUPPLIERS;
+  let matchedProductFilter = null;  // if user searched a product, only show that product per supplier
+
+  if (q) {
+    // Check if query matches any product name (so we can filter products too)
+    const matchingProducts = Object.entries(PRODUCTS)
+      .filter(([pid, p]) => p.name.toLowerCase().includes(q) || p.cat.toLowerCase().includes(q))
+      .map(([pid]) => pid);
+
+    filteredSuppliers = SUPPLIERS.filter(s => {
+      // Supplier name or ilce match
+      if (s.name.toLowerCase().includes(q)) return true;
+      if (ILCELER[s.ilce].name.toLowerCase().includes(q)) return true;
+      // Any matching product?
+      if (matchingProducts.some(pid => s.products.includes(pid))) return true;
+      return false;
+    });
+
+    if (matchingProducts.length > 0) {
+      matchedProductFilter = matchingProducts;
+    }
+  }
+
+  c.innerHTML = `<h2>TEDARİKÇİLER</h2>
+    <div class="subtitle">${SUPPLIERS.length} tedarikçi · İstanbul genelinde · Anında depoya geçer</div>
+
+    <div class="search-row">
+      <input type="text" class="search-input" id="supplier-search" placeholder="Tedarikçi, ilçe veya malzeme ara... (örn: Aksel, Kadıköy, çimento)" value="${state.supplierSearch}" oninput="updateSupplierSearch(this.value)">
+      ${state.supplierSearch ? '<button class="search-clear" onclick="clearSupplierSearch()">TEMİZLE</button>' : ''}
+    </div>
+
+    ${q ? `<div class="search-result-count">
+      <span class="hi">${filteredSuppliers.length}</span> tedarikçi bulundu · "${state.supplierSearch}"
+      ${matchedProductFilter ? ` · Sadece eşleşen malzeme(ler) gösteriliyor` : ''}
+    </div>` : ''}
+
+    ${filteredSuppliers.length === 0 ? `<div class="empty-search">Bu aramaya uygun tedarikçi yok.<br><span style="color: var(--accent); cursor: pointer; text-decoration: underline;" onclick="clearSupplierSearch()">Aramayı temizle</span></div>` : `
+    <div class="grid-2">
+      ${filteredSuppliers.map(s => {
+        // Filter products if search matched a product
+        const productsToShow = matchedProductFilter
+          ? s.products.filter(pid => matchedProductFilter.includes(pid))
+          : s.products;
+        return `<div class="card">
+          <h3>${s.name}</h3>
+          <div class="loc">📍 ${ILCELER[s.ilce].name} · ${s.priceMod < 0.95 ? 'Ekonomik' : s.priceMod > 1.08 ? 'Premium' : 'Standart'} · ×${s.priceMod.toFixed(2)}</div>
+          ${productsToShow.length === 0 ? '<div style="font-size: 11px; color: var(--ink-dim); padding: 6px 0;">Bu tedarikçinin eşleşen ürünü yok.</div>' : ''}
+          ${productsToShow.map(pid => {
+            const price = supplierPrice(s, pid);
+            const trend = priceTrend(pid);
+            const arr = trend === 'up' ? '<span class="price-trend up">▲</span>' : trend === 'down' ? '<span class="price-trend down">▼</span>' : '';
+            const canBuy = state.cash >= price;
+
+            // İhtiyaç hesabı
+            const demand = contractDemand(pid);
+            const stock = state.inventory[pid] || 0;
+            const shortfall = Math.max(0, demand - stock);
+            const hasDemand = demand > 0;
+            const details = hasDemand ? contractDemandDetails(pid) : [];
+            const minDeadline = details.length > 0 ? Math.min(...details.map(d => d.deadline)) : null;
+            const daysToDeadline = minDeadline !== null ? minDeadline - state.day : null;
+            const isUrgent = daysToDeadline !== null && daysToDeadline <= 3;
+
+            // Default qty: ihtiyaç varsa eksik kadar, yoksa 1
+            const defaultQty = shortfall > 0 ? shortfall : 1;
+
+            const demandBadge = hasDemand
+              ? (shortfall > 0
+                ? `<span class="demand-badge${isUrgent ? '' : ''}" title="${details.map(d => `${d.customerName}: ${d.remaining} ${PRODUCTS[pid].unit}`).join(' · ')}">İHTİYAÇ: ${shortfall}</span>`
+                : `<span class="demand-badge satisfied" title="Stok yeterli">✓ STOK YETERLİ</span>`)
+              : '';
+
+            const tooltip = hasDemand && shortfall > 0
+              ? `<div class="demand-tooltip">
+                  ${details.map(d => {
+                    const dl = d.deadline - state.day;
+                    return `<span class="${dl <= 3 ? 'urgent' : ''}">↳ ${d.customerName}: ${d.remaining} ${PRODUCTS[pid].unit} (G${d.deadline}, ${dl} gün)</span>`;
+                  }).join('<br>')}
+                </div>`
+              : '';
+
+            return `<div class="supplier-prod${hasDemand && shortfall > 0 ? ' has-demand' : ''}">
+              <span class="name">
+                ${PRODUCTS[pid].name} <span style="color:var(--ink-dim);font-size:10px">(${PRODUCTS[pid].unit})</span>
+                ${demandBadge}
+                ${tooltip}
+              </span>
+              <span class="price">${fmt(price)}${arr}</span>
+              <input type="number" class="qty-input" id="qty-${s.id}-${pid}" value="${defaultQty}" min="1">
+              <button class="btn small success" onclick="buyFromSupplier('${s.id}', '${pid}')" ${canBuy ? '' : 'disabled'}>AL</button>
+            </div>`;
+          }).join('')}
+        </div>`;
+      }).join('')}
+    </div>
+    `}`;
+
+  const sInp = $('supplier-search');
+  if (sInp && state.supplierSearchFocused) {
+    sInp.focus();
+    const len = sInp.value.length;
+    sInp.setSelectionRange(len, len);
+  }
+}
+
+function updateSupplierSearch(val) {
+  state.supplierSearch = val;
+  state.supplierSearchFocused = true;
+  renderSuppliers();
+  state.supplierSearchFocused = false;
+}
+function clearSupplierSearch() {
+  state.supplierSearch = '';
+  renderSuppliers();
+}
+
+function buyFromSupplier(sid, pid) {
+  const s = SUPPLIERS.find(x => x.id === sid);
+  const qty = parseInt($(`qty-${sid}-${pid}`).value) || 0;
+  if (qty <= 0) { toast('Geçerli miktar gir.', 'error'); return; }
+  const cost = supplierPrice(s, pid) * qty;
+  if (state.cash < cost) { toast('Kasanda yeterli para yok. Krediye bak.', 'error'); return; }
+  spend(cost, 'malzeme');
+  state.inventory[pid] = (state.inventory[pid] || 0) + qty;
+  toast(`${qty} ${PRODUCTS[pid].unit} ${PRODUCTS[pid].name} alındı (${fmt(cost)}) — ${s.name}`, 'success');
+  addXP(2);
+  render();
+}
+
+// ----- CONTRACTS VIEW -----
+
+function renderContractsView() {
+  const c = $('center');
+  if (state.contracts.length === 0) {
+    c.innerHTML = `<h2>AKTİF SÖZLEŞMELER</h2>
+      <div class="subtitle">Kazandığın işler · Sevkiyatla teslim et</div>
+      <div class="empty">Aktif sözleşme yok.</div>`;
+    return;
+  }
+  c.innerHTML = `<h2>AKTİF SÖZLEŞMELER</h2>
+    <div class="subtitle">${state.contracts.length} aktif · Sevkiyatları "Filo" üzerinden planla</div>
+    <div class="email-list">
+      ${state.contracts.map(ct => {
+        const cust = getCustomer(ct.customerId);
+        const daysLeft = ct.deadline - state.day;
+        return `<div class="email" style="cursor: default; border-left-color: ${daysLeft <= 1 ? 'var(--red)' : ct.delivered ? 'var(--green)' : 'var(--blue)'}">
+          <div class="top">
+            <span class="from">${cust.name}</span>
+            <span class="date">${daysLeft >= 0 ? daysLeft + ' gün kaldı' : 'GECİKMİŞ'}</span>
+          </div>
+          <div class="subject">${ILCELER[cust.ilce].name} · ${fmt(ct.total)} · ${ct.delivered ? '✓ Teslim Tamam' : ct.paid ? 'Ödendi' : 'Sevkiyat sürüyor'}</div>
+          <div class="table-scroll">
+          <table class="data-table" style="margin: 10px 0;">
+            <thead><tr><th>Malzeme</th><th>Sözleşme</th><th>Teslim</th><th>Kalan</th></tr></thead>
+            <tbody>
+              ${ct.items.map(it => {
+                const delivered = ct.deliveries.reduce((s, d) =>
+                  s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+                const remaining = it.qty - delivered;
+                return `<tr>
+                  <td>${PRODUCTS[it.productId].name}</td>
+                  <td>${it.qty} ${PRODUCTS[it.productId].unit}</td>
+                  <td class="${delivered >= it.qty ? 'have' : ''}">${delivered}</td>
+                  <td class="${remaining > 0 ? 'miss' : 'have'}">${remaining}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+          </div>
+          ${ct.deliveries.length ? `<div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 8px;">
+            <strong style="color: var(--ink);">İrsaliyeler:</strong> ${ct.deliveries.map(d => `#${d.no} (Gün ${d.day})`).join(', ')}
+          </div>` : ''}
+          <div class="actions">
+            ${!ct.delivered ? `<button class="btn primary" onclick="openDispatchModal('${ct.id}')">SEVKİYAT PLANLA</button>` : ''}
+            ${ct.delivered && !ct.paid ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
+            ${ct.paid ? `<span style="color: var(--green); font-size: 12px;">✓ Ödeme alındı, sözleşme kapandı</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function collectPayment(ctId) {
+  const idx = state.contracts.findIndex(c => c.id === ctId);
+  if (idx < 0) return;
+  const ct = state.contracts[idx];
+  if (!ct.delivered) { toast('Önce tüm malzemeleri teslim et.', 'error'); return; }
+
+  const cust = getCustomer(ct.customerId);
+  earn(ct.total, 'tahsilat');
+  cust.balance -= ct.total; // pay off debt
+  cust.totalRevenue += ct.total;
+  cust.trust = Math.min(100, cust.trust + 4);
+  state.totalProfit += ct.total - ct.estimatedCost;
+  state.contractsCompleted++;
+  state.reputation = Math.min(100, state.reputation + 2);
+  ct.paid = true;
+
+  state.archive.push({ ...ct, type: 'contract', status: 'completed', completedDay: state.day });
+  state.contracts.splice(idx, 1);
+
+  addXP(20 + Math.round(ct.total / 10000), 'sözleşme tamamlandı');
+  toast(`💰 ${cust.name}: ${fmt(ct.total)} tahsil edildi! +${Math.round(ct.total - ct.estimatedCost).toLocaleString('tr-TR')}₺ kâr`, 'success');
+  render();
+}
+
+// ----- FLEET / DISPATCH -----
+
+function renderFleet() {
+  const c = $('center');
+  c.innerHTML = `<h2>FİLO & SEVKİYAT</h2>
+    <div class="subtitle">${state.vehicles.length} araç · ${state.drivers.length} şoför</div>
+
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="stat-label">Araç Sayısı</div><div class="stat-val" style="color: var(--blue)">${state.vehicles.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Tonaj</div><div class="stat-val">${state.vehicles.reduce((s,v) => s + VEHICLE_TYPES[v.type].tonaj, 0)} ton</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif Sevkiyat</div><div class="stat-val" style="color: var(--accent)">${state.vehicles.filter(v => v.busyUntil > state.day).length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Şoförsüz Araç</div><div class="stat-val" style="color: var(--red)">${state.vehicles.filter(v => !state.drivers.some(d => d.vehicleId === v.id)).length}</div></div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">ARAÇLAR</h3>
+    <div class="grid-2">
+      ${state.vehicles.map(v => {
+        const t = VEHICLE_TYPES[v.type];
+        const driver = state.drivers.find(d => d.vehicleId === v.id);
+        const busy = v.busyUntil > state.day;
+        return `<div class="card">
+          <h3>${v.name || t.name}</h3>
+          <div class="loc">${t.name} · ${t.tonaj} ton kapasite</div>
+          <div style="font-size: 11px; line-height: 1.7;">
+            <div>📍 Durum: <strong style="color: ${busy ? 'var(--accent)' : 'var(--green)'}">${busy ? 'Yolda (G' + v.busyUntil + ' dönüş)' : 'Garajda'}</strong></div>
+            <div>👤 Şoför: ${driver ? `<strong>${driver.name}</strong> (Sv ${driver.level})` : '<span style="color: var(--red)">Atanmamış</span>'}</div>
+            <div>⛽ Yakıt: ${t.fuelPerKm} L/km · Hız çarpanı: ×${t.speed}</div>
+          </div>
+          ${!driver && state.drivers.filter(d => !d.vehicleId).length > 0 ? `
+            <select class="text-input" id="assign-${v.id}" style="margin-top: 8px;">
+              ${state.drivers.filter(d => !d.vehicleId).map(d => `<option value="${d.id}">${d.name} (Sv ${d.level})</option>`).join('')}
+            </select>
+            <button class="btn small primary" style="margin-top: 6px;" onclick="assignDriver('${v.id}')">ŞOFÖR ATA</button>
+          ` : ''}
+        </div>`;
+      }).join('')}
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 24px; margin-bottom: 10px;">YENİ ARAÇ AL</h3>
+    <div class="grid-2">
+      ${Object.entries(VEHICLE_TYPES).map(([k, t]) => `<div class="card">
+        <h3>${t.name}</h3>
+        <div style="font-size: 11px; line-height: 1.7;">
+          <div>Tonaj: <strong>${t.tonaj} ton</strong></div>
+          <div>Yakıt: ${t.fuelPerKm} L/km · Hız: ×${t.speed}</div>
+          <div style="margin-top: 6px; color: var(--accent); font-size: 14px; font-weight: 700;">${fmt(t.cost)}</div>
+        </div>
+        <button class="btn primary" style="margin-top: 10px;" onclick="buyVehicle('${k}')" ${state.cash >= t.cost ? '' : 'disabled'}>SATIN AL</button>
+      </div>`).join('')}
+    </div>`;
+}
+
+function assignDriver(vid) {
+  const did = $(`assign-${vid}`).value;
+  const v = state.vehicles.find(x => x.id === vid);
+  const d = state.drivers.find(x => x.id === did);
+  if (!v || !d) return;
+  d.vehicleId = vid;
+  toast(`${d.name}, ${v.name || VEHICLE_TYPES[v.type].name} aracına atandı.`, 'success');
+  render();
+}
+
+function buyVehicle(type) {
+  const t = VEHICLE_TYPES[type];
+  if (state.cash < t.cost) { toast('Kasada yetmez.', 'error'); return; }
+  spend(t.cost, 'arac');
+  state.vehicles.push({
+    id: 'v' + uid(),
+    type,
+    busyUntil: 0,
+    deliveringContractId: null,
+    name: t.name + ' #' + (state.vehicles.length + 1)
+  });
+  toast(`${t.name} satın alındı.`, 'success');
+  addXP(15, 'yeni araç');
+  render();
+}
+
+// Dispatch modal
+function openDispatchModal(ctId) {
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) return;
+  const cust = getCustomer(ct.customerId);
+  const dist = ILCELER[cust.ilce].km;
+
+  // Compute remaining items
+  const remaining = ct.items.map(it => {
+    const delivered = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, qty: it.qty - delivered, requested: it.qty, delivered };
+  }).filter(r => r.qty > 0);
+
+  const avail = state.vehicles.filter(v => v.busyUntil <= state.day && state.drivers.some(d => d.vehicleId === v.id));
+
+  if (remaining.length === 0) {
+    toast('Tüm kalemler zaten teslim edildi.', 'info');
+    return;
+  }
+  if (avail.length === 0) {
+    toast('Şu an müsait şoförlü araç yok. Yarın tekrar dene veya şoför ata.', 'error');
+    return;
+  }
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 720px;">
+      <h2>SEVKİYAT PLANLA</h2>
+      <p><strong>${cust.name}</strong> · ${ILCELER[cust.ilce].name} (${dist} km · ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası)</p>
+
+      <h3>1) Araç Seç</h3>
+      <select id="dispatch-vehicle" class="text-input" onchange="updateDispatchSummary('${ctId}')">
+        ${avail.map(v => {
+          const t = VEHICLE_TYPES[v.type];
+          const driver = state.drivers.find(d => d.vehicleId === v.id);
+          return `<option value="${v.id}">${v.name || t.name} — ${t.tonaj}t — Şoför: ${driver.name}</option>`;
+        }).join('')}
+      </select>
+
+      <h3>2) Yüklenecek Malzemeler</h3>
+      <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th>Malzeme</th><th>Kalan</th><th>Stok</th><th>Yükle</th><th class="num">Ağırlık</th></tr></thead>
+        <tbody>
+          ${remaining.map((r, idx) => {
+            const stock = state.inventory[r.productId];
+            const max = Math.min(r.qty, stock);
+            return `<tr>
+              <td>${PRODUCTS[r.productId].name}</td>
+              <td>${r.qty} ${PRODUCTS[r.productId].unit}</td>
+              <td>${stock}</td>
+              <td><input type="number" class="qty-input" id="disp-${idx}" value="${max}" min="0" max="${max}" oninput="updateDispatchSummary('${ctId}')"></td>
+              <td class="num"><span id="weight-${idx}">${(PRODUCTS[r.productId].weight * max / 1000).toFixed(2)} t</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+
+      <div style="margin-top: 16px; padding: 14px; background: var(--panel-2); border: 1px dashed var(--border);">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+          <span style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Toplam Yük</span>
+          <span style="font-weight: 700; font-size: 14px;" id="ds-weight">0.00 t</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+          <span style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Araç Kapasitesi</span>
+          <span id="ds-cap">0 t</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+          <span style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Yakıt Maliyeti (gidiş-dönüş)</span>
+          <span id="ds-fuel">0 ₺</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Tahmini Süre</span>
+          <span id="ds-duration">0 gün</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" onclick="executeDispatch('${ctId}')">SEVKİYATI BAŞLAT</button>
+        <button class="btn" onclick="closeModal()">İptal</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  setTimeout(() => updateDispatchSummary(ctId), 0);
+}
+
+function updateDispatchSummary(ctId) {
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) return;
+  const cust = getCustomer(ct.customerId);
+  const dist = ILCELER[cust.ilce].km;
+  const vid = $('dispatch-vehicle').value;
+  const v = state.vehicles.find(x => x.id === vid);
+  const t = VEHICLE_TYPES[v.type];
+
+  const remaining = ct.items.map(it => {
+    const delivered = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, qty: it.qty - delivered };
+  }).filter(r => r.qty > 0);
+
+  let totalWeight = 0;
+  remaining.forEach((r, idx) => {
+    const inp = $(`disp-${idx}`);
+    if (!inp) return;
+    const q = parseInt(inp.value) || 0;
+    const w = PRODUCTS[r.productId].weight * q / 1000;
+    totalWeight += w;
+    const wEl = $(`weight-${idx}`); if (wEl) wEl.textContent = w.toFixed(2) + ' t';
+  });
+
+  $('ds-weight').textContent = totalWeight.toFixed(2) + ' t';
+  $('ds-weight').style.color = totalWeight > t.tonaj ? 'var(--red)' : 'var(--green)';
+  $('ds-cap').textContent = t.tonaj + ' t';
+
+  const driver = state.drivers.find(d => d.vehicleId === v.id);
+  const driverSpeedBonus = 1 + (driver ? (driver.level - 1) * 0.05 : 0); // higher level = faster
+  const fuelCost = Math.round(t.fuelPerKm * dist * 2 * FUEL_PRICE);
+  const tripDays = Math.max(1, Math.ceil((dist * 2) / (200 * t.speed * driverSpeedBonus))); // 200 km/day at speed=1.0
+
+  $('ds-fuel').textContent = fmt(fuelCost);
+  $('ds-duration').textContent = tripDays + ' gün';
+}
+
+function executeDispatch(ctId) {
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) return;
+  const cust = getCustomer(ct.customerId);
+  const dist = ILCELER[cust.ilce].km;
+  const vid = $('dispatch-vehicle').value;
+  const v = state.vehicles.find(x => x.id === vid);
+  const t = VEHICLE_TYPES[v.type];
+  const driver = state.drivers.find(d => d.vehicleId === v.id);
+
+  // Read load
+  const remaining = ct.items.map(it => {
+    const delivered = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, qty: it.qty - delivered };
+  }).filter(r => r.qty > 0);
+
+  const load = [];
+  let weight = 0;
+  remaining.forEach((r, idx) => {
+    const q = parseInt($(`disp-${idx}`).value) || 0;
+    if (q > 0) {
+      load.push({ productId: r.productId, qty: q });
+      weight += PRODUCTS[r.productId].weight * q / 1000;
+    }
+  });
+
+  if (load.length === 0) { toast('En az bir kalem yükle.', 'error'); return; }
+  if (weight > t.tonaj) { toast(`Yük ${weight.toFixed(2)}t, kapasite ${t.tonaj}t aşılmış.`, 'error'); return; }
+
+  // Stock check
+  for (const l of load) {
+    if (state.inventory[l.productId] < l.qty) {
+      toast(`Yetersiz stok: ${PRODUCTS[l.productId].name}`, 'error');
+      return;
+    }
+  }
+
+  // Deduct stock + fuel
+  load.forEach(l => state.inventory[l.productId] -= l.qty);
+  const fuelCost = Math.round(t.fuelPerKm * dist * 2 * FUEL_PRICE);
+  spend(fuelCost, 'yakit');
+
+  // Driver speed bonus
+  const driverSpeedBonus = 1 + (driver ? (driver.level - 1) * 0.05 : 0);
+  const tripDays = Math.max(1, Math.ceil((dist * 2) / (200 * t.speed * driverSpeedBonus)));
+  v.busyUntil = state.day + tripDays;
+  v.deliveringContractId = ct.id;
+
+  // İrsaliye numarası
+  const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase();
+  ct.deliveries.push({
+    no: irNo,
+    day: state.day,
+    arrivalDay: state.day + tripDays,
+    vehicleId: v.id,
+    driverId: driver?.id,
+    items: load,
+    weight,
+    fuelCost
+  });
+
+  // Driver gets XP
+  if (driver) {
+    driver.xp += 10 + Math.round(dist / 10);
+    while (driver.xp >= 100 * driver.level) {
+      driver.xp -= 100 * driver.level;
+      driver.level++;
+      toast(`👷 Şoför ${driver.name} seviye atladı: ${driver.level}`, 'success');
+    }
+  }
+
+  // Check if fully delivered
+  const allDelivered = ct.items.every(it => {
+    const total = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return total >= it.qty;
+  });
+  if (allDelivered) {
+    ct.delivered = true;
+    cust.balance += ct.total; // create receivable
+    toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Müşteriye cari açıldı: ${fmt(ct.total)}`, 'success');
+    addXP(15, 'tüm sevkiyatlar tamam');
+  }
+
+  toast(`🚛 Sevkiyat başladı (${irNo}). ${tripDays} gün sürecek. Yakıt: ${fmt(fuelCost)}`, 'info');
+  closeModal();
+  showIrsaliye(ct.id, ct.deliveries[ct.deliveries.length - 1]);
+  render();
+}
+
+function showIrsaliye(ctId, delivery) {
+  const ct = state.contracts.find(c => c.id === ctId) || state.archive.find(c => c.id === ctId);
+  if (!ct) return;
+  const cust = getCustomer(ct.customerId);
+  const v = state.vehicles.find(x => x.id === delivery.vehicleId);
+  const driver = state.drivers.find(d => d.id === delivery.driverId);
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="background: white; max-width: 600px;">
+      <div class="irsaliye" style="border: none; margin: 0;">
+        <div class="ir-header">
+          <div>
+            <h3 style="margin-bottom: 4px;">SEVK İRSALİYESİ</h3>
+            <div style="font-size: 11px;">No: <strong>${delivery.no}</strong></div>
+            <div style="font-size: 11px;">Tarih: Gün ${delivery.day}</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-weight: 700;">${state.company.name}</div>
+            <div style="font-size: 10px;">İstanbul</div>
+            <div style="font-size: 10px;">VKN: 1234567890</div>
+          </div>
+        </div>
+        <div style="font-size: 11px; margin-bottom: 12px;">
+          <div><strong>Alıcı:</strong> ${cust.name}</div>
+          <div><strong>Adres:</strong> ${ILCELER[cust.ilce].name}, İstanbul</div>
+          <div><strong>Araç:</strong> ${v ? (v.name || VEHICLE_TYPES[v.type].name) : '—'}</div>
+          <div><strong>Şoför:</strong> ${driver ? driver.name : '—'}</div>
+          <div><strong>Sözleşme:</strong> #${ct.id.slice(-6).toUpperCase()}</div>
+        </div>
+        <table>
+          <thead><tr><th>S.No</th><th>Malzeme</th><th>Miktar</th><th>Birim</th></tr></thead>
+          <tbody>
+            ${delivery.items.map((it, i) => `<tr>
+              <td>${i + 1}</td>
+              <td>${PRODUCTS[it.productId].name}</td>
+              <td>${it.qty}</td>
+              <td>${PRODUCTS[it.productId].unit}</td>
+            </tr>`).join('')}
+            <tr style="font-weight: 700;"><td colspan="2">TOPLAM AĞIRLIK</td><td colspan="2">${delivery.weight.toFixed(2)} ton</td></tr>
+          </tbody>
+        </table>
+        <div style="display: flex; justify-content: space-between; margin-top: 16px;">
+          <div class="stamp">TESLİM EDEN</div>
+          <div class="stamp">TESLİM ALAN</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" onclick="closeModal()">Tamam</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+// ----- HR (Personnel) -----
+
+function renderHR() {
+  const c = $('center');
+  const totalMonthly = state.drivers.reduce((s,d) => s + d.salary, 0) + state.salesReps.reduce((s,r) => s + r.salary, 0);
+  const nextPayDay = state.lastPayrollDay + 30;
+  const daysToPay = nextPayDay - state.day;
+
+  c.innerHTML = `<h2>PERSONEL YÖNETİMİ</h2>
+    <div class="subtitle">Şoför ve pazarlamacılar · Maaşlar her ayın sonunda (30 günde bir) ödenir</div>
+
+    ${totalMonthly > 0 ? `<div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel); border-left: 3px solid ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'}; font-size: 12px;">
+      <strong style="color: ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'};">📅 SONRAKI MAAŞ ÖDEMESI:</strong>
+      ${daysToPay <= 0 ? 'Bugün' : `Gün ${nextPayDay}`} · ${daysToPay > 0 ? daysToPay + ' gün kaldı' : 'BUGÜN!'} · Tutar: <strong>${fmt(totalMonthly)}</strong>
+      ${state.cash < totalMonthly ? '<br><span style="color: var(--red);">⚠️ Kasa yetersiz! Krediye ya da tahsilata bak.</span>' : ''}
+    </div>` : ''}
+
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="stat-label">Şoför</div><div class="stat-val" style="color: var(--blue)">${state.drivers.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Pazarlamacı</div><div class="stat-val" style="color: var(--purple)">${state.salesReps.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aylık Bordro</div><div class="stat-val" style="color: var(--red); font-size: 18px;">${fmt(totalMonthly)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Yıllık (Tahmini)</div><div class="stat-val" style="font-size: 18px;">${fmt(totalMonthly * 12)}</div></div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖRLER (${state.drivers.length})</div>
+      <div class="tab" onclick="switchHRTab('sales')">PAZARLAMACILAR (${state.salesReps.length})</div>
+    </div>
+    <div id="hr-content"></div>`;
+  switchHRTab('drivers');
+}
+
+function switchHRTab(tab) {
+  document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+  if (event && event.target) event.target.classList.add('active');
+  else document.querySelectorAll('.tabs .tab')[tab === 'drivers' ? 0 : 1].classList.add('active');
+
+  const c = $('hr-content');
+  if (tab === 'drivers') {
+    c.innerHTML = `<div class="grid-2">
+      ${state.drivers.length === 0 ? '<div class="card"><div class="empty">Henüz şoför yok.</div></div>' : ''}
+      ${state.drivers.map(d => {
+        const v = state.vehicles.find(x => x.id === d.vehicleId);
+        const xpReq = 100 * d.level;
+        return `<div class="emp-card driver">
+          <div class="emp-avatar">👷</div>
+          <div class="emp-info">
+            <div class="emp-name">${d.name}</div>
+            <div class="emp-role">Şoför · Seviye ${d.level} · <span class="stars">${'★'.repeat(d.level)}${'☆'.repeat(Math.max(0, 5 - d.level))}</span></div>
+            <div class="emp-stats">Maaş: ${fmt(d.salary)}/ay · Hız Bonusu: +%${(d.level - 1) * 5}</div>
+            <div class="emp-stats">Araç: ${v ? (v.name || VEHICLE_TYPES[v.type].name) : '<span style="color: var(--red)">Atanmamış</span>'}</div>
+            <div class="emp-stats">XP: ${d.xp}/${xpReq}</div>
+            <div class="progress-bar"><div class="progress-fill blue" style="width: ${(d.xp / xpReq) * 100}%"></div></div>
+          </div>
+          <div>
+            <button class="btn small danger" onclick="fireEmployee('driver', '${d.id}')">KOVA</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 20px;">YENİ ŞOFÖR İŞE AL</h3>
+    <div class="grid-3">
+      ${[1, 2, 3].map(lvl => {
+        const monthlySalary = 35000 + (lvl - 1) * 12000;
+        const hireFee = 8000 + (lvl - 1) * 12000;
+        return `<div class="card">
+          <h3>Seviye ${lvl} Şoför</h3>
+          <div style="font-size: 11px; line-height: 1.7;">
+            <div>Hız bonusu: +%${(lvl - 1) * 5}</div>
+            <div>Aylık maaş: <strong>${fmt(monthlySalary)}</strong></div>
+            <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(hireFee)}</span></div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px;" onclick="hireDriver(${lvl})" ${state.cash >= hireFee ? '' : 'disabled'}>İŞE AL</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  } else {
+    c.innerHTML = `<div class="grid-2">
+      ${state.salesReps.length === 0 ? '<div class="card"><div class="empty">Henüz pazarlamacı yok. Saha ziyaretleri için ilk pazarlamacını işe al.</div></div>' : ''}
+      ${state.salesReps.map(r => {
+        const xpReq = 100 * r.level;
+        const busy = r.busyUntil > state.day;
+        return `<div class="emp-card sales">
+          <div class="emp-avatar">💼</div>
+          <div class="emp-info">
+            <div class="emp-name">${r.name}</div>
+            <div class="emp-role">Pazarlamacı · Seviye ${r.level} · <span class="stars">${'★'.repeat(r.level)}${'☆'.repeat(Math.max(0, 5 - r.level))}</span></div>
+            <div class="emp-stats">Maaş: ${fmt(r.salary)}/ay · İkna +%${r.level * 8}</div>
+            <div class="emp-stats">Durum: ${busy ? `<strong style="color: var(--accent)">Sahada (G${r.busyUntil} dönüş)</strong>` : '<strong style="color: var(--green)">Müsait</strong>'}</div>
+            <div class="emp-stats">XP: ${r.xp}/${xpReq}</div>
+            <div class="progress-bar"><div class="progress-fill purple" style="width: ${(r.xp / xpReq) * 100}%"></div></div>
+          </div>
+          <div>
+            <button class="btn small danger" onclick="fireEmployee('sales', '${r.id}')">KOVA</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 20px;">YENİ PAZARLAMACI İŞE AL</h3>
+    <div class="grid-3">
+      ${[1, 2, 3].map(lvl => {
+        const monthlySalary = 38000 + (lvl - 1) * 18000;
+        const hireFee = 12000 + (lvl - 1) * 18000;
+        return `<div class="card">
+          <h3>Seviye ${lvl} Pazarlamacı</h3>
+          <div style="font-size: 11px; line-height: 1.7;">
+            <div>İkna gücü: +%${lvl * 8}</div>
+            <div>Aylık maaş: <strong>${fmt(monthlySalary)}</strong></div>
+            <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(hireFee)}</span></div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px;" onclick="hireSales(${lvl})" ${state.cash >= hireFee ? '' : 'disabled'}>İŞE AL</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+}
+
+function hireDriver(lvl) {
+  // 2026 İstanbul ticari şoför maaşları (brüt + işveren maliyeti)
+  const monthlySalary = 35000 + (lvl - 1) * 12000;  // Sv1: 35k, Sv2: 47k, Sv3: 59k
+  const fee = 8000 + (lvl - 1) * 12000;  // İşe alım/komisyon
+  if (state.cash < fee) { toast('Yetersiz para.', 'error'); return; }
+  spend(fee, "ise-alim");
+  state.drivers.push({
+    id: 'd' + uid(),
+    name: fullName(),
+    salary: monthlySalary,
+    level: lvl,
+    xp: 0,
+    hireDay: state.day,
+    vehicleId: null
+  });
+  toast(`Yeni şoför işe alındı.`, 'success');
+  render();
+}
+
+function hireSales(lvl) {
+  // 2026 satış pazarlama maaşları
+  const monthlySalary = 38000 + (lvl - 1) * 18000;  // Sv1: 38k, Sv2: 56k, Sv3: 74k
+  const fee = 12000 + (lvl - 1) * 18000;
+  if (state.cash < fee) { toast('Yetersiz para.', 'error'); return; }
+  spend(fee, "ise-alim");
+  state.salesReps.push({
+    id: 'r' + uid(),
+    name: fullName(),
+    salary: monthlySalary,
+    level: lvl,
+    xp: 0,
+    hireDay: state.day,
+    busyUntil: 0,
+    visitingCustomerId: null
+  });
+  toast(`Yeni pazarlamacı işe alındı.`, 'success');
+  render();
+}
+
+function fireEmployee(type, id) {
+  if (type === 'driver') {
+    state.drivers = state.drivers.filter(d => d.id !== id);
+  } else {
+    state.salesReps = state.salesReps.filter(r => r.id !== id);
+  }
+  toast('Personel işten çıkarıldı.', 'info');
+  render();
+}
+
+// ----- CUSTOMERS (Cari) -----
+
+function renderCustomers() {
+  const c = $('center');
+  const totalReceivable = state.customers.reduce((s, c) => s + Math.max(0, c.balance), 0);
+  const known = state.customers.filter(c => c.totalContracts > 0 || c.trust > 35);
+  c.innerHTML = `<h2>MÜŞTERİLER & CARİ HESAPLAR</h2>
+    <div class="subtitle">${state.customers.length} firma · Sözleşme tamamlanınca müşteriye cari açılır</div>
+
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="stat-label">Toplam Müşteri</div><div class="stat-val">${state.customers.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Açık Bakiye</div><div class="stat-val" style="color: var(--green)">${fmt(totalReceivable)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif Sözleşme</div><div class="stat-val" style="color: var(--accent)">${state.contracts.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Tamamlanan</div><div class="stat-val" style="color: var(--purple)">${state.contractsCompleted}</div></div>
+    </div>
+
+    <div class="grid-2">
+      ${state.customers.slice().sort((a,b) => b.trust - a.trust).map(cust => `
+        <div class="customer-card">
+          <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+              <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 16px;">${cust.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">📍 ${ILCELER[cust.ilce].name}</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 9px; color: var(--ink-dim); text-transform: uppercase;">Cari Bakiye</div>
+              <div class="balance ${cust.balance > 0 ? 'positive' : cust.balance < 0 ? 'negative' : ''}">${fmt(cust.balance)}</div>
+            </div>
+          </div>
+          <div style="margin-top: 10px; font-size: 11px;">
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--ink-dim);">Güven:</span>
+              <strong style="color: var(--accent)">${Math.round(cust.trust)}/100</strong>
+            </div>
+            <div class="progress-bar trust-bar"><div class="progress-fill accent" style="width: ${cust.trust}%"></div></div>
+          </div>
+          <div style="margin-top: 8px; font-size: 11px; color: var(--ink-dim);">
+            ${cust.totalContracts} sözleşme · Toplam ciro: ${fmt(cust.totalRevenue)}
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+// ----- VISITS (Saha Ziyaretleri) -----
+
+function renderVisits() {
+  const c = $('center');
+  const availReps = state.salesReps.filter(r => r.busyUntil <= state.day);
+
+  c.innerHTML = `<h2>SAHA ZİYARETLERİ</h2>
+    <div class="subtitle">Müşterileri ziyaret ederek güveni artır · Daha çok ihale çağrısı al · Pazarlamacı atayabilirsin</div>
+
+    <div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel); border-left: 3px solid var(--purple); font-size: 11px; line-height: 1.6;">
+      <strong style="color: var(--purple);">NASIL ÇALIŞIR?</strong><br>
+      Bir müşteriyi kendin ziyaret edebilir veya pazarlamacı yollayabilirsin. Ziyaret tamamlanınca güven puanı artar — yüksek güvenli müşteriler daha sık ve daha büyük iş gönderir, daha yüksek tekliflere katlanır. Pazarlamacılar mesafeye göre 1-3 günde ziyareti tamamlar.
+    </div>
+
+    <div class="grid-2">
+      ${state.customers.slice().sort((a,b) => a.trust - b.trust).map(cust => {
+        const dist = ILCELER[cust.ilce].km;
+        const isBeingVisited = state.salesReps.some(r => r.visitingCustomerId === cust.id);
+        return `<div class="customer-card">
+          <div style="display: flex; justify-content: space-between;">
+            <div>
+              <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 15px;">${cust.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim);">📍 ${ILCELER[cust.ilce].name} · ${dist} km</div>
+            </div>
+            <div style="text-align: right; font-size: 11px;">
+              <div style="color: var(--ink-dim);">Güven</div>
+              <strong style="color: var(--accent); font-size: 14px;">${Math.round(cust.trust)}</strong>
+            </div>
+          </div>
+          <div class="progress-bar trust-bar"><div class="progress-fill accent" style="width: ${cust.trust}%"></div></div>
+          ${isBeingVisited ? '<div style="margin-top: 10px; font-size: 11px; color: var(--purple);">⏳ Ziyaret edilmekte...</div>' :
+          `<div class="actions" style="margin-top: 10px;">
+            <button class="btn small" onclick="selfVisit('${cust.id}')">KENDIM GİT</button>
+            ${availReps.length > 0 ? `<button class="btn small" onclick="repVisit('${cust.id}')">PAZARLAMACI YOLLA</button>` : ''}
+          </div>`}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function selfVisit(custId) {
+  const cust = getCustomer(custId);
+  const dist = ILCELER[cust.ilce].km;
+  const fuelCost = Math.round(dist * 2 * 5 * FUEL_PRICE / 100); // own car ~5L/100km
+  if (state.cash < fuelCost) { toast('Yakıt parası yok.', 'error'); return; }
+  spend(fuelCost, 'yakit');
+
+  const trustGain = 4 + Math.random() * 6 + (state.level * 0.5);
+  cust.trust = Math.min(100, cust.trust + trustGain);
+  state.reputation = Math.min(100, state.reputation + 0.5);
+
+  toast(`📍 ${cust.name} ziyaret edildi. Güven +${trustGain.toFixed(1)} · Yakıt: ${fmt(fuelCost)}`, 'success');
+  addXP(8 + Math.round(dist / 5), 'saha ziyareti');
+
+  // Chance of immediate inquiry
+  if (cust.trust > 50 && Math.random() < 0.4) {
+    setTimeout(() => {
+      const t = generateTender();
+      t.customerId = cust.id;
+      // re-roll fair total etc. with this customer
+      state.inbox.push(t);
+      toast(`📨 ${cust.name} ziyaret sırasında bir teklif istedi! Gelen kutunu kontrol et.`, 'info');
+      render();
+    }, 300);
+  }
+  render();
+}
+
+function repVisit(custId) {
+  const cust = getCustomer(custId);
+  const dist = ILCELER[cust.ilce].km;
+  const reps = state.salesReps.filter(r => r.busyUntil <= state.day);
+  if (reps.length === 0) { toast('Müsait pazarlamacı yok.', 'error'); return; }
+  const rep = reps[0]; // first available
+  const days = Math.max(1, Math.ceil(dist / 30));
+  rep.busyUntil = state.day + days;
+  rep.visitingCustomerId = custId;
+
+  toast(`💼 ${rep.name}, ${cust.name} firmasına yola çıktı. ${days} gün sonra dönecek.`, 'info');
+  render();
+}
+
+// ----- BANK -----
+
+function renderBank() {
+  const c = $('center');
+  const totalDebtVal = totalDebt();
+  const dailyPayment = state.loans.reduce((s, l) => s + l.dailyPayment, 0);
+  // Limit: temel 250k + itibara göre, seviyeye göre büyür
+  const maxLoan = Math.round(250000 + state.reputation * 20000 + state.level * 150000);
+
+  c.innerHTML = `<h2>YAPI BANKASI</h2>
+    <div class="subtitle">Kredi çek, işletme sermayeni güçlendir · Düzensiz ödeme = itibar kaybı</div>
+
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="stat-label">Toplam Borç</div><div class="stat-val" style="color: var(--red)">${fmt(totalDebtVal)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Günlük Taksit</div><div class="stat-val" style="color: var(--accent)">${fmt(dailyPayment)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif Kredi</div><div class="stat-val">${state.loans.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Kredi Limiti</div><div class="stat-val" style="color: var(--green)">${fmt(Math.max(0, maxLoan - totalDebtVal))}</div></div>
+    </div>
+
+    ${state.loans.length > 0 ? `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">AKTİF KREDİLER</h3>
+    <div class="table-scroll">
+    <table class="data-table" style="margin-bottom: 24px;">
+      <thead><tr><th>Kredi No</th><th>Kalan</th><th>Faiz</th><th>Taksit</th><th>Gün</th><th>İşlem</th></tr></thead>
+      <tbody>${state.loans.map(l => `<tr>
+        <td>#${l.id.slice(-6).toUpperCase()}</td>
+        <td>${fmt(l.remaining)}</td>
+        <td>%${(l.interestRate * 100).toFixed(2)}/gün</td>
+        <td>${fmt(l.dailyPayment)}</td>
+        <td>${l.daysLeft}</td>
+        <td><button class="btn small" onclick="payOffLoan('${l.id}')" ${state.cash >= l.remaining ? '' : 'disabled'}>KAPAT</button></td>
+      </tr>`).join('')}</tbody>
+    </table>
+    </div>` : ''}
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">YENİ KREDİ BAŞVURUSU</h3>
+    <div class="grid-3">
+      ${[
+        { amount: 250000,  term: 30,  rateMod: 1.0,  label: 'Kısa Vade' },
+        { amount: 1000000, term: 60,  rateMod: 0.85, label: 'Orta Vade' },
+        { amount: 3000000, term: 120, rateMod: 0.75, label: 'Uzun Vade' }
+      ].map(opt => {
+        const rate = (0.0025 + (1 - state.reputation / 100) * 0.003) * opt.rateMod;
+        const totalRepay = opt.amount * Math.pow(1 + rate, opt.term);
+        const dailyP = Math.round(totalRepay / opt.term);
+        const canTake = totalDebtVal + opt.amount <= maxLoan;
+        return `<div class="card">
+          <h3>${opt.label}</h3>
+          <div style="font-size: 11px; line-height: 1.8;">
+            <div>Tutar: <strong style="color: var(--green); font-size: 14px;">${fmt(opt.amount)}</strong></div>
+            <div>Vade: ${opt.term} gün</div>
+            <div>Günlük faiz: %${(rate * 100).toFixed(3)}</div>
+            <div>Günlük taksit: <strong>${fmt(dailyP)}</strong></div>
+            <div>Toplam geri ödeme: ${fmt(totalRepay)}</div>
+          </div>
+          <button class="btn primary" style="margin-top: 12px;" onclick="takeLoan(${opt.amount}, ${opt.term}, ${rate})" ${canTake ? '' : 'disabled'}>
+            ${canTake ? 'KREDI ÇEK' : 'LIMIT YETMİYOR'}
+          </button>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="font-size: 10px; color: var(--ink-dim); margin-top: 14px; line-height: 1.6;">
+      💡 Yüksek itibar ve seviye kredi limitini ve faiz indirimini artırır. Şu anki limitin: ${fmt(maxLoan)}.
+    </div>`;
+}
+
+function takeLoan(amount, term, rate) {
+  const totalRepay = amount * Math.pow(1 + rate, term);
+  const daily = Math.round(totalRepay / term);
+  state.loans.push({
+    id: 'l' + uid(),
+    principal: amount,
+    remaining: Math.round(totalRepay),
+    interestRate: rate,
+    dailyPayment: daily,
+    daysLeft: term,
+    takenDay: state.day
+  });
+  earn(amount, 'noop');
+  toast(`💵 ${fmt(amount)} kredi alındı. ${term} gün boyunca günlük ${fmt(daily)} taksit ödeyeceksin.`, 'success');
+  render();
+}
+
+function payOffLoan(lid) {
+  const idx = state.loans.findIndex(l => l.id === lid);
+  if (idx < 0) return;
+  const l = state.loans[idx];
+  if (state.cash < l.remaining) { toast('Yetersiz bakiye.', 'error'); return; }
+  spend(l.remaining, 'kredi');
+  state.loans.splice(idx, 1);
+  toast(`Kredi erken kapatıldı: ${fmt(l.remaining)}`, 'success');
+  state.reputation = Math.min(100, state.reputation + 1);
+  render();
+}
+
+// ----- ARCHIVE -----
+
+function renderArchive() {
+  const c = $('center');
+  if (state.archive.length === 0) {
+    c.innerHTML = `<h2>ARŞİV</h2><div class="empty">Arşiv boş.</div>`;
+    return;
+  }
+  c.innerHTML = `<h2>ARŞİV</h2>
+    <div class="subtitle">Geçmiş ${state.archive.length} kayıt</div>
+    <div class="email-list">
+      ${state.archive.slice().reverse().slice(0, 50).map(e => {
+        const cust = e.customerId ? getCustomer(e.customerId) : null;
+        const colors = {
+          completed: 'var(--green)', delivered: 'var(--green)',
+          failed: 'var(--red)', declined: 'var(--ink-dim)',
+          lost: 'var(--ink-dim)', expired: 'var(--ink-dim)', 'won-pending': 'var(--blue)'
+        };
+        const labels = {
+          completed: '✓ TAMAMLANDI', delivered: '✓ TESLİM EDİLDİ',
+          failed: '✗ BAŞARISIZ', declined: '— REDDEDİLDİ',
+          lost: '✗ KAYBEDİLDİ', expired: '— SÜRESİ DOLDU', 'won-pending': '◐ KAZANILDI'
+        };
+        return `<div class="email" style="cursor: default; border-left-color: ${colors[e.status] || 'var(--ink-dim)'}">
+          <div class="top">
+            <span class="from">${cust ? cust.name : '—'}</span>
+            <span class="date" style="color: ${colors[e.status]}">${labels[e.status] || e.status}</span>
+          </div>
+          <div class="subject">${cust ? ILCELER[cust.ilce].name : ''} · ${fmt(e.userOffer || e.total || 0)}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// ============================================================
+// DAY ADVANCEMENT
+// ============================================================
+
+function nextDay() {
+  state.day++;
+  state.agenda = [];
+  rollPrices();
+
+  // 1) Process answered tenders → win/loss
+  const stillInbox = [];
+  for (const e of state.inbox) {
+    if (e.answered) {
+      const cust = getCustomer(e.customerId);
+      // Aynı evaluateOffer mantığı kullanılır — canlı önizleme ile bire bir tutarlı
+      const ev = evaluateOffer(e.userOffer, e);
+      // 'good' garanti kabul, 'bad' garanti red, 'risky' yarısı kabul yarısı red
+      let won;
+      if (ev.status === 'good') won = true;
+      else if (ev.status === 'bad') won = false;
+      else won = Math.random() < 0.5; // risky → coin flip
+
+      if (won) {
+        // Estimated cost (for profit tracking)
+        const estCost = e.fairTotal;
+        const ctId = 'c' + uid();
+        state.contracts.push({
+          id: ctId,
+          customerId: e.customerId,
+          items: e.items,
+          unitPrices: e.unitPrices,
+          materialsTotal: e.materialsTotal || e.userOffer,
+          shippingCost: e.shippingCost || 0,
+          shippingType: e.selectedShippingType,
+          total: e.userOffer,  // nakliye dahil net
+          deadline: e.deadline,
+          deliveries: [],
+          delivered: false,
+          paid: false,
+          estimatedCost: estCost,
+          startedDay: state.day
+        });
+        cust.totalContracts++;
+        cust.trust = Math.min(100, cust.trust + 2);
+        state.archive.push({ ...e, status: 'won-pending' });
+        toast(`🎉 İHALE KAZANILDI: ${cust.name} (${fmt(e.userOffer)})`, 'success');
+        state.agenda.push(`Yeni sözleşme: ${cust.name}`);
+        state.monthlyContractsWon++;
+        addXP(15, 'ihale kazandın');
+      } else {
+        state.archive.push({ ...e, status: 'lost' });
+        toast(`✗ ${cust.name} ihalesi kaybedildi (${ev.reason.toLowerCase()}).`, 'error');
+        state.agenda.push(`İhale kaybı: ${cust.name}`);
+        state.monthlyContractsLost++;
+      }
+    } else if (e.expiresDay < state.day) {
+      state.archive.push({ ...e, status: 'expired' });
+      state.reputation = Math.max(0, state.reputation - 1);
+      state.agenda.push(`Cevapsız ihale: ${getCustomer(e.customerId).name}`);
+    } else {
+      stillInbox.push(e);
+    }
+  }
+  state.inbox = stillInbox;
+
+  // 2) Vehicle deliveries arriving
+  for (const v of state.vehicles) {
+    if (v.busyUntil === state.day && v.deliveringContractId) {
+      const ct = state.contracts.find(c => c.id === v.deliveringContractId);
+      const cust = ct ? getCustomer(ct.customerId) : null;
+      if (cust) {
+        state.agenda.push(`${v.name || VEHICLE_TYPES[v.type].name} ${ILCELER[cust.ilce].name}'den döndü`);
+      }
+      v.deliveringContractId = null;
+    }
+  }
+
+  // 3) Sales reps returning from visits
+  for (const rep of state.salesReps) {
+    if (rep.busyUntil === state.day && rep.visitingCustomerId) {
+      const cust = getCustomer(rep.visitingCustomerId);
+      const trustGain = 6 + rep.level * 4 + Math.random() * 5;
+      cust.trust = Math.min(100, cust.trust + trustGain);
+      rep.xp += 15 + rep.level * 5;
+      while (rep.xp >= 100 * rep.level) {
+        rep.xp -= 100 * rep.level;
+        rep.level++;
+        toast(`💼 Pazarlamacı ${rep.name} seviye atladı: ${rep.level}`, 'success');
+      }
+      toast(`📍 ${rep.name}, ${cust.name} ziyaretinden döndü. Güven +${trustGain.toFixed(1)}`, 'success');
+      state.agenda.push(`${rep.name} → ${cust.name} ziyaret tamamlandı`);
+      // Possible immediate inquiry
+      if (cust.trust > 50 && Math.random() < 0.5) {
+        const t = generateTender();
+        t.customerId = cust.id;
+        state.inbox.push(t);
+        state.agenda.push(`Yeni teklif talebi: ${cust.name}`);
+      }
+      rep.visitingCustomerId = null;
+    }
+  }
+
+  // 4) Overdue contracts — kısmi teslim edilen kısım için ödeme alınır, kalan için ceza
+  const stillCt = [];
+  for (const ct of state.contracts) {
+    if (!ct.delivered && ct.deadline < state.day) {
+      const cust = getCustomer(ct.customerId);
+
+      // Teslim edilen miktarların tahsilatı: her kalemde teslim edilen × birim fiyat
+      let partialMaterialsRevenue = 0;
+      const deliveredItems = [];
+      ct.items.forEach((it, idx) => {
+        const deliveredQty = ct.deliveries.reduce((s, d) =>
+          s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+        if (deliveredQty > 0) {
+          partialMaterialsRevenue += ct.unitPrices[idx] * deliveredQty;
+          deliveredItems.push({ name: PRODUCTS[it.productId].name, qty: deliveredQty, unit: PRODUCTS[it.productId].unit });
+        }
+      });
+
+      // Tamamlanma oranı (malzeme bazında, ağırlıkla)
+      const totalReqWeight = ct.items.reduce((s, it) => s + PRODUCTS[it.productId].weight * it.qty, 0);
+      const deliveredWeight = ct.deliveries.reduce((s, d) =>
+        s + d.items.reduce((s2, di) => s2 + PRODUCTS[di.productId].weight * di.qty, 0), 0);
+      const completionRatio = totalReqWeight > 0 ? deliveredWeight / totalReqWeight : 0;
+
+      // Nakliye payı orantılı tahsil edilir
+      const partialShippingRevenue = Math.round((ct.shippingCost || 0) * completionRatio);
+      const totalCollected = partialMaterialsRevenue + partialShippingRevenue;
+
+      // Ceza: kalan (teslim edilmemiş) kısım üzerinden %30
+      const remainingValue = ct.total - totalCollected;
+      const penalty = Math.round(Math.max(0, remainingValue) * 0.3);
+
+      // İtibar/güven kaybı: tamamlanma oranına göre yumuşatılır
+      const repPenalty = Math.round(8 * (1 - completionRatio));
+      const trustPenalty = Math.round(15 * (1 - completionRatio));
+      state.reputation = Math.max(0, state.reputation - repPenalty);
+      cust.trust = Math.max(0, cust.trust - trustPenalty);
+
+      // Tahsilat ve ceza
+      if (totalCollected > 0) {
+        earn(totalCollected, 'tahsilat');
+        cust.totalRevenue += totalCollected;
+      }
+      if (penalty > 0) {
+        spend(penalty, 'ceza');
+      }
+
+      state.contractsFailed++;
+      state.archive.push({
+        ...ct,
+        status: 'failed',
+        partialCollected: totalCollected,
+        completionRatio,
+        penalty,
+        deliveredItems
+      });
+
+      // Mesajlar
+      if (totalCollected > 0) {
+        toast(`❌ ${cust.name} terminini kaçırdı (%${Math.round(completionRatio * 100)} teslim edildi). Tahsilat: +${fmt(totalCollected)}, Ceza: -${fmt(penalty)}, İtibar -${repPenalty}.`, 'error');
+        state.agenda.push(`GECİKEN: ${cust.name} (kısmi tahsilat ${fmt(totalCollected)})`);
+      } else {
+        toast(`❌ ${cust.name} terminini kaçırdı. Hiç teslim yapılmadı. Ceza: -${fmt(penalty)}, İtibar -${repPenalty}.`, 'error');
+        state.agenda.push(`GECİKEN sözleşme: ${cust.name}`);
+      }
+    } else {
+      stillCt.push(ct);
+    }
+  }
+  state.contracts = stillCt;
+
+  // 5) Salaries - Maaşlar her 30 günde bir ödenir
+  const nextPayrollDay = state.lastPayrollDay + 30;
+  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0)) {
+    let totalPayroll = 0;
+    const breakdown = [];
+
+    // Şoförler
+    state.drivers.forEach(d => {
+      const periodStart = state.lastPayrollDay;
+      const effectiveStart = Math.max(d.hireDay, periodStart);
+      const daysWorked = Math.min(30, state.day - effectiveStart);
+      const pay = Math.round(d.salary * (daysWorked / 30));
+      totalPayroll += pay;
+      breakdown.push({ name: d.name, role: 'Şoför', pay, daysWorked });
+    });
+
+    // Pazarlamacılar
+    state.salesReps.forEach(r => {
+      const periodStart = state.lastPayrollDay;
+      const effectiveStart = Math.max(r.hireDay, periodStart);
+      const daysWorked = Math.min(30, state.day - effectiveStart);
+      const pay = Math.round(r.salary * (daysWorked / 30));
+      totalPayroll += pay;
+      breakdown.push({ name: r.name, role: 'Pazarlamacı', pay, daysWorked });
+    });
+
+    if (totalPayroll > 0) {
+      spend(totalPayroll, 'maas');
+      state.lastPayrollDay = state.day;
+      state.agenda.push(`💼 AYLIK MAAŞLAR ÖDENDİ: ${fmt(totalPayroll)}`);
+      toast(`💼 Aylık maaşlar ödendi: ${fmt(totalPayroll)} (${breakdown.length} kişi)`, 'info');
+
+      if (state.cash < 0) {
+        state.reputation = Math.max(0, state.reputation - 3);
+        toast(`⚠️ Maaş ödemesi için kasa açıkta kaldı! İtibar -3`, 'error');
+      }
+    } else {
+      state.lastPayrollDay = state.day;
+    }
+  }
+
+  // 6) Loan payments
+  let loanTotal = 0;
+  state.loans = state.loans.filter(l => {
+    const pay = Math.min(l.dailyPayment, l.remaining);
+    loanTotal += pay;
+    l.remaining -= pay;
+    l.daysLeft--;
+    if (l.remaining <= 0) {
+      toast(`✓ Kredi #${l.id.slice(-6).toUpperCase()} kapandı.`, 'success');
+      state.reputation = Math.min(100, state.reputation + 1);
+      return false;
+    }
+    return true;
+  });
+  if (loanTotal > 0) {
+    spend(loanTotal, 'kredi-taksit');
+    state.agenda.push(`Kredi taksitleri: ${fmt(loanTotal)}`);
+  }
+
+  // 7) Generate new tenders — base 1-2 plus more from high-trust customers
+  const numNew = rand(1, 3) + (state.reputation > 70 ? 1 : 0) + (state.level > 3 ? 1 : 0);
+  for (let i = 0; i < numNew; i++) state.inbox.push(generateTender());
+
+  // 8) Aylık rapor — her 30 günde bir
+  const monthNumber = Math.floor(state.day / 30);
+  const lastReportMonth = Math.floor(state.lastReportDay / 30);
+  const reportDue = monthNumber > lastReportMonth && state.day >= 30;
+
+  // 9) Bankruptcy check (sürekli mod, sadece çok kötü iflas)
+  if (state.cash < -1500000) {
+    showBankruptcy();
+    return;
+  }
+
+  state.selectedEmail = null;
+
+  if (reportDue) {
+    // Rapor göster, hesapları sıfırla
+    showMonthlyReport(monthNumber);
+    return;
+  }
+
+  setView('inbox');
+  render();
+}
+
+function showBankruptcy() {
+  const c = $('center');
+  c.innerHTML = `<h2 style="color: var(--red)">İFLAS</h2>
+    <div class="email-detail" style="border-color: var(--red)">
+      <h3 style="color: var(--red);">BANKAYA YENİLDİN</h3>
+      <p style="color: var(--ink-dim); margin-bottom: 16px;">Kasanın açığı tolerans sınırını (-₺1.500.000) aştı. Şirket iflas etti.</p>
+      <div class="meta-row"><span class="k">Toplam Gün</span><span>${state.day}</span></div>
+      <div class="meta-row"><span class="k">Seviye</span><span>${state.level}</span></div>
+      <div class="meta-row"><span class="k">Son Kasa</span><span>${fmt(state.cash)}</span></div>
+      <div class="meta-row"><span class="k">İtibar</span><span>${Math.round(state.reputation)}/100</span></div>
+      <div class="meta-row"><span class="k">Tamamlanan Sözleşme</span><span>${state.contractsCompleted}</span></div>
+      <div class="meta-row"><span class="k">Başarısız Sözleşme</span><span>${state.contractsFailed}</span></div>
+      <div class="actions">
+        <button class="btn primary" onclick="location.reload()">Yeniden Oyna</button>
+      </div>
+    </div>`;
+}
+
+// Aylık rapor — modal olarak gösterilir, "DEVAM ET" tuşu ile yeni aya geçilir
+function showMonthlyReport(monthNumber) {
+  const cashStart = state.monthStartCash;
+  const cashEnd = state.cash;
+  const cashChange = cashEnd - cashStart;
+  const repStart = state.monthStartReputation;
+  const repChange = state.reputation - repStart;
+  const lvlStart = state.monthStartLevel;
+  const lvlChange = state.level - lvlStart;
+  const ctCompleted = state.contractsCompleted - state.monthStartContracts;
+  const ctFailed = state.contractsFailed - state.monthStartFailed;
+  const won = state.monthlyContractsWon;
+  const lost = state.monthlyContractsLost;
+  const winRate = (won + lost) > 0 ? Math.round(won / (won + lost) * 100) : 0;
+  const revenue = state.monthlyRevenue;
+  const expenses = state.monthlyExpenses;
+  const netProfit = revenue - expenses;
+
+  // Performans değerlendirmesi
+  let grade, gradeColor, gradeMsg;
+  if (netProfit >= 800000 && ctCompleted >= 3) {
+    grade = 'A+'; gradeColor = 'var(--green)'; gradeMsg = 'Mükemmel ay! Sektörün önde gelenleri arasındasın.';
+  } else if (netProfit >= 400000 && ctCompleted >= 2) {
+    grade = 'A'; gradeColor = 'var(--green)'; gradeMsg = 'Çok başarılı bir ay geçirdin.';
+  } else if (netProfit >= 100000) {
+    grade = 'B'; gradeColor = 'var(--accent)'; gradeMsg = 'Karlı bir ay. İyi gidiyorsun.';
+  } else if (netProfit >= 0) {
+    grade = 'C'; gradeColor = 'var(--accent)'; gradeMsg = 'Zar zor pozitif. Daha iyisini yapabilirsin.';
+  } else if (netProfit >= -200000) {
+    grade = 'D'; gradeColor = 'var(--red)'; gradeMsg = 'Zarar ettin. Stratejini gözden geçir.';
+  } else {
+    grade = 'F'; gradeColor = 'var(--red)'; gradeMsg = 'Ciddi kayıp. İflas riski yaklaşıyor.';
+  }
+
+  // Rapor objesini sakla (Arşiv'de görünebilir, ileride)
+  state.pastReports.push({
+    month: monthNumber,
+    day: state.day,
+    cashStart, cashEnd, cashChange,
+    revenue, expenses, netProfit,
+    ctCompleted, ctFailed, won, lost, winRate,
+    repStart, repChange, lvlStart, lvlChange,
+    grade
+  });
+
+  const html = `<div class="modal-bg">
+    <div class="modal" style="max-width: 680px;">
+      <h2 style="margin-bottom: 4px;">${monthNumber}. AY RAPORU</h2>
+      <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 18px;">
+        Gün ${state.day - 30 + 1} – ${state.day} · ${state.company.name}
+      </div>
+
+      <div style="display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; padding: 18px; background: var(--panel-2); border: 2px solid ${gradeColor}; margin-bottom: 18px;">
+        <div style="font-family: 'Bebas Neue'; font-size: 64px; line-height: 1; color: ${gradeColor}; text-align: center; min-width: 90px;">${grade}</div>
+        <div>
+          <div style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 16px; color: ${gradeColor}; margin-bottom: 6px;">PERFORMANS</div>
+          <div style="font-size: 12px; line-height: 1.5; color: var(--ink);">${gradeMsg}</div>
+        </div>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px;">FİNANSAL</h3>
+      <table class="data-table" style="margin-bottom: 16px;">
+        <tbody>
+          <tr><td>Ay Başı Kasa</td><td class="num">${fmt(cashStart)}</td></tr>
+          <tr><td>Toplam Tahsilat</td><td class="num" style="color: var(--green);">+${fmt(revenue)}</td></tr>
+          <tr><td>Toplam Gider</td><td class="num" style="color: var(--red);">-${fmt(expenses)}</td></tr>
+          <tr style="border-top: 2px solid var(--accent);"><td><strong>Net Kâr/Zarar</strong></td><td class="num" style="color: ${netProfit >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight: 700; font-size: 14px;">${netProfit >= 0 ? '+' : ''}${fmt(netProfit)}</td></tr>
+          <tr><td>Ay Sonu Kasa</td><td class="num"><strong>${fmt(cashEnd)}</strong> <span style="color: ${cashChange >= 0 ? 'var(--green)' : 'var(--red)'}; font-size: 10px;">(${cashChange >= 0 ? '+' : ''}${fmt(cashChange)})</span></td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px;">OPERASYON</h3>
+      <table class="data-table" style="margin-bottom: 16px;">
+        <tbody>
+          <tr><td>İhale Kazanma Oranı</td><td class="num"><strong>%${winRate}</strong> <span style="color: var(--ink-dim); font-size: 10px;">(${won} kazanıldı, ${lost} kaybedildi)</span></td></tr>
+          <tr><td>Tamamlanan Sözleşme</td><td class="num" style="color: var(--green);">${ctCompleted}</td></tr>
+          <tr><td>Başarısız Sözleşme</td><td class="num" style="color: ${ctFailed > 0 ? 'var(--red)' : 'var(--ink-dim)'};">${ctFailed}</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px;">ŞİRKET</h3>
+      <table class="data-table" style="margin-bottom: 18px;">
+        <tbody>
+          <tr><td>Seviye</td><td class="num">${state.level} ${lvlChange > 0 ? `<span style="color: var(--green); font-size: 10px;">(+${lvlChange})</span>` : ''}</td></tr>
+          <tr><td>İtibar</td><td class="num">${Math.round(state.reputation)}/100 ${repChange !== 0 ? `<span style="color: ${repChange >= 0 ? 'var(--green)' : 'var(--red)'}; font-size: 10px;">(${repChange >= 0 ? '+' : ''}${Math.round(repChange)})</span>` : ''}</td></tr>
+          <tr><td>Aktif Sözleşme</td><td class="num">${state.contracts.length}</td></tr>
+          <tr><td>Bekleyen Tahsilat</td><td class="num">${fmt(state.customers.reduce((s, c) => s + Math.max(0, c.balance), 0))}</td></tr>
+          <tr><td>Açık Borç</td><td class="num" style="color: ${totalDebt() > 0 ? 'var(--red)' : 'var(--ink-dim)'};">${fmt(totalDebt())}</td></tr>
+        </tbody>
+      </table>
+
+      <div class="actions">
+        <button class="btn primary" style="width: 100%; padding: 14px;" onclick="closeMonthlyReport()">${monthNumber + 1}. AYA DEVAM ET ▶</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function closeMonthlyReport() {
+  closeModal();
+  // Yeni ay başlat - snapshot al
+  state.lastReportDay = state.day;
+  state.monthStartCash = state.cash;
+  state.monthStartContracts = state.contractsCompleted;
+  state.monthStartFailed = state.contractsFailed;
+  state.monthStartLevel = state.level;
+  state.monthStartReputation = state.reputation;
+  state.monthlyContractsWon = 0;
+  state.monthlyContractsLost = 0;
+  state.monthlyRevenue = 0;
+  state.monthlyExpenses = 0;
+  setView('inbox');
+  render();
+}
+
+// ============================================================
+// MODAL
+// ============================================================
+
+function closeModal() {
+  $('modals').innerHTML = '';
+}
+
+// ============================================================
+// COMPANY CREATION (intro)
+// ============================================================
+
+const LOGO_OPTIONS = ['🏗','🏭','🏢','🏛','⚒','🔨','🧱','🪨','⚙','🛠','🏠','🏘','📐','🧰'];
+const COLOR_OPTIONS = ['#f4a020','#c44a1e','#7fb069','#5a8ca8','#9a7fb0','#d96c5e','#e2c044','#4ecdc4','#ff6b6b','#a78bfa','#fb923c','#22d3ee'];
+
+let intro = { logo: 'Y', color: '#f4a020', name: '' };
+
+function showIntroModal() {
+  const html = `<div class="modal-bg">
+    <div class="modal">
+      <h2>YAPI TİCARET</h2>
+      <p>İstanbul'un orta ölçekli bir inşaat malzemeleri toptancısı kuruyorsun. Şirketini tanımla:</p>
+
+      <label>ŞİRKET ADI</label>
+      <input type="text" id="company-name" placeholder="Ör: Yıldız Yapı Ltd." maxlength="32" oninput="updateLogoPreview()">
+
+      <label>LOGO</label>
+      <div class="logo-picker" id="logo-picker">
+        ${LOGO_OPTIONS.map((l, i) => `<div class="logo-option ${i === 0 ? 'selected' : ''}" data-logo="${l}" onclick="selectLogo('${l}', this)">${l}</div>`).join('')}
+      </div>
+
+      <label>RENK</label>
+      <div class="color-picker">
+        ${COLOR_OPTIONS.map((c, i) => `<div class="color-option ${i === 0 ? 'selected' : ''}" data-color="${c}" style="background: ${c};" onclick="selectColor('${c}', this)"></div>`).join('')}
+      </div>
+
+      <div class="preview-logo">
+        <div class="logo-circle" id="preview-circle" style="background: ${intro.color}; border-color: ${intro.color};">${intro.logo}</div>
+        <div>
+          <div style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 18px;" id="preview-name">YAPI TİCARET</div>
+          <div style="font-size: 10px; color: var(--ink-dim); letter-spacing: 1px;">İSTANBUL · İNŞAAT MALZEMELERİ</div>
+        </div>
+      </div>
+
+      <h3>OYUN HAKKINDA</h3>
+      <ul style="font-size: 12px; line-height: 1.7; margin-left: 20px; color: var(--ink-dim);">
+        <li>Başlangıç sermayesi: <strong style="color: var(--green);">₺500.000</strong> · 14 tedarikçi · 24 malzeme · 22 müşteri</li>
+        <li>Tüm fiyatlar 2026 İstanbul piyasa rakamları (çimento ~₺200/torba, demir ~₺35.000/ton)</li>
+        <li>İhalelere kalem kalem teklif ver, fiyatlar günlük dalgalanır</li>
+        <li>Kazandığın işleri araç filonla teslim et — irsaliyeyle</li>
+        <li>Şoför (₺35k+/ay) ve pazarlamacı (₺38k+/ay) işe al, geliştir</li>
+        <li>Müşterilere cari aç, sözleşme tamamlanınca tahsil et</li>
+        <li>Banka kredisi al — kamyonet ₺950k, küçük kamyon ₺2.4M</li>
+        <li>Saha ziyaretleri ile müşteri güveni kazan</li>
+        <li>XP topla, seviye atla, daha büyük işler aç</li>
+      </ul>
+
+      <div class="actions">
+        <button class="btn primary" style="width:100%; padding: 14px;" onclick="startGame()">ŞİRKETİ KUR ▶</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function selectLogo(l, el) {
+  intro.logo = l;
+  document.querySelectorAll('.logo-option').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  updateLogoPreview();
+}
+
+function selectColor(c, el) {
+  intro.color = c;
+  document.querySelectorAll('.color-option').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  updateLogoPreview();
+}
+
+function updateLogoPreview() {
+  const nameInput = $('company-name');
+  const name = (nameInput?.value || '').trim() || 'YAPI TİCARET';
+  $('preview-name').textContent = name.toUpperCase();
+  const pc = $('preview-circle');
+  pc.textContent = intro.logo;
+  pc.style.background = intro.color;
+  pc.style.borderColor = intro.color;
+}
+
+function startGame() {
+  const name = ($('company-name').value || '').trim() || 'YAPI TİCARET';
+  state.company.name = name.toUpperCase();
+  state.company.logo = intro.logo;
+  state.company.color = intro.color;
+  // Aylık rapor için ay başı snapshot (kasa değişirse buraya da yansısın)
+  state.monthStartCash = state.cash;
+  closeModal();
+
+  // Generate starting emails
+  for (let i = 0; i < 2; i++) state.inbox.push(generateTender());
+  // Generate one starter driver (free)
+  state.drivers.push({
+    id: 'd' + uid(),
+    name: fullName(),
+    salary: 35000,  // 2026 Sv1 şoför maaşı
+    level: 1,
+    xp: 0,
+    hireDay: 1,
+    vehicleId: state.vehicles[0].id
+  });
+  toast(`Hoş geldin, ${state.company.name}! İlk şoförün ücretsiz olarak işe alındı.`, 'success');
+  render();
+}
+
+// ============================================================
+// INIT
+// ============================================================
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+showIntroModal();
+render();
+</script>
+</body>
+</html>

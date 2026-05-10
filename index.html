@@ -133,6 +133,303 @@
   }
   .next-day:hover { background: #ffb733; transform: translateY(-1px); }
 
+  /* Login screen */
+  .login-modal-bg {
+    position: fixed; inset: 0;
+    background: linear-gradient(135deg, #0d0e0c 0%, #1d201a 100%);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 900;
+    padding: 20px;
+  }
+  .login-modal {
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    padding: 40px 36px;
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 0 60px rgba(244, 160, 32, 0.15);
+  }
+  .login-logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 48px;
+    letter-spacing: 6px;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .login-tagline {
+    font-size: 11px;
+    color: var(--ink-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 28px;
+  }
+  .login-features {
+    text-align: left;
+    margin: 24px 0;
+    padding: 16px;
+    background: var(--panel-2);
+    border-left: 3px solid var(--accent);
+    font-size: 11px;
+    line-height: 1.8;
+    color: var(--ink-dim);
+  }
+  .login-features strong { color: var(--ink); }
+  .google-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    background: white;
+    color: #1a1a1a;
+    border: none;
+    padding: 14px 20px;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    transition: all 0.15s;
+    border-radius: 4px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .google-btn:hover {
+    background: #f3f3f3;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .google-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .google-btn .g-icon {
+    width: 20px; height: 20px;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><path fill='%23FFC107' d='M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z'/><path fill='%23FF3D00' d='M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z'/><path fill='%234CAF50' d='M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z'/><path fill='%231976D2' d='M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z'/></svg>") center/contain no-repeat;
+    flex-shrink: 0;
+  }
+  .login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0 14px;
+    color: var(--ink-dim);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .login-divider::before,
+  .login-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .login-guest-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--ink-dim);
+    padding: 10px 16px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: all 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .login-guest-btn:hover { color: var(--ink); border-color: var(--ink-dim); }
+  .login-status {
+    margin-top: 16px;
+    font-size: 11px;
+    color: var(--ink-dim);
+    min-height: 18px;
+  }
+  .login-status.error { color: var(--red); }
+  .login-status.loading { color: var(--accent); }
+
+  /* Continue/New Game choice */
+  .game-choice {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: center;
+  }
+  .game-choice:hover { border-color: var(--accent); background: var(--panel-2); }
+  .game-choice .gc-icon {
+    width: 36px; height: 36px;
+    background: var(--panel-2);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .game-choice.continue .gc-icon { background: rgba(127, 176, 105, 0.2); color: var(--green); }
+  .game-choice.new .gc-icon { background: rgba(244, 160, 32, 0.2); color: var(--accent); }
+  .game-choice .gc-info .gc-title {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--ink);
+    margin-bottom: 2px;
+  }
+  .game-choice .gc-info .gc-meta { font-size: 10px; color: var(--ink-dim); }
+  .auth-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 6px 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    transition: all 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .auth-btn:hover { border-color: var(--accent); }
+  .auth-btn .auth-avatar {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .auth-btn .auth-avatar img {
+    width: 100%; height: 100%; object-fit: cover;
+  }
+  .auth-btn .auth-name {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .auth-btn.signed-in {
+    border-color: var(--green);
+  }
+  .auth-btn.signed-in .auth-avatar {
+    background: var(--green);
+    color: #1a1610;
+    font-weight: 700;
+  }
+
+  /* Auth menu dropdown */
+  .auth-menu {
+    position: fixed;
+    top: 50px;
+    right: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    z-index: 800;
+    min-width: 240px;
+    display: none;
+  }
+  .auth-menu.show { display: block; }
+  .auth-menu .am-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .auth-menu .am-name { font-weight: 700; font-size: 13px; color: var(--ink); }
+  .auth-menu .am-email { font-size: 10px; color: var(--ink-dim); margin-top: 2px; }
+  .auth-menu .am-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .auth-menu .am-item:hover { background: var(--panel-2); }
+  .auth-menu .am-item:last-child { border-bottom: none; }
+  .auth-menu .am-item .am-icon { color: var(--ink-dim); font-size: 14px; }
+  .auth-menu .am-item.danger { color: var(--red); }
+  .auth-menu .am-item.danger:hover { background: rgba(217, 108, 94, 0.1); }
+  .auth-menu .am-status {
+    padding: 8px 16px;
+    font-size: 10px;
+    color: var(--ink-dim);
+    background: var(--panel-2);
+    text-align: center;
+  }
+  .auth-menu .am-status.success { color: var(--green); }
+  .auth-menu .am-status.saving { color: var(--accent); }
+
+  /* Cloud save indicator (small) */
+  .cloud-indicator {
+    position: fixed;
+    bottom: 70px;
+    right: 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 8px 12px;
+    font-size: 10px;
+    color: var(--ink-dim);
+    z-index: 700;
+    transform: translateX(120%);
+    transition: transform 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cloud-indicator.show { transform: translateX(0); }
+  .cloud-indicator.success { border-left-color: var(--green); color: var(--green); }
+  .cloud-indicator.error { border-left-color: var(--red); color: var(--red); }
+
+  /* Save slots modal */
+  .save-slot {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+  }
+  .save-slot:hover { border-color: var(--accent); }
+  .save-slot.empty { color: var(--ink-dim); border-style: dashed; }
+  .save-slot .slot-info { font-size: 11px; }
+  .save-slot .slot-title {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .save-slot .slot-meta { color: var(--ink-dim); font-size: 10px; }
+  .save-slot .slot-actions { display: flex; gap: 6px; }
+
+  @media (max-width: 900px) {
+    .auth-btn .auth-name { display: none; }
+    .auth-btn { padding: 4px 6px; }
+    .auth-menu {
+      top: auto;
+      right: 0; left: 0; bottom: 0;
+      max-width: 100%;
+      max-height: 70vh;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+    }
+  }
+
   /* MAIN GRID */
   main {
     display: grid;
@@ -1505,9 +1802,16 @@
       <div class="stat rep"><span class="label">İtibar</span><span class="value" id="stat-rep">50</span></div>
       <div class="stat cash"><span class="label">Kasa</span><span class="value" id="stat-cash">₺500.000</span></div>
       <div class="stat debt"><span class="label">Borç</span><span class="value" id="stat-debt">₺0</span></div>
+      <button class="auth-btn" id="auth-btn" onclick="toggleAuthMenu()">
+        <span class="auth-avatar" id="auth-avatar">👤</span>
+        <span class="auth-name" id="auth-name">Giriş Yap</span>
+      </button>
       <button class="next-day" onclick="nextDay()">Gün ▶</button>
     </div>
   </header>
+
+  <div class="auth-menu" id="auth-menu"></div>
+  <div class="cloud-indicator" id="cloud-indicator"></div>
 
   <main>
     <aside class="sidebar" id="sidebar">
@@ -1616,6 +1920,118 @@
 
 <div class="toast-container" id="toasts"></div>
 <div id="modals"></div>
+
+<!-- Firebase modular SDK — exposes window.fbAuth wrapper for legacy script -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+  import {
+    getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
+    signOut, onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+  import {
+    getFirestore, doc, setDoc, getDoc, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCgqo52YSOyDGRbWBEy_slRWLVgMSiGEOg",
+    authDomain: "yapi-ticaret.firebaseapp.com",
+    projectId: "yapi-ticaret",
+    storageBucket: "yapi-ticaret.firebasestorage.app",
+    messagingSenderId: "929683517708",
+    appId: "1:929683517708:web:815e7be2f7235df0c0d929"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  // Mobil için: redirect, masaüstü: popup
+  const isMobile = window.matchMedia('(max-width: 900px)').matches;
+
+  // Auth state değişimlerini ana koda ilet
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      window.dispatchEvent(new CustomEvent('fb:auth-changed', {
+        detail: {
+          uid: user.uid,
+          email: user.email,
+          name: user.displayName || user.email,
+          photo: user.photoURL || null
+        }
+      }));
+    } else {
+      window.dispatchEvent(new CustomEvent('fb:auth-changed', { detail: null }));
+    }
+  });
+
+  // Redirect sonrası geri dönüş
+  getRedirectResult(auth).catch(err => {
+    console.error('Redirect result error:', err);
+  });
+
+  // Global wrapper
+  window.fbAuth = {
+    signIn: async () => {
+      try {
+        if (isMobile) {
+          await signInWithRedirect(auth, provider);
+        } else {
+          await signInWithPopup(auth, provider);
+        }
+      } catch (err) {
+        console.error('Sign in error:', err);
+        window.dispatchEvent(new CustomEvent('fb:auth-error', { detail: err.message }));
+      }
+    },
+    signOut: async () => {
+      await signOut(auth);
+    },
+    saveGame: async (uid, slotId, data) => {
+      const ref = doc(db, 'saves', uid, 'slots', slotId);
+      await setDoc(ref, {
+        data: JSON.stringify(data),
+        updatedAt: serverTimestamp(),
+        companyName: data.company?.name || 'Yapı Ticaret',
+        day: data.day || 1,
+        cash: data.cash || 0,
+        level: data.level || 1
+      });
+    },
+    loadGame: async (uid, slotId) => {
+      const ref = doc(db, 'saves', uid, 'slots', slotId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return null;
+      const obj = snap.data();
+      return { data: JSON.parse(obj.data), meta: obj };
+    },
+    listSaves: async (uid) => {
+      const slots = ['slot1', 'slot2', 'slot3'];
+      const result = [];
+      for (const slotId of slots) {
+        const ref = doc(db, 'saves', uid, 'slots', slotId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const obj = snap.data();
+          result.push({
+            slotId,
+            companyName: obj.companyName,
+            day: obj.day,
+            cash: obj.cash,
+            level: obj.level,
+            updatedAt: obj.updatedAt?.toDate?.()
+          });
+        } else {
+          result.push({ slotId, empty: true });
+        }
+      }
+      return result;
+    }
+  };
+
+  // Hazır olduğunu bildir
+  window.dispatchEvent(new CustomEvent('fb:ready'));
+</script>
 
 <script>
 'use strict';
@@ -1820,6 +2236,12 @@ const state = {
   monthlyRevenue: 0,          // bu ay tahsil edilen
   monthlyExpenses: 0,         // bu ay yapılan harcama (alış+yakıt+maaş+taksit)
   pastReports: [],            // {month, ...metrics} listesi
+
+  // Firebase Auth
+  user: null,                 // {uid, email, name, photo} veya null
+  cloudSaving: false,
+  lastCloudSave: 0,           // son bulut kaydetme günü
+  hasUnsavedChanges: false,
 
   // Search filters (yeni)
   marketSearch: '',
@@ -4410,6 +4832,30 @@ function closeMonthlyReport() {
   state.monthlyExpenses = 0;
   setView('inbox');
   render();
+
+  // Eğer kullanıcı giriş yapmışsa otomatik bulut kaydet (slot1)
+  if (state.user && window.fbAuth) {
+    setTimeout(() => doAutoSave(), 500);
+  }
+}
+
+// Sessiz otomatik kayıt (toast yok, sadece küçük indicator)
+async function doAutoSave() {
+  if (!state.user || state.cloudSaving) return;
+  state.cloudSaving = true;
+  showCloudIndicator('☁ Otomatik kaydediliyor...', 'saving');
+  try {
+    const data = serializeState();
+    await window.fbAuth.saveGame(state.user.uid, 'slot1', data);
+    state.lastCloudSave = state.day;
+    state.hasUnsavedChanges = false;
+    showCloudIndicator('☁ Otomatik kaydedildi', 'success');
+  } catch (err) {
+    console.error('Auto-save error:', err);
+    showCloudIndicator('Otomatik kayıt hatası', 'error');
+  } finally {
+    state.cloudSaving = false;
+  }
 }
 
 // ============================================================
@@ -4527,6 +4973,440 @@ function startGame() {
 }
 
 // ============================================================
+// LOGIN FLOW (oyun açılışında giriş zorunlu)
+// ============================================================
+
+let isFirstLoad = true;
+
+function showLoginScreen() {
+  const html = `<div class="login-modal-bg" id="login-screen">
+    <div class="login-modal">
+      <div class="login-logo">YAPI TİCARET</div>
+      <div class="login-tagline">İSTANBUL · İNŞAAT MALZEMELERİ</div>
+
+      <div class="login-features">
+        <div>📨 <strong>Müşteri ihalelerine teklif ver</strong>, sözleşmeleri kazan</div>
+        <div>🚛 <strong>Filonu yönet</strong>, irsaliyeyle teslim et</div>
+        <div>🏢 <strong>Tedarikçilerle pazarlık</strong>, en uygun fiyatı bul</div>
+        <div>💰 <strong>Aylık raporla</strong> şirketini büyüt</div>
+      </div>
+
+      <button class="google-btn" id="google-signin-btn" onclick="initiateLogin()">
+        <span class="g-icon"></span>
+        <span>Google ile Devam Et</span>
+      </button>
+
+      <div class="login-divider">veya</div>
+
+      <button class="login-guest-btn" onclick="continueAsGuest()">
+        Misafir Olarak Oyna
+      </button>
+
+      <div class="login-status" id="login-status">
+        Bulut kaydı için Google girişi gerekir
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+async function initiateLogin() {
+  const btn = $('google-signin-btn');
+  const status = $('login-status');
+  if (!window.fbAuth) {
+    status.className = 'login-status error';
+    status.textContent = 'Firebase yüklenemedi. Sayfayı yenile.';
+    return;
+  }
+  btn.disabled = true;
+  status.className = 'login-status loading';
+  status.textContent = '☁ Google girişi açılıyor...';
+  try {
+    await window.fbAuth.signIn();
+  } catch (err) {
+    status.className = 'login-status error';
+    status.textContent = 'Giriş hatası: ' + err.message;
+    btn.disabled = false;
+  }
+}
+
+function continueAsGuest() {
+  closeLoginScreen();
+  showIntroModal();
+}
+
+function closeLoginScreen() {
+  closeModal();
+}
+
+// Giriş yapıldıktan sonra çalışır — bulut kayıtları kontrol et
+async function postLoginFlow() {
+  const status = $('login-status');
+  if (status) {
+    status.className = 'login-status loading';
+    status.textContent = '☁ Bulut kayıtları kontrol ediliyor...';
+  }
+
+  try {
+    const slots = await window.fbAuth.listSaves(state.user.uid);
+    const savedSlots = slots.filter(s => !s.empty);
+
+    if (savedSlots.length === 0) {
+      // Hiç kayıt yok, yeni oyun başlat
+      closeLoginScreen();
+      showIntroModal();
+    } else {
+      // Var olan kayıtları göster + yeni oyun seçeneği
+      showGameChoice(savedSlots);
+    }
+  } catch (err) {
+    console.error(err);
+    if (status) {
+      status.className = 'login-status error';
+      status.textContent = 'Kayıtlar okunamadı: ' + err.message;
+    }
+    // Yine de yeni oyuna geç
+    setTimeout(() => {
+      closeLoginScreen();
+      showIntroModal();
+    }, 2000);
+  }
+}
+
+function showGameChoice(savedSlots) {
+  const html = `<div class="modal-bg">
+    <div class="modal" style="max-width: 460px;">
+      <h2 style="margin-bottom: 6px;">Hoş Geldin</h2>
+      <p style="color: var(--ink-dim); margin-bottom: 18px; font-size: 12px;">
+        ${state.user.name} olarak giriş yaptın. Devam etmek istediğin kayıt var:
+      </p>
+
+      ${savedSlots.map((s, i) => {
+        const date = s.updatedAt
+          ? s.updatedAt.toLocaleDateString('tr-TR') + ' ' + s.updatedAt.toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'})
+          : '';
+        return `<div class="game-choice continue" onclick="loadAndStart('${s.slotId}')">
+          <div class="gc-icon">▶</div>
+          <div class="gc-info">
+            <div class="gc-title">${s.companyName}</div>
+            <div class="gc-meta">Gün ${s.day} · Sv ${s.level} · ${fmt(s.cash)} · ${date}</div>
+          </div>
+          <span style="color: var(--ink-dim);">→</span>
+        </div>`;
+      }).join('')}
+
+      <div class="game-choice new" onclick="startNewFromLogin()">
+        <div class="gc-icon">+</div>
+        <div class="gc-info">
+          <div class="gc-title">Yeni Şirket Kur</div>
+          <div class="gc-meta">Sıfırdan başla</div>
+        </div>
+        <span style="color: var(--ink-dim);">→</span>
+      </div>
+
+      <div style="margin-top: 16px; text-align: center;">
+        <button class="login-guest-btn" onclick="doSignOut(); showLoginScreen();" style="font-size: 10px;">
+          Farklı hesapla giriş yap
+        </button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+async function loadAndStart(slotId) {
+  closeModal();
+  // Loading göster
+  const html = `<div class="modal-bg"><div class="modal" style="text-align: center; padding: 60px 40px;">
+    <div style="font-family: 'Bebas Neue'; font-size: 24px; color: var(--accent); letter-spacing: 3px;">YÜKLENİYOR...</div>
+    <div style="color: var(--ink-dim); font-size: 11px; margin-top: 10px;">Bulut kaydın getiriliyor</div>
+  </div></div>`;
+  $('modals').innerHTML = html;
+  try {
+    const result = await window.fbAuth.loadGame(state.user.uid, slotId);
+    if (!result) throw new Error('Kayıt boş');
+    deserializeState(result.data);
+    closeModal();
+    setView('inbox');
+    render();
+    toast('☁ Kayıt yüklendi: ' + (state.company?.name || 'Şirket'), 'success');
+  } catch (err) {
+    console.error(err);
+    toast('Yükleme hatası: ' + err.message, 'error');
+    closeModal();
+    showIntroModal();
+  }
+}
+
+function startNewFromLogin() {
+  closeModal();
+  showIntroModal();
+}
+
+// ============================================================
+// FIREBASE AUTH UI & SAVE/LOAD
+// ============================================================
+
+function showCloudIndicator(message, type) {
+  const ind = $('cloud-indicator');
+  ind.className = 'cloud-indicator show ' + (type || '');
+  ind.textContent = message;
+  setTimeout(() => ind.classList.remove('show'), 2500);
+}
+
+function renderAuthButton() {
+  const btn = $('auth-btn');
+  const avatar = $('auth-avatar');
+  const name = $('auth-name');
+  if (state.user) {
+    btn.classList.add('signed-in');
+    if (state.user.photo) {
+      avatar.innerHTML = `<img src="${state.user.photo}" alt="">`;
+    } else {
+      avatar.textContent = (state.user.name || 'U').charAt(0).toUpperCase();
+    }
+    name.textContent = state.user.name.split(' ')[0];
+  } else {
+    btn.classList.remove('signed-in');
+    avatar.innerHTML = '👤';
+    name.textContent = 'Giriş Yap';
+  }
+}
+
+function toggleAuthMenu() {
+  const menu = $('auth-menu');
+  if (menu.classList.contains('show')) {
+    menu.classList.remove('show');
+    return;
+  }
+  renderAuthMenu();
+  menu.classList.add('show');
+}
+
+function renderAuthMenu() {
+  const menu = $('auth-menu');
+  if (!state.user) {
+    menu.innerHTML = `
+      <div class="am-header">
+        <div class="am-name">Giriş Yapılmadı</div>
+        <div class="am-email">Bulut kayıt için Google hesabınla giriş yap</div>
+      </div>
+      <div class="am-item" onclick="doSignIn()">
+        <span><strong>🔐 Google ile Giriş Yap</strong></span>
+        <span class="am-icon">→</span>
+      </div>
+      <div class="am-status">Kayıtların 3 farklı slotta bulutta saklanır</div>
+    `;
+  } else {
+    menu.innerHTML = `
+      <div class="am-header">
+        <div class="am-name">${state.user.name}</div>
+        <div class="am-email">${state.user.email}</div>
+      </div>
+      <div class="am-item" onclick="openSaveSlotModal('save')">
+        <span>💾 Bulutta Kaydet</span>
+        <span class="am-icon">→</span>
+      </div>
+      <div class="am-item" onclick="openSaveSlotModal('load')">
+        <span>📂 Buluttan Yükle</span>
+        <span class="am-icon">→</span>
+      </div>
+      <div class="am-item danger" onclick="doSignOut()">
+        <span>🚪 Çıkış Yap</span>
+        <span class="am-icon">→</span>
+      </div>
+      ${state.lastCloudSave ? `<div class="am-status success">Son kayıt: Gün ${state.lastCloudSave}</div>` : '<div class="am-status">Henüz kaydedilmedi</div>'}
+    `;
+  }
+}
+
+async function doSignIn() {
+  $('auth-menu').classList.remove('show');
+  if (!window.fbAuth) {
+    toast('Firebase yüklenmedi, sayfayı yenile', 'error');
+    return;
+  }
+  showCloudIndicator('Google girişi açılıyor...', '');
+  await window.fbAuth.signIn();
+}
+
+async function doSignOut() {
+  if (!confirm('Çıkış yapmak istediğinden emin misin? Kaydedilmemiş ilerleme kaybolabilir.')) return;
+  $('auth-menu').classList.remove('show');
+  await window.fbAuth.signOut();
+  state.user = null;
+  state.lastCloudSave = 0;
+  isFirstLoad = true;  // sonraki giriş akışı için
+  renderAuthButton();
+  toast('Çıkış yapıldı', 'info');
+}
+
+// Game state'i serialize edilebilir hale getir (DOM ref vs. yok zaten)
+function serializeState() {
+  // Kopya al, gereksiz alanları çıkar
+  const copy = JSON.parse(JSON.stringify(state));
+  delete copy.user;
+  delete copy.cloudSaving;
+  delete copy.selectedEmail;
+  delete copy.marketSearchFocused;
+  delete copy.supplierSearchFocused;
+  return copy;
+}
+
+function deserializeState(data) {
+  // Mevcut state'i koruyarak (özellikle user) data ile değiştir
+  const user = state.user;
+  Object.keys(state).forEach(k => delete state[k]);
+  Object.assign(state, data);
+  state.user = user;
+  state.selectedEmail = null;
+  state.cloudSaving = false;
+}
+
+function openSaveSlotModal(mode) {
+  $('auth-menu').classList.remove('show');
+  if (!state.user) { toast('Önce giriş yap', 'error'); return; }
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <h2>${mode === 'save' ? 'BULUT KAYIT' : 'BULUTTAN YÜKLE'}</h2>
+      <p style="color: var(--ink-dim); margin-bottom: 14px;">
+        ${mode === 'save'
+          ? 'Mevcut oyununu bir slota kaydet. Eski kayıt üzerine yazılır.'
+          : 'Yüklemek istediğin slotu seç. Mevcut oyun durumun kaybolacak.'}
+      </p>
+      <div id="slot-list">
+        <div class="empty">Slotlar yükleniyor...</div>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="closeModal()">İptal</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  loadSlotList(mode);
+}
+
+async function loadSlotList(mode) {
+  const list = $('slot-list');
+  try {
+    const slots = await window.fbAuth.listSaves(state.user.uid);
+    list.innerHTML = slots.map((s, i) => {
+      if (s.empty) {
+        return `<div class="save-slot empty" onclick="${mode === 'save' ? `doCloudSave('${s.slotId}')` : ''}">
+          <div class="slot-info">
+            <div class="slot-title">Slot ${i + 1} <span style="color: var(--ink-dim); font-weight: normal;">— Boş</span></div>
+            <div class="slot-meta">${mode === 'save' ? 'Buraya kaydet' : 'Bu slot boş'}</div>
+          </div>
+          <div class="slot-actions">${mode === 'save' ? '<button class="btn small primary">KAYDET</button>' : ''}</div>
+        </div>`;
+      }
+      const date = s.updatedAt ? s.updatedAt.toLocaleDateString('tr-TR') + ' ' + s.updatedAt.toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'}) : '';
+      return `<div class="save-slot">
+        <div class="slot-info">
+          <div class="slot-title">${s.companyName} <span style="color: var(--ink-dim); font-weight: normal; font-size: 11px;">— Slot ${i + 1}</span></div>
+          <div class="slot-meta">Gün ${s.day} · Sv ${s.level} · ${fmt(s.cash)} · ${date}</div>
+        </div>
+        <div class="slot-actions">
+          <button class="btn small ${mode === 'save' ? 'danger' : 'primary'}" onclick="${mode === 'save' ? `confirmOverwrite('${s.slotId}')` : `doCloudLoad('${s.slotId}')`}">
+            ${mode === 'save' ? 'ÜZERİNE YAZ' : 'YÜKLE'}
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    console.error(err);
+    list.innerHTML = '<div class="empty" style="color: var(--red);">Yükleme hatası: ' + err.message + '</div>';
+  }
+}
+
+function confirmOverwrite(slotId) {
+  if (confirm('Bu slottaki eski kayıt silinecek. Devam edelim mi?')) {
+    doCloudSave(slotId);
+  }
+}
+
+async function doCloudSave(slotId) {
+  if (!state.user) { toast('Önce giriş yap', 'error'); return; }
+  state.cloudSaving = true;
+  showCloudIndicator('☁ Kaydediliyor...', 'saving');
+  try {
+    const data = serializeState();
+    await window.fbAuth.saveGame(state.user.uid, slotId, data);
+    state.lastCloudSave = state.day;
+    state.hasUnsavedChanges = false;
+    showCloudIndicator('☁ Kaydedildi (Gün ' + state.day + ')', 'success');
+    closeModal();
+    toast('✓ Bulut kaydı tamamlandı', 'success');
+  } catch (err) {
+    console.error('Save error:', err);
+    showCloudIndicator('Kayıt hatası: ' + err.message, 'error');
+    toast('Kayıt hatası: ' + err.message, 'error');
+  } finally {
+    state.cloudSaving = false;
+  }
+}
+
+async function doCloudLoad(slotId) {
+  if (!state.user) { toast('Önce giriş yap', 'error'); return; }
+  showCloudIndicator('☁ Yükleniyor...', 'saving');
+  try {
+    const result = await window.fbAuth.loadGame(state.user.uid, slotId);
+    if (!result) { toast('Slot boş', 'error'); return; }
+    deserializeState(result.data);
+    closeModal();
+    setView('inbox');
+    render();
+    showCloudIndicator('☁ Yüklendi: Gün ' + state.day, 'success');
+    toast('✓ Kayıt yüklendi', 'success');
+  } catch (err) {
+    console.error('Load error:', err);
+    showCloudIndicator('Yükleme hatası: ' + err.message, 'error');
+    toast('Yükleme hatası: ' + err.message, 'error');
+  }
+}
+
+// Auth state değişimi
+window.addEventListener('fb:auth-changed', (e) => {
+  state.user = e.detail;
+  renderAuthButton();
+  if (e.detail) {
+    // İlk açılışta giriş yapılmışsa, kayıtları yükle ekranını göster
+    if (isFirstLoad) {
+      isFirstLoad = false;
+      postLoginFlow();
+    } else {
+      toast(`Hoş geldin, ${e.detail.name}! 💾 Bulut kaydı aktif.`, 'success');
+    }
+  }
+});
+
+window.addEventListener('fb:auth-error', (e) => {
+  toast('Giriş hatası: ' + e.detail, 'error');
+  const status = $('login-status');
+  if (status) {
+    status.className = 'login-status error';
+    status.textContent = 'Giriş hatası: ' + e.detail;
+  }
+  const btn = $('google-signin-btn');
+  if (btn) btn.disabled = false;
+});
+
+window.addEventListener('fb:ready', () => {
+  // Firebase hazır — auth state otomatik kontrol edilir
+});
+
+// Auth menüyü dış tıklamada kapat
+document.addEventListener('click', (e) => {
+  const menu = $('auth-menu');
+  const btn = $('auth-btn');
+  if (menu && menu.classList.contains('show')
+      && !menu.contains(e.target)
+      && !btn.contains(e.target)) {
+    menu.classList.remove('show');
+  }
+});
+
+// ============================================================
 // INIT
 // ============================================================
 
@@ -4534,7 +5414,9 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
 });
 
-showIntroModal();
+renderAuthButton();
+// Açılışta önce login ekranı; eğer auth state yüklü gelirse postLoginFlow otomatik çalışır
+showLoginScreen();
 render();
 </script>
 </body>

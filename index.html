@@ -391,8 +391,167 @@
   .cloud-indicator.error { border-left-color: var(--red); color: var(--red); }
 
   /* ============================================================
-     VIP BADGE
+     PROFILE PAGE
      ============================================================ */
+  .profile-header {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 24px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .profile-avatar-big {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 3px solid var(--accent);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 42px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .profile-avatar-big img,
+  .profile-avatar-big svg {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .profile-name-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .profile-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px;
+    letter-spacing: 2px;
+    color: var(--ink);
+  }
+  .profile-meta {
+    color: var(--ink-dim);
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .profile-meta strong { color: var(--ink); }
+
+  /* Avatar grid */
+  .avatar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+  }
+  @media (max-width: 900px) {
+    .avatar-grid { grid-template-columns: repeat(5, 1fr); }
+    .profile-header { grid-template-columns: 1fr; text-align: center; }
+    .profile-avatar-big { margin: 0 auto; }
+    .profile-name-row { justify-content: center; }
+  }
+  .avatar-option {
+    aspect-ratio: 1;
+    border-radius: 50%;
+    cursor: pointer;
+    overflow: hidden;
+    border: 2px solid var(--border);
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-2);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .avatar-option:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .avatar-option.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgba(244,160,32,0.4);
+    transform: translateY(-2px);
+  }
+  .avatar-option svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .avatar-option img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .avatar-option.google-photo {
+    background: var(--panel);
+  }
+  .avatar-option.default-letter {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    color: var(--ink);
+  }
+
+  /* Profile form */
+  .profile-form {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .profile-form h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 2px;
+    font-size: 16px;
+    margin-bottom: 14px;
+    color: var(--accent);
+  }
+  .profile-form label {
+    display: block;
+    font-size: 10px;
+    color: var(--ink-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    margin-top: 14px;
+  }
+  .profile-form label:first-of-type { margin-top: 0; }
+  .profile-form input[type="text"] {
+    width: 100%;
+    max-width: 360px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 14px;
+  }
+  .profile-form input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .profile-form .form-hint {
+    font-size: 10px;
+    color: var(--ink-dim);
+    margin-top: 4px;
+  }
+
+  /* Profile stats */
+  .profile-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 900px) {
+    .profile-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  }
   .vip-badge {
     display: inline-flex;
     align-items: center;
@@ -2006,6 +2165,9 @@
       </div>
 
       <div class="nav-section">Topluluk</div>
+      <div class="nav-item" data-view="profile" onclick="setView('profile')">
+        <span>👤 Profilim</span>
+      </div>
       <div class="nav-item" data-view="leaderboard" onclick="setView('leaderboard')">
         <span>🏆 Sıralama</span>
       </div>
@@ -2235,14 +2397,17 @@
         const data = d.data();
         rows.push({
           uid: d.id,
-          displayName: data.displayName || 'Anonim',
+          displayName: data.customDisplayName || data.displayName || 'Anonim',
           companyName: data.companyName || '—',
           photoURL: data.photoURL,
+          avatarId: data.avatarId || null,
           bestCash: data.bestCash || 0,
           bestLevel: data.bestLevel || 1,
           bestDay: data.bestDay || 1,
           contractsCompleted: data.contractsCompleted || 0,
           email: data.email,
+          vipTier: data.vipTier || null,
+          vipUntil: data.vipUntil || null,
           lastSeen: data.lastSeen?.toDate?.()
         });
       });
@@ -2260,6 +2425,8 @@
         rows.push({
           uid: d.id,
           ...data,
+          displayName: data.customDisplayName || data.displayName,
+          originalDisplayName: data.displayName,
           lastSeen: data.lastSeen?.toDate?.()
         });
       });
@@ -2336,6 +2503,18 @@
       const snap = await getDoc(ref);
       if (!snap.exists()) return null;
       return snap.data();
+    },
+
+    // Kullanıcı kendi profilini günceller (avatarId, customDisplayName)
+    updateProfile: async (uid, updates) => {
+      const ref = doc(db, 'users', uid);
+      const allowedFields = ['avatarId', 'customDisplayName'];
+      const data = {};
+      for (const k of allowedFields) {
+        if (updates[k] !== undefined) data[k] = updates[k];
+      }
+      data.updatedAt = serverTimestamp();
+      await setDoc(ref, data, { merge: true });
     }
   };
 
@@ -3046,6 +3225,7 @@ function render() {
   else if (state.view === 'visits') renderVisits();
   else if (state.view === 'bank') renderBank();
   else if (state.view === 'archive') renderArchive();
+  else if (state.view === 'profile') renderProfile();
   else if (state.view === 'leaderboard') renderLeaderboard();
   else if (state.view === 'admin') renderAdmin();
 
@@ -4759,6 +4939,221 @@ function renderArchive() {
 }
 
 // ============================================================
+// PROFILE PAGE
+// ============================================================
+
+function renderProfile() {
+  const c = $('center');
+
+  if (!state.user) {
+    c.innerHTML = `<h2>👤 PROFİLİM</h2>
+      <div class="empty">Profilini görüntülemek için Google ile giriş yapmalısın.<br><br>
+        <button class="btn primary" onclick="doSignIn()">Giriş Yap</button>
+      </div>`;
+    return;
+  }
+
+  const user = state.user;
+  const displayName = user.customDisplayName || user.name;
+  const avatarId = user.avatarId;
+  const tier = currentVipTier();
+  const memberSince = user.memberSince ? user.memberSince.toLocaleDateString('tr-TR') : 'Bilinmiyor';
+
+  // Sıralamadaki yer (cache'den)
+  let myRank = '—';
+  if (_leaderboardCache) {
+    const idx = _leaderboardCache.findIndex(r => r.uid === user.uid);
+    if (idx >= 0) myRank = '#' + (idx + 1);
+  }
+
+  // Büyük avatar
+  const bigAvatar = (() => {
+    if (avatarId && avatarId !== 'letter' && avatarId !== 'google') {
+      return avatarHTML(avatarId, displayName, user.photo);
+    } else if (avatarId === 'google' && user.photo) {
+      return `<img src="${user.photo}" alt="">`;
+    } else if (user.photo && !avatarId) {
+      return `<img src="${user.photo}" alt="">`;
+    }
+    return displayName.charAt(0).toUpperCase();
+  })();
+
+  // Avatar galerisi seçenekleri
+  const avatarOptions = [];
+  // Google fotoğrafı (varsa)
+  if (user.photo) {
+    avatarOptions.push({
+      id: 'google',
+      type: 'photo',
+      label: 'Google Fotoğrafım'
+    });
+  }
+  // Harf
+  avatarOptions.push({ id: 'letter', type: 'letter', label: 'Baş Harf' });
+  // SVG'ler
+  Object.keys(AVATARS).forEach(id => {
+    avatarOptions.push({ id, type: 'svg', label: AVATARS[id].name });
+  });
+
+  const currentAvatarId = avatarId || (user.photo ? 'google' : 'letter');
+
+  c.innerHTML = `<h2>👤 PROFİLİM</h2>
+    <div class="subtitle">Görünür adını ve avatarını seç</div>
+
+    <div class="profile-header">
+      <div class="profile-avatar-big" id="profile-avatar-big">${bigAvatar}</div>
+      <div>
+        <div class="profile-name-row">
+          <div class="profile-name">${displayName}</div>
+          ${tier ? vipBadgeHTML(tier, 'large') : ''}
+        </div>
+        <div class="profile-meta">
+          <strong>${user.email}</strong><br>
+          Üyelik: ${memberSince}
+          ${user.vipUntil ? ` · VIP Bitiş: <strong style="color: var(--accent);">${new Date(user.vipUntil).toLocaleDateString('tr-TR')}</strong>` : ''}
+        </div>
+      </div>
+    </div>
+
+    <div class="profile-form">
+      <h3>İSTATİSTİKLER</h3>
+      <div class="profile-stat-grid">
+        <div class="stat-tile">
+          <div class="stat-label">Sıralama</div>
+          <div class="stat-val" style="color: var(--accent);">${myRank}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Aktif Oyun</div>
+          <div class="stat-val" style="font-size: 14px;">${state.company?.name || '—'}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Kasa</div>
+          <div class="stat-val" style="color: var(--green); font-size: 14px;">${fmt(state.cash)}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Seviye / Gün</div>
+          <div class="stat-val" style="font-size: 14px;">Sv ${state.level} · ${state.day}.</div>
+        </div>
+      </div>
+
+      <div style="font-size: 10px; color: var(--ink-dim); margin-top: 8px;">
+        Sıralamadaki yer, "Buluttan Kaydet" yapıldığında güncellenir.
+      </div>
+    </div>
+
+    <div class="profile-form">
+      <h3>GÖRÜNÜR AD</h3>
+      <label>Ad (Diğer oyuncular bu adı görecek)</label>
+      <input type="text" id="profile-name-input" value="${displayName.replace(/"/g, '&quot;')}" maxlength="20" placeholder="Adın">
+      <div class="form-hint">3-20 karakter. Boş bırakırsan Google adı kullanılır.</div>
+      <div style="margin-top: 12px;">
+        <button class="btn primary" onclick="saveProfileName()">ADI KAYDET</button>
+      </div>
+    </div>
+
+    <div class="profile-form">
+      <h3>AVATAR SEÇ</h3>
+      <div class="form-hint" style="margin-bottom: 8px;">
+        Üstüne tıkla, otomatik kaydedilir.
+      </div>
+      <div class="avatar-grid" id="avatar-grid">
+        ${avatarOptions.map(opt => {
+          const selected = opt.id === currentAvatarId ? 'selected' : '';
+          let content;
+          if (opt.type === 'photo') {
+            content = `<img src="${user.photo}" alt="">`;
+          } else if (opt.type === 'letter') {
+            content = `<span style="font-family: 'Bebas Neue', sans-serif; font-size: 26px; color: var(--ink);">${displayName.charAt(0).toUpperCase()}</span>`;
+          } else {
+            content = AVATARS[opt.id].svg();
+          }
+          const cls = `avatar-option ${selected}${opt.type === 'photo' ? ' google-photo' : ''}${opt.type === 'letter' ? ' default-letter' : ''}`;
+          return `<div class="${cls}" onclick="selectAvatar('${opt.id}')" title="${opt.label}">${content}</div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+async function selectAvatar(avatarId) {
+  if (!state.user) return;
+
+  // UI'ı hemen güncelle (optimistic)
+  state.user.avatarId = avatarId;
+  document.querySelectorAll('#avatar-grid .avatar-option').forEach(el => el.classList.remove('selected'));
+  // Tıklanan elementi bul
+  const clicked = [...document.querySelectorAll('#avatar-grid .avatar-option')].find(el =>
+    el.getAttribute('onclick')?.includes(`'${avatarId}'`));
+  if (clicked) clicked.classList.add('selected');
+
+  // Büyük avatarı güncelle
+  const big = $('profile-avatar-big');
+  if (big) {
+    const displayName = state.user.customDisplayName || state.user.name;
+    if (avatarId === 'google' && state.user.photo) {
+      big.innerHTML = `<img src="${state.user.photo}" alt="">`;
+    } else if (avatarId === 'letter' || !avatarId) {
+      big.innerHTML = displayName.charAt(0).toUpperCase();
+    } else if (AVATARS[avatarId]) {
+      big.innerHTML = AVATARS[avatarId].svg();
+    }
+  }
+
+  // Header avatarını da güncelle
+  renderAuthButton();
+
+  // Firestore'a yaz
+  try {
+    await window.fbAuth.updateProfile(state.user.uid, { avatarId });
+    toast('Avatar değiştirildi', 'success');
+  } catch (err) {
+    console.error(err);
+    toast('Avatar kaydedilemedi: ' + err.message, 'error');
+  }
+}
+
+async function saveProfileName() {
+  if (!state.user) return;
+  const inp = $('profile-name-input');
+  if (!inp) return;
+  const newName = (inp.value || '').trim();
+
+  if (newName.length === 0) {
+    // Boş bırakıldı → Google adına dön
+    state.user.customDisplayName = null;
+    try {
+      await window.fbAuth.updateProfile(state.user.uid, { customDisplayName: null });
+      toast('Ad sıfırlandı (Google adı kullanılacak)', 'info');
+      renderAuthButton();
+      renderProfile();
+    } catch (err) {
+      toast('Hata: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  if (newName.length < 3 || newName.length > 20) {
+    toast('Ad 3-20 karakter arasında olmalı', 'error');
+    return;
+  }
+
+  // Basit küfür/spam filtreleme: özel karakterler sınırlı
+  if (!/^[a-zA-ZçğıöşüÇĞIİÖŞÜ0-9 ._-]+$/.test(newName)) {
+    toast('Sadece harf, rakam, boşluk ve . _ - karakterleri kullanılabilir', 'error');
+    return;
+  }
+
+  state.user.customDisplayName = newName;
+  try {
+    await window.fbAuth.updateProfile(state.user.uid, { customDisplayName: newName });
+    toast('Adın güncellendi: ' + newName, 'success');
+    renderAuthButton();
+    renderProfile();
+  } catch (err) {
+    toast('Hata: ' + err.message, 'error');
+  }
+}
+
+// ============================================================
 // LEADERBOARD
 // ============================================================
 
@@ -4870,10 +5265,27 @@ function renderLeaderboardContent(rows) {
             }
           }
           const vipHtml = userVipTier ? `<span class="leaderboard-vip">${vipBadgeHTML(userVipTier)}</span>` : '';
+
+          // Mini avatar
+          const miniAv = (() => {
+            const avId = r.avatarId;
+            if (avId && avId !== 'letter' && avId !== 'google' && AVATARS[avId]) {
+              return AVATARS[avId].svg();
+            } else if (avId === 'google' && r.photoURL) {
+              return `<img src="${r.photoURL}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
+            } else if (r.photoURL && !avId) {
+              return `<img src="${r.photoURL}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
+            }
+            return `<span style="font-family:'Bebas Neue',sans-serif;font-weight:700;">${(r.displayName || '?').charAt(0).toUpperCase()}</span>`;
+          })();
+
           return `<tr style="${isMe ? 'background: rgba(244,160,32,0.1);' : ''}">
             <td style="font-weight: 700;">${medal} ${i + 1}</td>
             <td>
-              <div style="font-weight: 700; color: ${isMe ? 'var(--accent)' : 'var(--ink)'};">${r.displayName}${isMe ? ' (sen)' : ''}${vipHtml}</div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="width: 28px; height: 28px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--panel-2); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border);">${miniAv}</span>
+                <span style="font-weight: 700; color: ${isMe ? 'var(--accent)' : 'var(--ink)'};">${r.displayName}${isMe ? ' (sen)' : ''}${vipHtml}</span>
+              </div>
             </td>
             <td style="color: var(--ink-dim);">${r.companyName}</td>
             <td class="num" style="${_leaderboardSort === 'bestCash' ? 'color: var(--green); font-weight: 700;' : ''}">${fmt(r.bestCash)}</td>
@@ -5006,11 +5418,30 @@ function renderAdminStats(users) {
           }
           const vipHtml = userVipTier ? ' ' + vipBadgeHTML(userVipTier) : '';
           const vipDate = u.vipUntil ? new Date(u.vipUntil).toLocaleDateString('tr-TR') : (userVipTier ? 'süresiz' : '');
+
+          // Mini avatar
+          const miniAv = (() => {
+            const avId = u.avatarId;
+            if (avId && avId !== 'letter' && avId !== 'google' && AVATARS[avId]) {
+              return AVATARS[avId].svg();
+            } else if (avId === 'google' && u.photoURL) {
+              return `<img src="${u.photoURL}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
+            } else if (u.photoURL && !avId) {
+              return `<img src="${u.photoURL}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
+            }
+            return `<span style="font-family:'Bebas Neue',sans-serif;font-weight:700;font-size:11px;">${(u.displayName || '?').charAt(0).toUpperCase()}</span>`;
+          })();
+
           return `<tr>
             <td>
-              <div style="font-weight: 700;">${u.displayName || 'Anonim'}${isAdmin ? ' 👑' : ''}${vipHtml}</div>
-              <div style="font-size: 9px; color: var(--ink-dim);">${u.uid.slice(0, 12)}...</div>
-              ${userVipTier && vipDate ? `<div style="font-size: 9px; color: var(--accent);">VIP bitiş: ${vipDate}</div>` : ''}
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="width: 24px; height: 24px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--panel-2); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border);">${miniAv}</span>
+                <div>
+                  <div style="font-weight: 700;">${u.displayName || 'Anonim'}${isAdmin ? ' 👑' : ''}${vipHtml}</div>
+                  <div style="font-size: 9px; color: var(--ink-dim);">${u.uid.slice(0, 12)}...</div>
+                  ${userVipTier && vipDate ? `<div style="font-size: 9px; color: var(--accent);">VIP bitiş: ${vipDate}</div>` : ''}
+                </div>
+              </div>
             </td>
             <td style="font-size: 11px;">${u.email || '—'}</td>
             <td>${u.companyName || '—'}</td>
@@ -5964,6 +6395,51 @@ function vipBadgeHTML(tier, size) {
   return `<span class="${cls}" title="${t.label}">${t.icon}<span class="vip-text">${t.name}</span></span>`;
 }
 
+// ============================================================
+// AVATAR GALERİSİ
+// ============================================================
+
+// 20 farklı SVG avatar (inşaat / iş temalı, parametrik renkler)
+const AVATARS = {
+  a01: { name: 'Sarı Baret', svg: (c1, c2) => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="${c1}"/><circle cx="32" cy="26" r="9" fill="#ffd166"/><path d="M16 50 L20 36 L44 36 L48 50 Z" fill="#ffd166"/><rect x="13" y="48" width="38" height="4" rx="1" fill="#e8a900"/><rect x="29" y="20" width="6" height="3" fill="#e8a900"/></svg>`, colors: ['#2a4858', '#f4a020'] },
+  a02: { name: 'Mavi Tulum', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#1e3a5f"/><circle cx="32" cy="22" r="8" fill="#f4c896"/><path d="M16 60 L18 38 Q32 32 46 38 L48 60 Z" fill="#3a6fa0"/><rect x="29" y="40" width="6" height="20" fill="#234060"/><circle cx="24" cy="44" r="1.5" fill="#fff"/><circle cx="40" cy="44" r="1.5" fill="#fff"/></svg>`, colors: [] },
+  a03: { name: 'Çekiç', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#c44a1e"/><rect x="14" y="20" width="36" height="14" fill="#444"/><rect x="38" y="18" width="10" height="18" fill="#666"/><rect x="29" y="32" width="6" height="28" fill="#8b5a2b"/></svg>`, colors: [] },
+  a04: { name: 'Tuğla Duvar', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#8b4513"/><g fill="#a0522d" stroke="#5d2906" stroke-width="0.5"><rect x="0" y="0" width="20" height="10"/><rect x="22" y="0" width="20" height="10"/><rect x="44" y="0" width="20" height="10"/><rect x="-10" y="12" width="20" height="10"/><rect x="12" y="12" width="20" height="10"/><rect x="34" y="12" width="20" height="10"/><rect x="56" y="12" width="20" height="10"/><rect x="0" y="24" width="20" height="10"/><rect x="22" y="24" width="20" height="10"/><rect x="44" y="24" width="20" height="10"/><rect x="-10" y="36" width="20" height="10"/><rect x="12" y="36" width="20" height="10"/><rect x="34" y="36" width="20" height="10"/><rect x="56" y="36" width="20" height="10"/><rect x="0" y="48" width="20" height="10"/><rect x="22" y="48" width="20" height="10"/><rect x="44" y="48" width="20" height="10"/></g></svg>`, colors: [] },
+  a05: { name: 'İskele', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#252830"/><g stroke="#f4a020" stroke-width="2" fill="none"><line x1="10" y1="10" x2="10" y2="54"/><line x1="32" y1="10" x2="32" y2="54"/><line x1="54" y1="10" x2="54" y2="54"/><line x1="10" y1="20" x2="54" y2="20"/><line x1="10" y1="35" x2="54" y2="35"/><line x1="10" y1="50" x2="54" y2="50"/><line x1="10" y1="20" x2="32" y2="35"/><line x1="32" y1="20" x2="54" y2="35"/><line x1="10" y1="35" x2="32" y2="50"/><line x1="32" y1="35" x2="54" y2="50"/></g></svg>`, colors: [] },
+  a06: { name: 'Vinç', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#5a8ca8"/><line x1="10" y1="58" x2="10" y2="10" stroke="#f4a020" stroke-width="3"/><line x1="10" y1="10" x2="54" y2="14" stroke="#f4a020" stroke-width="3"/><line x1="10" y1="10" x2="20" y2="20" stroke="#f4a020" stroke-width="2"/><line x1="42" y1="13" x2="42" y2="28" stroke="#ddd" stroke-width="1"/><rect x="38" y="28" width="8" height="6" fill="#777"/><rect x="6" y="56" width="10" height="6" fill="#333"/></svg>`, colors: [] },
+  a07: { name: 'Buldozer', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#7fb069"/><rect x="10" y="34" width="34" height="14" fill="#f4a020"/><rect x="14" y="24" width="20" height="12" fill="#d97706"/><rect x="44" y="36" width="8" height="14" fill="#444"/><circle cx="18" cy="52" r="6" fill="#222"/><circle cx="36" cy="52" r="6" fill="#222"/><circle cx="18" cy="52" r="2" fill="#999"/><circle cx="36" cy="52" r="2" fill="#999"/></svg>`, colors: [] },
+  a08: { name: 'Çimento Karıştırıcı', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#9a7fb0"/><ellipse cx="32" cy="28" rx="18" ry="14" fill="#d4d0c0"/><ellipse cx="32" cy="26" rx="14" ry="10" fill="#8a8775"/><rect x="12" y="40" width="40" height="10" fill="#444"/><circle cx="20" cy="54" r="5" fill="#222"/><circle cx="44" cy="54" r="5" fill="#222"/></svg>`, colors: [] },
+  a09: { name: 'Mühendis', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#2c3e50"/><circle cx="32" cy="22" r="9" fill="#f4c896"/><rect x="20" y="16" width="24" height="8" rx="2" fill="#222"/><path d="M18 60 L20 40 Q32 35 44 40 L46 60 Z" fill="#5a8ca8"/><rect x="29" y="38" width="6" height="22" fill="#fff"/><rect x="30" y="45" width="4" height="12" fill="#2c3e50"/></svg>`, colors: [] },
+  a10: { name: 'Tornavida & Anahtar', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#d96c5e"/><g transform="rotate(-30 32 32)"><rect x="14" y="30" width="36" height="4" fill="#888"/><rect x="42" y="26" width="10" height="12" fill="#aaa"/><polygon points="42,28 38,32 42,36" fill="#666"/></g><g transform="rotate(45 32 32)"><rect x="14" y="30" width="36" height="4" fill="#bbb"/><circle cx="46" cy="32" r="8" fill="#888"/><circle cx="46" cy="32" r="4" fill="#d96c5e"/></g></svg>`, colors: [] },
+  a11: { name: 'Plan / Pusula', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#f4a020"/><rect x="10" y="12" width="44" height="40" fill="#fff8e7" stroke="#5a3a10" stroke-width="1"/><g stroke="#5a3a10" stroke-width="0.5" fill="none"><line x1="15" y1="20" x2="49" y2="20"/><line x1="15" y1="28" x2="49" y2="28"/><line x1="15" y1="36" x2="49" y2="36"/><line x1="15" y1="44" x2="49" y2="44"/><line x1="20" y1="15" x2="20" y2="49"/><line x1="32" y1="15" x2="32" y2="49"/><line x1="44" y1="15" x2="44" y2="49"/></g><circle cx="32" cy="32" r="8" fill="none" stroke="#c44a1e" stroke-width="1.5"/></svg>`, colors: [] },
+  a12: { name: 'Para Yığını', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#7fb069"/><ellipse cx="32" cy="48" rx="22" ry="6" fill="#d4af37"/><ellipse cx="32" cy="42" rx="22" ry="6" fill="#e6c853"/><ellipse cx="32" cy="36" rx="22" ry="6" fill="#d4af37"/><ellipse cx="32" cy="30" rx="22" ry="6" fill="#e6c853"/><ellipse cx="32" cy="24" rx="22" ry="6" fill="#d4af37"/><text x="32" y="28" text-anchor="middle" font-family="Bebas Neue, sans-serif" font-size="10" fill="#5a3a10">₺</text></svg>`, colors: [] },
+  a13: { name: 'Geometrik Mavi', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#1e3a5f"/><polygon points="32,8 56,24 56,48 32,56 8,48 8,24" fill="#5a8ca8"/><polygon points="32,18 46,28 46,44 32,50 18,44 18,28" fill="#1e3a5f"/><circle cx="32" cy="34" r="6" fill="#f4a020"/></svg>`, colors: [] },
+  a14: { name: 'Geometrik Turuncu', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#c44a1e"/><polygon points="32,4 60,32 32,60 4,32" fill="#f4a020"/><polygon points="32,16 48,32 32,48 16,32" fill="#c44a1e"/><polygon points="32,24 40,32 32,40 24,32" fill="#ffcb52"/></svg>`, colors: [] },
+  a15: { name: 'Geometrik Yeşil', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#1a3a2a"/><circle cx="32" cy="32" r="22" fill="#7fb069"/><circle cx="32" cy="32" r="16" fill="#5a9050"/><circle cx="32" cy="32" r="10" fill="#3a6a35"/><circle cx="32" cy="32" r="4" fill="#1a3a2a"/></svg>`, colors: [] },
+  a16: { name: 'Geometrik Mor', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#3a1f50"/><polygon points="32,8 56,32 32,56 8,32" fill="#9a7fb0"/><rect x="22" y="22" width="20" height="20" fill="#3a1f50" transform="rotate(45 32 32)"/><circle cx="32" cy="32" r="6" fill="#e2c044"/></svg>`, colors: [] },
+  a17: { name: 'Kırmızı Şahin', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#4a0e0e"/><path d="M32 14 L48 30 L42 36 L48 50 L32 44 L16 50 L22 36 L16 30 Z" fill="#d96c5e"/><circle cx="32" cy="30" r="3" fill="#fff"/><polygon points="30,32 34,32 32,38" fill="#4a0e0e"/></svg>`, colors: [] },
+  a18: { name: 'Altın Yıldız', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="g18"><stop offset="0%" stop-color="#ffd166"/><stop offset="100%" stop-color="#d97706"/></radialGradient></defs><rect width="64" height="64" fill="#2a1a05"/><polygon points="32,8 38,26 56,26 42,38 48,56 32,46 16,56 22,38 8,26 26,26" fill="url(#g18)"/></svg>`, colors: [] },
+  a19: { name: 'Elmas', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#0a2530"/><polygon points="20,16 44,16 56,28 32,56 8,28" fill="#5fc0d0"/><polygon points="20,16 44,16 32,28" fill="#b8e6f0"/><polygon points="8,28 20,16 32,28" fill="#3a8da0"/><polygon points="44,16 56,28 32,28" fill="#3a8da0"/><polygon points="8,28 32,28 32,56" fill="#5fc0d0"/><polygon points="32,28 56,28 32,56" fill="#4a9faf"/></svg>`, colors: [] },
+  a20: { name: 'Şirket Logosu', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#252830"/><rect x="14" y="20" width="36" height="32" fill="#f4a020"/><rect x="18" y="26" width="6" height="6" fill="#252830"/><rect x="29" y="26" width="6" height="6" fill="#252830"/><rect x="40" y="26" width="6" height="6" fill="#252830"/><rect x="18" y="36" width="6" height="6" fill="#252830"/><rect x="29" y="36" width="6" height="6" fill="#252830"/><rect x="40" y="36" width="6" height="6" fill="#252830"/><rect x="20" y="46" width="24" height="6" fill="#c44a1e"/></svg>`, colors: [] }
+};
+
+// Avatar HTML üretir. avatarId: 'a01'-'a20' veya 'google' veya 'letter' veya null
+function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
+  if (!avatarId || avatarId === 'letter') {
+    return `<span style="font-family: 'Bebas Neue', sans-serif; font-weight: 700;">${(fallbackLetter || '?').charAt(0).toUpperCase()}</span>`;
+  }
+  if (avatarId === 'google' && googlePhotoURL) {
+    return `<img src="${googlePhotoURL}" alt="">`;
+  }
+  if (avatarId === 'google' && !googlePhotoURL) {
+    // Google foto yoksa harf
+    return `<span style="font-family: 'Bebas Neue', sans-serif; font-weight: 700;">${(fallbackLetter || '?').charAt(0).toUpperCase()}</span>`;
+  }
+  const av = AVATARS[avatarId];
+  if (!av) return `<span>?</span>`;
+  return av.svg(...(av.colors || []));
+}
+
 // State'e VIP bilgisi yükle
 function isVip() {
   if (!state.user) return false;
@@ -5986,14 +6462,24 @@ function renderAuthButton() {
   const name = $('auth-name');
   if (state.user) {
     btn.classList.add('signed-in');
-    if (state.user.photo) {
+    const displayName = state.user.customDisplayName || state.user.name;
+    const avatarId = state.user.avatarId;
+
+    if (avatarId && avatarId !== 'letter' && avatarId !== 'google') {
+      // SVG avatar seçildi
+      avatar.innerHTML = avatarHTML(avatarId, displayName, state.user.photo);
+    } else if (avatarId === 'google' && state.user.photo) {
+      avatar.innerHTML = `<img src="${state.user.photo}" alt="">`;
+    } else if (state.user.photo && !avatarId) {
+      // Hiç seçim yapılmadıysa varsayılan: Google fotosu
       avatar.innerHTML = `<img src="${state.user.photo}" alt="">`;
     } else {
-      avatar.textContent = (state.user.name || 'U').charAt(0).toUpperCase();
+      avatar.textContent = displayName.charAt(0).toUpperCase();
     }
+
     const tier = currentVipTier();
     const vipHtml = tier ? vipBadgeHTML(tier) : '';
-    name.innerHTML = state.user.name.split(' ')[0] + vipHtml;
+    name.innerHTML = displayName.split(' ')[0] + vipHtml;
   } else {
     btn.classList.remove('signed-in');
     avatar.innerHTML = '👤';
@@ -6198,12 +6684,15 @@ window.addEventListener('fb:auth-changed', async (e) => {
   state.user = e.detail;
   renderAuthButton();
   if (e.detail) {
-    // VIP durumunu yükle
+    // VIP ve profil bilgilerini yükle
     try {
       const profile = await window.fbAuth.refreshOwnProfile();
       if (profile) {
         state.user.vipTier = profile.vipTier || null;
         state.user.vipUntil = profile.vipUntil || null;
+        state.user.avatarId = profile.avatarId || null;
+        state.user.customDisplayName = profile.customDisplayName || null;
+        state.user.memberSince = profile.lastSeen?.toDate?.() || null;
         renderAuthButton();
       }
     } catch (err) {

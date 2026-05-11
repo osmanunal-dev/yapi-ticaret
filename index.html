@@ -390,7 +390,155 @@
   .cloud-indicator.success { border-left-color: var(--green); color: var(--green); }
   .cloud-indicator.error { border-left-color: var(--red); color: var(--red); }
 
-  /* Save slots modal */
+  /* ============================================================
+     VIP BADGE
+     ============================================================ */
+  .vip-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    line-height: 1;
+    vertical-align: middle;
+    position: relative;
+    overflow: hidden;
+    user-select: none;
+  }
+  .vip-badge::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      120deg,
+      transparent 0%,
+      transparent 35%,
+      rgba(255,255,255,0.5) 50%,
+      transparent 65%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shine 3s linear infinite;
+    pointer-events: none;
+  }
+  .vip-badge .vip-icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    z-index: 1;
+    position: relative;
+  }
+  .vip-badge .vip-text {
+    z-index: 1;
+    position: relative;
+    text-shadow: 0 1px 0 rgba(0,0,0,0.25);
+  }
+  @keyframes shine {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* VIP TIER: GOLD */
+  .vip-badge.gold {
+    background: linear-gradient(135deg, #f4a020 0%, #ffcb52 40%, #d97706 100%);
+    color: #3d2304;
+    box-shadow: 0 0 0 1px #ffcb52, 0 0 6px rgba(244, 160, 32, 0.4);
+  }
+  /* VIP TIER: DIAMOND */
+  .vip-badge.diamond {
+    background: linear-gradient(135deg, #5fc0d0 0%, #b8e6f0 40%, #2d8aa0 100%);
+    color: #0a2530;
+    box-shadow: 0 0 0 1px #b8e6f0, 0 0 8px rgba(95, 192, 208, 0.5);
+  }
+  /* VIP TIER: LEGEND */
+  .vip-badge.legend {
+    background: linear-gradient(135deg, #b91c8e 0%, #f472d6 30%, #7c2bcc 60%, #fbbf24 100%);
+    background-size: 200% 200%;
+    animation: legend-flow 4s ease infinite;
+    color: white;
+    box-shadow: 0 0 0 1px #f472d6, 0 0 12px rgba(247, 114, 214, 0.6);
+  }
+  @keyframes legend-flow {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  /* Büyük VIP rozeti (admin panelinde kullanıcı kartı) */
+  .vip-badge.large {
+    padding: 4px 12px;
+    font-size: 13px;
+    gap: 6px;
+  }
+  .vip-badge.large .vip-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* VIP banner — kullanıcı profilinin yanında */
+  .auth-btn .vip-badge {
+    margin-left: 4px;
+    padding: 1px 5px;
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+  .auth-btn .vip-badge .vip-icon {
+    width: 9px;
+    height: 9px;
+  }
+
+  /* Mobile auth button kısaltma — VIP rozeti varsa görünür kalmalı */
+  @media (max-width: 900px) {
+    .auth-btn .vip-badge {
+      padding: 1px 4px;
+      font-size: 8px;
+    }
+  }
+
+  /* VIP tag in leaderboard rows */
+  .leaderboard-vip {
+    display: inline-block;
+    margin-left: 6px;
+  }
+
+  /* Admin VIP yönetim modali */
+  .vip-tier-selector {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 12px 0;
+  }
+  .vip-tier-option {
+    padding: 16px 8px;
+    border: 2px solid var(--border);
+    background: var(--panel-2);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .vip-tier-option:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .vip-tier-option.selected {
+    border-color: var(--accent);
+    background: var(--panel);
+    box-shadow: 0 0 12px rgba(244,160,32,0.2);
+  }
+  .vip-tier-option .vtio-badge {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+  .vip-tier-option .vtio-desc {
+    font-size: 10px;
+    color: var(--ink-dim);
+    line-height: 1.4;
+  }
   .save-slot {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -2153,6 +2301,41 @@
           await deleteDoc(doc(db, 'saves', userUid, 'slots', slotId));
         } catch(e) { /* slot olmayabilir */ }
       }
+    },
+
+    // ============== VIP MANAGEMENT (Admin only) ==============
+    adminSetVip: async (userUid, tier, durationDays) => {
+      // tier: 'gold' | 'diamond' | 'legend' | null (kaldırmak için)
+      const userRef = doc(db, 'users', userUid);
+      const update = {};
+      if (tier === null || tier === undefined) {
+        // VIP'i kaldır
+        update.vipTier = null;
+        update.vipUntil = null;
+        update.vipGrantedAt = null;
+      } else {
+        update.vipTier = tier;
+        update.vipGrantedAt = serverTimestamp();
+        if (durationDays && durationDays > 0) {
+          const until = new Date();
+          until.setDate(until.getDate() + durationDays);
+          update.vipUntil = until.toISOString();
+        } else {
+          // Süresiz
+          update.vipUntil = null;
+        }
+      }
+      await setDoc(userRef, update, { merge: true });
+    },
+
+    // Kendi VIP durumunu yenile (auth state event'inde çağrılır)
+    refreshOwnProfile: async () => {
+      const user = auth.currentUser;
+      if (!user) return null;
+      const ref = doc(db, 'users', user.uid);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return null;
+      return snap.data();
     }
   };
 
@@ -4676,10 +4859,21 @@ function renderLeaderboardContent(rows) {
         ${rows.map((r, i) => {
           const isMe = r.uid === myUid;
           const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+          // VIP kontrolü
+          let userVipTier = null;
+          if (r.vipTier) {
+            if (r.vipUntil) {
+              const until = new Date(r.vipUntil);
+              if (until >= new Date()) userVipTier = r.vipTier;
+            } else {
+              userVipTier = r.vipTier;
+            }
+          }
+          const vipHtml = userVipTier ? `<span class="leaderboard-vip">${vipBadgeHTML(userVipTier)}</span>` : '';
           return `<tr style="${isMe ? 'background: rgba(244,160,32,0.1);' : ''}">
             <td style="font-weight: 700;">${medal} ${i + 1}</td>
             <td>
-              <div style="font-weight: 700; color: ${isMe ? 'var(--accent)' : 'var(--ink)'};">${r.displayName}${isMe ? ' (sen)' : ''}</div>
+              <div style="font-weight: 700; color: ${isMe ? 'var(--accent)' : 'var(--ink)'};">${r.displayName}${isMe ? ' (sen)' : ''}${vipHtml}</div>
             </td>
             <td style="color: var(--ink-dim);">${r.companyName}</td>
             <td class="num" style="${_leaderboardSort === 'bestCash' ? 'color: var(--green); font-weight: 700;' : ''}">${fmt(r.bestCash)}</td>
@@ -4800,10 +4994,23 @@ function renderAdminStats(users) {
           const lastSeenStr = u.lastSeen
             ? u.lastSeen.toLocaleDateString('tr-TR') + ' ' + u.lastSeen.toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'})
             : '—';
+          // VIP kontrolü
+          let userVipTier = null;
+          if (u.vipTier) {
+            if (u.vipUntil) {
+              const until = new Date(u.vipUntil);
+              if (until >= new Date()) userVipTier = u.vipTier;
+            } else {
+              userVipTier = u.vipTier;
+            }
+          }
+          const vipHtml = userVipTier ? ' ' + vipBadgeHTML(userVipTier) : '';
+          const vipDate = u.vipUntil ? new Date(u.vipUntil).toLocaleDateString('tr-TR') : (userVipTier ? 'süresiz' : '');
           return `<tr>
             <td>
-              <div style="font-weight: 700;">${u.displayName || 'Anonim'}${isAdmin ? ' 👑' : ''}</div>
+              <div style="font-weight: 700;">${u.displayName || 'Anonim'}${isAdmin ? ' 👑' : ''}${vipHtml}</div>
               <div style="font-size: 9px; color: var(--ink-dim);">${u.uid.slice(0, 12)}...</div>
+              ${userVipTier && vipDate ? `<div style="font-size: 9px; color: var(--accent);">VIP bitiş: ${vipDate}</div>` : ''}
             </td>
             <td style="font-size: 11px;">${u.email || '—'}</td>
             <td>${u.companyName || '—'}</td>
@@ -4812,7 +5019,8 @@ function renderAdminStats(users) {
             <td class="num">${u.bestDay || 1}</td>
             <td style="font-size: 10px;">${lastSeenStr}</td>
             <td>
-              <button class="btn small" onclick="adminViewUser('${u.uid}')">Kayıtlar</button>
+              <button class="btn small" onclick="adminViewUser('${u.uid}')">Kayıt</button>
+              <button class="btn small" style="background: linear-gradient(135deg, #f4a020, #ffcb52); color: #3d2304; border-color: #f4a020;" onclick="adminOpenVipModal('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}', '${userVipTier || ''}')">VIP</button>
               ${isAdmin ? '' : `<button class="btn small danger" onclick="adminConfirmDelete('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}')">Sil</button>`}
             </td>
           </tr>`;
@@ -4886,6 +5094,116 @@ async function doAdminDeleteUser(userUid) {
     renderAdmin();
   } catch (err) {
     toast('Silme hatası: ' + err.message, 'error');
+  }
+}
+
+// ============================================================
+// VIP YÖNETİMİ (Admin)
+// ============================================================
+
+let _vipModalState = { uid: null, name: '', currentTier: null, selectedTier: null, duration: 30 };
+
+function adminOpenVipModal(userUid, displayName, currentTier) {
+  _vipModalState = {
+    uid: userUid,
+    name: displayName,
+    currentTier: currentTier || null,
+    selectedTier: currentTier || null,
+    duration: 30
+  };
+  renderVipModal();
+}
+
+function renderVipModal() {
+  const s = _vipModalState;
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 540px;">
+      <h2>VIP YÖNETİMİ</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 4px;">
+        Kullanıcı: <strong style="color: var(--ink);">${s.name}</strong>
+      </p>
+      <p style="font-size: 11px; color: var(--ink-dim); margin-bottom: 16px;">
+        ${s.currentTier
+          ? `Mevcut durum: ${vipBadgeHTML(s.currentTier)}`
+          : 'Mevcut durum: VIP değil'}
+      </p>
+
+      <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;">Tier Seç</div>
+      <div class="vip-tier-selector">
+        <div class="vip-tier-option ${s.selectedTier === 'gold' ? 'selected' : ''}" onclick="vipSelectTier('gold')">
+          <div class="vtio-badge">${vipBadgeHTML('gold', 'large')}</div>
+          <div class="vtio-desc">Temel VIP<br><strong>₺49/ay</strong></div>
+        </div>
+        <div class="vip-tier-option ${s.selectedTier === 'diamond' ? 'selected' : ''}" onclick="vipSelectTier('diamond')">
+          <div class="vtio-badge">${vipBadgeHTML('diamond', 'large')}</div>
+          <div class="vtio-desc">Premium VIP<br><strong>₺99/ay</strong></div>
+        </div>
+        <div class="vip-tier-option ${s.selectedTier === 'legend' ? 'selected' : ''}" onclick="vipSelectTier('legend')">
+          <div class="vtio-badge">${vipBadgeHTML('legend', 'large')}</div>
+          <div class="vtio-desc">Efsane Seviye<br><strong>₺199/ay</strong></div>
+        </div>
+      </div>
+
+      <div style="margin-top: 16px;">
+        <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;">Süre (Gün)</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;">
+          <button class="btn small ${s.duration === 7 ? 'primary' : ''}" onclick="vipSetDuration(7)">7 Gün</button>
+          <button class="btn small ${s.duration === 30 ? 'primary' : ''}" onclick="vipSetDuration(30)">30 Gün</button>
+          <button class="btn small ${s.duration === 90 ? 'primary' : ''}" onclick="vipSetDuration(90)">90 Gün</button>
+          <button class="btn small ${s.duration === 365 ? 'primary' : ''}" onclick="vipSetDuration(365)">1 Yıl</button>
+          <button class="btn small ${s.duration === 0 ? 'primary' : ''}" onclick="vipSetDuration(0)">Süresiz</button>
+        </div>
+        <input type="number" class="text-input" id="vip-custom-duration" value="${s.duration}" min="0" placeholder="Özel gün sayısı" oninput="_vipModalState.duration = parseInt(this.value) || 0" style="max-width: 200px;">
+        <div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">
+          ${s.duration === 0 ? 'Süresiz VIP (manuel olarak kaldırılana kadar)' : `Bitiş: ${new Date(Date.now() + s.duration * 86400000).toLocaleDateString('tr-TR')}`}
+        </div>
+      </div>
+
+      <div class="actions" style="margin-top: 20px;">
+        <button class="btn primary" onclick="vipConfirmApply()" ${!s.selectedTier ? 'disabled' : ''}>
+          ${s.currentTier ? 'GÜNCELLE' : 'VIP YAP'}
+        </button>
+        ${s.currentTier ? `<button class="btn danger" onclick="vipConfirmRemove()">VIP'İ KALDIR</button>` : ''}
+        <button class="btn" onclick="closeModal()">İptal</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function vipSelectTier(tier) {
+  _vipModalState.selectedTier = tier;
+  renderVipModal();
+}
+
+function vipSetDuration(days) {
+  _vipModalState.duration = days;
+  renderVipModal();
+}
+
+async function vipConfirmApply() {
+  const s = _vipModalState;
+  if (!s.selectedTier) { toast('Tier seç', 'error'); return; }
+  try {
+    await window.fbAuth.adminSetVip(s.uid, s.selectedTier, s.duration);
+    toast(`✨ ${s.name} → ${VIP_TIERS[s.selectedTier].label} verildi`, 'success');
+    closeModal();
+    renderAdmin();
+  } catch (err) {
+    toast('Hata: ' + err.message, 'error');
+  }
+}
+
+async function vipConfirmRemove() {
+  const s = _vipModalState;
+  if (!confirm(`${s.name} kullanıcısının VIP statüsü kaldırılacak. Emin misin?`)) return;
+  try {
+    await window.fbAuth.adminSetVip(s.uid, null, 0);
+    toast(`${s.name} → VIP kaldırıldı`, 'info');
+    closeModal();
+    renderAdmin();
+  } catch (err) {
+    toast('Hata: ' + err.message, 'error');
   }
 }
 
@@ -5603,6 +5921,65 @@ function showCloudIndicator(message, type) {
   setTimeout(() => ind.classList.remove('show'), 2500);
 }
 
+// ============================================================
+// VIP BADGE HELPERS
+// ============================================================
+
+const VIP_TIERS = {
+  gold: {
+    name: 'GOLD',
+    label: 'Gold VIP',
+    icon: `<svg class="vip-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L14.39 8.27L21 9.27L16 14.14L17.45 21L12 17.77L6.55 21L8 14.14L3 9.27L9.61 8.27L12 2Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/>
+    </svg>`,
+    desc: 'Temel VIP statüsü'
+  },
+  diamond: {
+    name: 'DIAMOND',
+    label: 'Diamond VIP',
+    icon: `<svg class="vip-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M6 3H18L22 9L12 22L2 9L6 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/>
+      <path d="M2 9H22M12 22L6 3M12 22L18 3M12 22L9 9M12 22L15 9" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"/>
+    </svg>`,
+    desc: 'Premium statü'
+  },
+  legend: {
+    name: 'LEGEND',
+    label: 'Legend VIP',
+    icon: `<svg class="vip-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 17L6.5 9L10 13L12 5L14 13L17.5 9L21 17L19 20H5L3 17Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/>
+      <circle cx="6.5" cy="8" r="1" fill="currentColor"/>
+      <circle cx="12" cy="4" r="1" fill="currentColor"/>
+      <circle cx="17.5" cy="8" r="1" fill="currentColor"/>
+    </svg>`,
+    desc: 'En üst statü — efsane'
+  }
+};
+
+// VIP rozeti HTML üretici. tier: 'gold' | 'diamond' | 'legend' | null
+function vipBadgeHTML(tier, size) {
+  if (!tier || !VIP_TIERS[tier]) return '';
+  const t = VIP_TIERS[tier];
+  const cls = size === 'large' ? 'vip-badge large ' + tier : 'vip-badge ' + tier;
+  return `<span class="${cls}" title="${t.label}">${t.icon}<span class="vip-text">${t.name}</span></span>`;
+}
+
+// State'e VIP bilgisi yükle
+function isVip() {
+  if (!state.user) return false;
+  const tier = state.user.vipTier;
+  if (!tier) return false;
+  // VIP süresi var mı kontrol et
+  if (state.user.vipUntil) {
+    const until = new Date(state.user.vipUntil);
+    if (until < new Date()) return false;
+  }
+  return true;
+}
+function currentVipTier() {
+  return isVip() ? state.user.vipTier : null;
+}
+
 function renderAuthButton() {
   const btn = $('auth-btn');
   const avatar = $('auth-avatar');
@@ -5614,7 +5991,9 @@ function renderAuthButton() {
     } else {
       avatar.textContent = (state.user.name || 'U').charAt(0).toUpperCase();
     }
-    name.textContent = state.user.name.split(' ')[0];
+    const tier = currentVipTier();
+    const vipHtml = tier ? vipBadgeHTML(tier) : '';
+    name.innerHTML = state.user.name.split(' ')[0] + vipHtml;
   } else {
     btn.classList.remove('signed-in');
     avatar.innerHTML = '👤';
@@ -5815,10 +6194,22 @@ async function doCloudLoad(slotId) {
 }
 
 // Auth state değişimi
-window.addEventListener('fb:auth-changed', (e) => {
+window.addEventListener('fb:auth-changed', async (e) => {
   state.user = e.detail;
   renderAuthButton();
   if (e.detail) {
+    // VIP durumunu yükle
+    try {
+      const profile = await window.fbAuth.refreshOwnProfile();
+      if (profile) {
+        state.user.vipTier = profile.vipTier || null;
+        state.user.vipUntil = profile.vipUntil || null;
+        renderAuthButton();
+      }
+    } catch (err) {
+      console.warn('Profil yüklenemedi:', err);
+    }
+
     // İlk açılışta giriş yapılmışsa, kayıtları yükle ekranını göster
     if (isFirstLoad) {
       isFirstLoad = false;

@@ -1857,6 +1857,14 @@
         <span>📁 Arşiv</span>
       </div>
 
+      <div class="nav-section">Topluluk</div>
+      <div class="nav-item" data-view="leaderboard" onclick="setView('leaderboard')">
+        <span>🏆 Sıralama</span>
+      </div>
+      <div class="nav-item" data-view="admin" onclick="setView('admin')" id="nav-admin" style="display: none;">
+        <span style="color: var(--red);">⚡ Admin Panel</span>
+      </div>
+
       <div class="level-bar">
         <div class="lvl-row"><span>SEVİYE</span><span class="lvl-num" id="side-lvl">1</span></div>
         <div class="lvl-row"><span id="side-xp">0 / 100 XP</span><span id="side-title">Çırak</span></div>
@@ -1929,7 +1937,8 @@
     signOut, onAuthStateChanged
   } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
   import {
-    getFirestore, doc, setDoc, getDoc, serverTimestamp
+    getFirestore, doc, setDoc, getDoc, serverTimestamp,
+    collection, query, orderBy, limit, getDocs, deleteDoc, where
   } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -1940,6 +1949,8 @@
     messagingSenderId: "929683517708",
     appId: "1:929683517708:web:815e7be2f7235df0c0d929"
   };
+
+  const ADMIN_UID = "rZ64Dl6jzqhjO6QBS4c1UF1gbL92";
 
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
@@ -1972,6 +1983,9 @@
 
   // Global wrapper
   window.fbAuth = {
+    isAdmin: () => auth.currentUser && auth.currentUser.uid === ADMIN_UID,
+    getAdminUid: () => ADMIN_UID,
+
     signIn: async () => {
       try {
         if (isMobile) {
@@ -1997,6 +2011,36 @@
         cash: data.cash || 0,
         level: data.level || 1
       });
+
+      // Kullanıcı profilini de güncelle (leaderboard için)
+      const user = auth.currentUser;
+      if (user) {
+        const userRef = doc(db, 'users', uid);
+        const profileData = {
+          uid: uid,
+          displayName: user.displayName || user.email,
+          email: user.email,
+          photoURL: user.photoURL || null,
+          lastSeen: serverTimestamp(),
+          // En iyi skoru güncelle (yalnızca daha iyiyse)
+          bestCash: data.cash || 0,
+          bestLevel: data.level || 1,
+          bestDay: data.day || 1,
+          companyName: data.company?.name || 'Yapı Ticaret',
+          contractsCompleted: data.contractsCompleted || 0,
+          contractsFailed: data.contractsFailed || 0
+        };
+        // Mevcut profil var mı kontrol et, eğer best'i geçmezse güncelleme
+        const existingSnap = await getDoc(userRef);
+        if (existingSnap.exists()) {
+          const ex = existingSnap.data();
+          profileData.bestCash = Math.max(ex.bestCash || 0, data.cash || 0);
+          profileData.bestLevel = Math.max(ex.bestLevel || 1, data.level || 1);
+          profileData.bestDay = Math.max(ex.bestDay || 1, data.day || 1);
+          profileData.contractsCompleted = Math.max(ex.contractsCompleted || 0, data.contractsCompleted || 0);
+        }
+        await setDoc(userRef, profileData, { merge: true });
+      }
     },
     loadGame: async (uid, slotId) => {
       const ref = doc(db, 'saves', uid, 'slots', slotId);
@@ -2026,6 +2070,89 @@
         }
       }
       return result;
+    },
+
+    // ============== LEADERBOARD ==============
+    getLeaderboard: async (sortBy, max) => {
+      sortBy = sortBy || 'bestCash';
+      max = max || 50;
+      const q = query(
+        collection(db, 'users'),
+        orderBy(sortBy, 'desc'),
+        limit(max)
+      );
+      const snap = await getDocs(q);
+      const rows = [];
+      snap.forEach(d => {
+        const data = d.data();
+        rows.push({
+          uid: d.id,
+          displayName: data.displayName || 'Anonim',
+          companyName: data.companyName || '—',
+          photoURL: data.photoURL,
+          bestCash: data.bestCash || 0,
+          bestLevel: data.bestLevel || 1,
+          bestDay: data.bestDay || 1,
+          contractsCompleted: data.contractsCompleted || 0,
+          email: data.email,
+          lastSeen: data.lastSeen?.toDate?.()
+        });
+      });
+      return rows;
+    },
+
+    // ============== ADMIN ==============
+    adminListAllUsers: async () => {
+      // Admin için tüm kullanıcıları listele (lastSeen'e göre sırala)
+      const q = query(collection(db, 'users'), orderBy('lastSeen', 'desc'), limit(500));
+      const snap = await getDocs(q);
+      const rows = [];
+      snap.forEach(d => {
+        const data = d.data();
+        rows.push({
+          uid: d.id,
+          ...data,
+          lastSeen: data.lastSeen?.toDate?.()
+        });
+      });
+      return rows;
+    },
+
+    adminListUserSaves: async (userUid) => {
+      const slots = ['slot1', 'slot2', 'slot3'];
+      const result = [];
+      for (const slotId of slots) {
+        const ref = doc(db, 'saves', userUid, 'slots', slotId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const obj = snap.data();
+          result.push({
+            slotId,
+            companyName: obj.companyName,
+            day: obj.day,
+            cash: obj.cash,
+            level: obj.level,
+            updatedAt: obj.updatedAt?.toDate?.()
+          });
+        }
+      }
+      return result;
+    },
+
+    adminDeleteUserSave: async (userUid, slotId) => {
+      const ref = doc(db, 'saves', userUid, 'slots', slotId);
+      await deleteDoc(ref);
+    },
+
+    adminDeleteUser: async (userUid) => {
+      // Profili sil (kayıtlar da otomatik kaybolur — security rules engellerse manuel)
+      await deleteDoc(doc(db, 'users', userUid));
+      // Slotları da sil
+      for (const slotId of ['slot1', 'slot2', 'slot3']) {
+        try {
+          await deleteDoc(doc(db, 'saves', userUid, 'slots', slotId));
+        } catch(e) { /* slot olmayabilir */ }
+      }
     }
   };
 
@@ -2736,6 +2863,14 @@ function render() {
   else if (state.view === 'visits') renderVisits();
   else if (state.view === 'bank') renderBank();
   else if (state.view === 'archive') renderArchive();
+  else if (state.view === 'leaderboard') renderLeaderboard();
+  else if (state.view === 'admin') renderAdmin();
+
+  // Admin sekmesi sadece admin için
+  const adminNav = $('nav-admin');
+  if (adminNav) {
+    adminNav.style.display = (window.fbAuth && window.fbAuth.isAdmin && window.fbAuth.isAdmin()) ? 'flex' : 'none';
+  }
 }
 
 // ----- RIGHT PANEL -----
@@ -4438,6 +4573,320 @@ function renderArchive() {
         </div>`;
       }).join('')}
     </div>`;
+}
+
+// ============================================================
+// LEADERBOARD
+// ============================================================
+
+let _leaderboardCache = null;
+let _leaderboardSort = 'bestCash';
+
+function renderLeaderboard() {
+  const c = $('center');
+
+  if (!state.user) {
+    c.innerHTML = `<h2>🏆 SIRALAMA</h2>
+      <div class="subtitle">Bütün oyuncular arasındaki yerini gör</div>
+      <div class="empty">Sıralamayı görmek için Google ile giriş yapmalısın.<br><br>
+        <button class="btn primary" onclick="doSignIn()">Giriş Yap</button>
+      </div>`;
+    return;
+  }
+
+  const sortOptions = {
+    bestCash: { label: 'Kasa', icon: '💰' },
+    bestLevel: { label: 'Seviye', icon: '⭐' },
+    bestDay: { label: 'Toplam Gün', icon: '📅' },
+    contractsCompleted: { label: 'Sözleşme', icon: '📋' }
+  };
+
+  c.innerHTML = `<h2>🏆 SIRALAMA</h2>
+    <div class="subtitle">Tüm oyuncuların en iyi skorları · Top 50</div>
+
+    <div class="filter-chips" style="margin-bottom: 18px;">
+      ${Object.entries(sortOptions).map(([k, v]) => `
+        <div class="filter-chip ${_leaderboardSort === k ? 'active' : ''}" onclick="changeLeaderboardSort('${k}')">
+          ${v.icon} ${v.label}
+        </div>
+      `).join('')}
+    </div>
+
+    <div id="leaderboard-content">
+      <div class="empty">⏳ Sıralama yükleniyor...</div>
+    </div>`;
+
+  loadLeaderboard();
+}
+
+async function loadLeaderboard() {
+  try {
+    const rows = await window.fbAuth.getLeaderboard(_leaderboardSort, 50);
+    _leaderboardCache = rows;
+    renderLeaderboardContent(rows);
+  } catch (err) {
+    console.error(err);
+    const lc = $('leaderboard-content');
+    if (lc) lc.innerHTML = `<div class="empty" style="color: var(--red);">Yükleme hatası: ${err.message}</div>`;
+  }
+}
+
+function changeLeaderboardSort(sortBy) {
+  _leaderboardSort = sortBy;
+  renderLeaderboard();
+}
+
+function renderLeaderboardContent(rows) {
+  const c = $('leaderboard-content');
+  if (!rows || rows.length === 0) {
+    c.innerHTML = '<div class="empty">Henüz sıralamada oyuncu yok. İlk sen ol!</div>';
+    return;
+  }
+
+  const myUid = state.user?.uid;
+  const myRank = rows.findIndex(r => r.uid === myUid) + 1;
+
+  const sortLabels = {
+    bestCash: 'En Yüksek Kasa',
+    bestLevel: 'En Yüksek Seviye',
+    bestDay: 'En Uzun Oyun',
+    contractsCompleted: 'En Çok Sözleşme'
+  };
+  const sortLabel = sortLabels[_leaderboardSort];
+
+  c.innerHTML = `
+    ${myRank > 0 ? `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel); border-left: 3px solid var(--accent); font-size: 12px;">
+      🎯 <strong>Senin sıran:</strong> #${myRank} (${sortLabel})
+    </div>` : ''}
+
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width: 50px;">Sıra</th>
+          <th>Oyuncu</th>
+          <th>Şirket</th>
+          <th class="num">Kasa</th>
+          <th class="num">Sv</th>
+          <th class="num">Gün</th>
+          <th class="num">Söz.</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((r, i) => {
+          const isMe = r.uid === myUid;
+          const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+          return `<tr style="${isMe ? 'background: rgba(244,160,32,0.1);' : ''}">
+            <td style="font-weight: 700;">${medal} ${i + 1}</td>
+            <td>
+              <div style="font-weight: 700; color: ${isMe ? 'var(--accent)' : 'var(--ink)'};">${r.displayName}${isMe ? ' (sen)' : ''}</div>
+            </td>
+            <td style="color: var(--ink-dim);">${r.companyName}</td>
+            <td class="num" style="${_leaderboardSort === 'bestCash' ? 'color: var(--green); font-weight: 700;' : ''}">${fmt(r.bestCash)}</td>
+            <td class="num" style="${_leaderboardSort === 'bestLevel' ? 'color: var(--accent); font-weight: 700;' : ''}">${r.bestLevel}</td>
+            <td class="num" style="${_leaderboardSort === 'bestDay' ? 'color: var(--blue); font-weight: 700;' : ''}">${r.bestDay}</td>
+            <td class="num" style="${_leaderboardSort === 'contractsCompleted' ? 'color: var(--purple); font-weight: 700;' : ''}">${r.contractsCompleted}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+
+    <div style="margin-top: 14px; font-size: 10px; color: var(--ink-dim); text-align: center;">
+      Sıralama, kullanıcıların bulutta kayıtlı en iyi skorları üzerinden hesaplanır.<br>
+      Daha iyi bir skor için oyununu sık sık bulutta kaydet 💾
+    </div>`;
+}
+
+// ============================================================
+// ADMIN PANEL (only ADMIN_UID)
+// ============================================================
+
+let _adminUsersCache = null;
+
+function renderAdmin() {
+  const c = $('center');
+  if (!state.user || !window.fbAuth.isAdmin()) {
+    c.innerHTML = `<h2>⚡ ADMİN PANELİ</h2>
+      <div class="empty" style="color: var(--red);">
+        🔒 Bu sayfaya erişim yetkin yok.
+      </div>`;
+    return;
+  }
+
+  c.innerHTML = `<h2 style="color: var(--red);">⚡ ADMİN PANELİ</h2>
+    <div class="subtitle">Sadece admin tarafından görülür · Tüm kullanıcılar ve istatistikler</div>
+
+    <div id="admin-stats">
+      <div class="empty">⏳ Veriler yükleniyor...</div>
+    </div>`;
+
+  loadAdminData();
+}
+
+async function loadAdminData() {
+  try {
+    const users = await window.fbAuth.adminListAllUsers();
+    _adminUsersCache = users;
+    renderAdminStats(users);
+  } catch (err) {
+    console.error(err);
+    const c = $('admin-stats');
+    if (c) c.innerHTML = `<div class="empty" style="color: var(--red);">Yükleme hatası: ${err.message}</div>`;
+  }
+}
+
+function renderAdminStats(users) {
+  const c = $('admin-stats');
+  if (!users || users.length === 0) {
+    c.innerHTML = '<div class="empty">Henüz kullanıcı yok.</div>';
+    return;
+  }
+
+  const totalUsers = users.length;
+  const totalCash = users.reduce((s, u) => s + (u.bestCash || 0), 0);
+  const avgCash = totalCash / totalUsers;
+  const maxLevel = Math.max(...users.map(u => u.bestLevel || 1));
+  const totalContracts = users.reduce((s, u) => s + (u.contractsCompleted || 0), 0);
+
+  // Aktif (son 7 gün) — lastSeen
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const activeUsers = users.filter(u => u.lastSeen && u.lastSeen >= sevenDaysAgo).length;
+
+  c.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-tile">
+        <div class="stat-label">Toplam Oyuncu</div>
+        <div class="stat-val" style="color: var(--accent);">${totalUsers}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Son 7 Gün Aktif</div>
+        <div class="stat-val" style="color: var(--green);">${activeUsers}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">En Yüksek Sv</div>
+        <div class="stat-val" style="color: var(--purple);">${maxLevel}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Toplam Sözleşme</div>
+        <div class="stat-val">${totalContracts}</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--red); font-size: 11px; line-height: 1.5;">
+      <strong style="color: var(--red);">⚠️ DİKKAT:</strong> Sil butonları kalıcıdır, geri alınamaz. Sadece spam/sahte hesapları sil.
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">TÜM KULLANICILAR (${users.length})</h3>
+
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Oyuncu</th>
+          <th>E-posta</th>
+          <th>Şirket</th>
+          <th class="num">Kasa</th>
+          <th class="num">Sv</th>
+          <th class="num">Gün</th>
+          <th>Son Görülme</th>
+          <th>İşlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${users.map(u => {
+          const isAdmin = u.uid === window.fbAuth.getAdminUid();
+          const lastSeenStr = u.lastSeen
+            ? u.lastSeen.toLocaleDateString('tr-TR') + ' ' + u.lastSeen.toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'})
+            : '—';
+          return `<tr>
+            <td>
+              <div style="font-weight: 700;">${u.displayName || 'Anonim'}${isAdmin ? ' 👑' : ''}</div>
+              <div style="font-size: 9px; color: var(--ink-dim);">${u.uid.slice(0, 12)}...</div>
+            </td>
+            <td style="font-size: 11px;">${u.email || '—'}</td>
+            <td>${u.companyName || '—'}</td>
+            <td class="num">${fmt(u.bestCash || 0)}</td>
+            <td class="num">${u.bestLevel || 1}</td>
+            <td class="num">${u.bestDay || 1}</td>
+            <td style="font-size: 10px;">${lastSeenStr}</td>
+            <td>
+              <button class="btn small" onclick="adminViewUser('${u.uid}')">Kayıtlar</button>
+              ${isAdmin ? '' : `<button class="btn small danger" onclick="adminConfirmDelete('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}')">Sil</button>`}
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>`;
+}
+
+async function adminViewUser(userUid) {
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 600px;">
+      <h2>KULLANICI KAYITLARI</h2>
+      <p style="font-size: 11px; color: var(--ink-dim); margin-bottom: 14px;">UID: ${userUid}</p>
+      <div id="admin-user-saves">
+        <div class="empty">⏳ Yükleniyor...</div>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="closeModal()">Kapat</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  try {
+    const saves = await window.fbAuth.adminListUserSaves(userUid);
+    const div = $('admin-user-saves');
+    if (saves.length === 0) {
+      div.innerHTML = '<div class="empty">Bu kullanıcının kayıtlı oyunu yok.</div>';
+    } else {
+      div.innerHTML = saves.map(s => {
+        const date = s.updatedAt ? s.updatedAt.toLocaleString('tr-TR') : '';
+        return `<div class="save-slot">
+          <div class="slot-info">
+            <div class="slot-title">${s.companyName} <span style="color: var(--ink-dim); font-weight: normal; font-size: 11px;">— ${s.slotId}</span></div>
+            <div class="slot-meta">Gün ${s.day} · Sv ${s.level} · ${fmt(s.cash)} · ${date}</div>
+          </div>
+          <div class="slot-actions">
+            <button class="btn small danger" onclick="adminDeleteSave('${userUid}', '${s.slotId}')">SİL</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } catch (err) {
+    const div = $('admin-user-saves');
+    if (div) div.innerHTML = `<div class="empty" style="color: var(--red);">Hata: ${err.message}</div>`;
+  }
+}
+
+async function adminDeleteSave(userUid, slotId) {
+  if (!confirm(`Bu kayıt silinecek (${slotId}). Emin misin?`)) return;
+  try {
+    await window.fbAuth.adminDeleteUserSave(userUid, slotId);
+    toast('Kayıt silindi.', 'success');
+    closeModal();
+    if (state.view === 'admin') renderAdmin();
+  } catch (err) {
+    toast('Silme hatası: ' + err.message, 'error');
+  }
+}
+
+function adminConfirmDelete(userUid, displayName) {
+  if (!confirm(`"${displayName}" adlı kullanıcının TÜM verileri silinecek (profil + 3 slot). Bu işlem geri alınamaz. Devam edelim mi?`)) return;
+  if (!confirm('Son uyarı: Gerçekten silinsin mi?')) return;
+  doAdminDeleteUser(userUid);
+}
+
+async function doAdminDeleteUser(userUid) {
+  try {
+    await window.fbAuth.adminDeleteUser(userUid);
+    toast('Kullanıcı silindi.', 'success');
+    renderAdmin();
+  } catch (err) {
+    toast('Silme hatası: ' + err.message, 'error');
+  }
 }
 
 // ============================================================

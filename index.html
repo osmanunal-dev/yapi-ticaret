@@ -391,8 +391,418 @@
   .cloud-indicator.error { border-left-color: var(--red); color: var(--red); }
 
   /* ============================================================
-     PROFILE PAGE
+     CHANGELOG / GÜNCELLEMELER PAGE
      ============================================================ */
+  .changelog-intro {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 18px 22px;
+    margin-bottom: 20px;
+  }
+  .changelog-intro h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 2px;
+    font-size: 16px;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .changelog-intro p {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--ink-dim);
+  }
+
+  .changelog-timeline {
+    position: relative;
+    padding-left: 28px;
+  }
+  .changelog-timeline::before {
+    content: '';
+    position: absolute;
+    left: 9px;
+    top: 12px;
+    bottom: 12px;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .changelog-entry {
+    position: relative;
+    margin-bottom: 24px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px 20px;
+  }
+  .changelog-entry::before {
+    content: '';
+    position: absolute;
+    left: -24px;
+    top: 20px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    border: 2px solid var(--border);
+  }
+  .changelog-entry.latest::before {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgba(244, 160, 32, 0.6);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { box-shadow: 0 0 12px rgba(244, 160, 32, 0.6); }
+    50% { box-shadow: 0 0 20px rgba(244, 160, 32, 0.9); }
+  }
+  .changelog-entry.major {
+    border-left: 3px solid var(--accent);
+  }
+  .changelog-entry .ce-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .changelog-entry .ce-title {
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 2px;
+    font-size: 16px;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .changelog-entry .ce-version {
+    background: var(--panel-2);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .changelog-entry.latest .ce-version {
+    background: var(--accent);
+    color: #1a1610;
+  }
+  .changelog-entry .ce-new {
+    background: var(--red);
+    color: #fff;
+    padding: 2px 7px;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    font-family: 'Bebas Neue', sans-serif;
+    animation: pulse-new 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-new {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .changelog-entry .ce-date {
+    font-size: 10px;
+    color: var(--ink-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .changelog-entry ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .changelog-entry li {
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--ink);
+    padding-left: 18px;
+    position: relative;
+  }
+  .changelog-entry li::before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+  }
+  .changelog-entry li strong {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .changelog-entry .ce-category {
+    display: inline-block;
+    background: var(--panel-2);
+    color: var(--ink-dim);
+    padding: 1px 6px;
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-right: 6px;
+    border-radius: 2px;
+  }
+  .changelog-entry .ce-category.feature { color: var(--green); }
+  .changelog-entry .ce-category.fix { color: var(--accent); }
+  .changelog-entry .ce-category.major { color: var(--purple); }
+
+  /* Update badge on nav item */
+  .nav-item .update-badge {
+    background: var(--red);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: auto;
+    animation: pulse-new 1.5s ease-in-out infinite;
+  }
+  .receipt-modal {
+    background: #f5f1e8;
+    color: #2a2520;
+    border: 2px solid #1a1610;
+    max-width: 560px;
+    padding: 0;
+    font-family: 'JetBrains Mono', monospace;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    position: relative;
+    overflow: hidden;
+  }
+  /* Üst banner */
+  .receipt-header {
+    background: #1a1610;
+    color: #f4a020;
+    padding: 18px 24px;
+    text-align: center;
+    border-bottom: 3px double #1a1610;
+  }
+  .receipt-header .r-company {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 4px;
+    margin-bottom: 4px;
+  }
+  .receipt-header .r-tagline {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #d4d0c0;
+  }
+  /* Makbuz başlığı */
+  .receipt-title-bar {
+    background: #ffffff;
+    padding: 16px 24px;
+    border-bottom: 1px solid #d4cdb8;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .receipt-title-bar .r-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 24px;
+    letter-spacing: 3px;
+    color: #1a1610;
+  }
+  .receipt-title-bar .r-number {
+    text-align: right;
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  .receipt-title-bar .r-number strong {
+    color: #1a1610;
+    font-size: 11px;
+  }
+  /* Müşteri ve fatura bilgileri */
+  .receipt-info {
+    padding: 14px 24px;
+    background: #fbf8f0;
+    border-bottom: 1px dashed #c9c0a8;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    font-size: 11px;
+  }
+  .receipt-info .ri-section .ri-label {
+    font-size: 9px;
+    color: #7c7468;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
+  }
+  .receipt-info .ri-section .ri-val {
+    font-weight: 700;
+    line-height: 1.5;
+    color: #1a1610;
+  }
+  /* Kalem tablosu */
+  .receipt-items {
+    padding: 0 24px;
+    background: #ffffff;
+  }
+  .receipt-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    margin-top: 14px;
+  }
+  .receipt-table th {
+    background: #1a1610;
+    color: #f5f1e8;
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .receipt-table th.num { text-align: right; }
+  .receipt-table td {
+    padding: 8px 10px;
+    border-bottom: 1px dashed #d4cdb8;
+    color: #2a2520;
+  }
+  .receipt-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .receipt-table tr:last-child td { border-bottom: none; }
+  .receipt-table .r-product { font-weight: 700; }
+  .receipt-table .r-shipping td {
+    background: #f5f1e8;
+    font-style: italic;
+    color: #5a5048;
+  }
+  /* Toplamlar */
+  .receipt-totals {
+    background: #ffffff;
+    padding: 14px 24px 18px;
+    border-top: 1px solid #1a1610;
+  }
+  .receipt-totals .rt-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 11px;
+  }
+  .receipt-totals .rt-row.subtotal { color: #5a5048; }
+  .receipt-totals .rt-row.vat { color: #5a5048; }
+  .receipt-totals .rt-row.grand {
+    border-top: 2px solid #1a1610;
+    border-bottom: 4px double #1a1610;
+    padding: 10px 0;
+    margin-top: 8px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: #1a1610;
+  }
+  .receipt-totals .rt-row.profit {
+    margin-top: 8px;
+    color: #2d7a2d;
+    font-weight: 700;
+    font-size: 10px;
+  }
+  /* Damga */
+  .receipt-stamp {
+    position: absolute;
+    top: 200px;
+    right: -50px;
+    transform: rotate(-18deg);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 64px;
+    letter-spacing: 8px;
+    color: rgba(45, 122, 45, 0.25);
+    border: 6px solid rgba(45, 122, 45, 0.25);
+    padding: 12px 30px;
+    pointer-events: none;
+    user-select: none;
+    z-index: 1;
+  }
+  /* Footer */
+  .receipt-footer {
+    background: #1a1610;
+    color: #d4d0c0;
+    padding: 14px 24px;
+    text-align: center;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .receipt-footer .rf-thanks {
+    color: #f4a020;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 14px;
+    letter-spacing: 3px;
+    margin-bottom: 4px;
+  }
+  /* Aksiyonlar */
+  .receipt-actions {
+    padding: 14px 24px;
+    background: #ebe5d5;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    border-top: 1px solid #c9c0a8;
+  }
+  .receipt-actions button {
+    background: #1a1610;
+    color: #f4a020;
+    border: none;
+    padding: 10px 20px;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 2px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .receipt-actions button:hover {
+    background: #2a2520;
+    transform: translateY(-1px);
+  }
+  .receipt-actions button.primary {
+    background: #f4a020;
+    color: #1a1610;
+  }
+  .receipt-actions button.primary:hover {
+    background: #ffb733;
+  }
+  /* Print (yazdırma) modunda makbuzu tek başına gösterme */
+  @media print {
+    body * { visibility: hidden; }
+    .receipt-modal, .receipt-modal * { visibility: visible; }
+    .receipt-modal {
+      position: absolute;
+      left: 0; top: 0;
+      box-shadow: none;
+      border: 2px solid #1a1610;
+      width: 100%;
+      max-width: 700px;
+    }
+    .receipt-actions { display: none; }
+    .modal-bg {
+      position: static;
+      background: white;
+    }
+  }
+  /* Mobil */
+  @media (max-width: 600px) {
+    .receipt-info { grid-template-columns: 1fr; gap: 10px; }
+    .receipt-header .r-company { font-size: 18px; letter-spacing: 2px; }
+    .receipt-title-bar { padding: 12px 16px; }
+    .receipt-title-bar .r-title { font-size: 18px; }
+    .receipt-info, .receipt-items, .receipt-totals { padding-left: 16px; padding-right: 16px; }
+    .receipt-table { font-size: 10px; }
+    .receipt-table th, .receipt-table td { padding: 6px 5px; }
+    .receipt-stamp {
+      top: 180px;
+      right: -30px;
+      font-size: 44px;
+      padding: 8px 20px;
+    }
+    .receipt-actions { padding: 12px 16px; }
+  }
   .profile-header {
     display: grid;
     grid-template-columns: auto 1fr;
@@ -2171,6 +2581,10 @@
       <div class="nav-item" data-view="leaderboard" onclick="setView('leaderboard')">
         <span>🏆 Sıralama</span>
       </div>
+      <div class="nav-item" data-view="changelog" onclick="setView('changelog')">
+        <span>📰 Güncellemeler</span>
+        <span class="update-badge" id="update-badge" style="display: none;">YENİ</span>
+      </div>
       <div class="nav-item" data-view="admin" onclick="setView('admin')" id="nav-admin" style="display: none;">
         <span style="color: var(--red);">⚡ Admin Panel</span>
       </div>
@@ -3227,12 +3641,25 @@ function render() {
   else if (state.view === 'archive') renderArchive();
   else if (state.view === 'profile') renderProfile();
   else if (state.view === 'leaderboard') renderLeaderboard();
+  else if (state.view === 'changelog') renderChangelog();
   else if (state.view === 'admin') renderAdmin();
 
   // Admin sekmesi sadece admin için
   const adminNav = $('nav-admin');
   if (adminNav) {
     adminNav.style.display = (window.fbAuth && window.fbAuth.isAdmin && window.fbAuth.isAdmin()) ? 'flex' : 'none';
+  }
+
+  // Update badge: kullanıcı son güncellemeyi görmediyse "YENİ" göster
+  const updateBadge = $('update-badge');
+  if (updateBadge) {
+    try {
+      const lastSeen = localStorage.getItem('yt_lastSeenChangelog');
+      const hasNewUpdate = !lastSeen || lastSeen !== CURRENT_VERSION;
+      updateBadge.style.display = hasNewUpdate ? 'inline-block' : 'none';
+    } catch (e) {
+      // localStorage erişilemezse görmezden gel
+    }
   }
 }
 
@@ -4145,6 +4572,15 @@ function renderContractsView() {
     </div>`;
 }
 
+// Makbuz numarası sayacı (oyun boyunca artar)
+function nextReceiptNumber() {
+  if (!state.receiptCounter) state.receiptCounter = 0;
+  state.receiptCounter++;
+  const date = new Date();
+  const ymd = date.getFullYear().toString() + (date.getMonth() + 1).toString().padStart(2, '0') + date.getDate().toString().padStart(2, '0');
+  return `TM-${ymd}-${state.receiptCounter.toString().padStart(4, '0')}`;
+}
+
 function collectPayment(ctId) {
   const idx = state.contracts.findIndex(c => c.id === ctId);
   if (idx < 0) return;
@@ -4160,12 +4596,141 @@ function collectPayment(ctId) {
   state.contractsCompleted++;
   state.reputation = Math.min(100, state.reputation + 2);
   ct.paid = true;
+  ct.receiptNo = nextReceiptNumber();
+  ct.collectedDay = state.day;
 
   state.archive.push({ ...ct, type: 'contract', status: 'completed', completedDay: state.day });
   state.contracts.splice(idx, 1);
 
   addXP(20 + Math.round(ct.total / 10000), 'sözleşme tamamlandı');
-  toast(`💰 ${cust.name}: ${fmt(ct.total)} tahsil edildi! +${Math.round(ct.total - ct.estimatedCost).toLocaleString('tr-TR')}₺ kâr`, 'success');
+
+  // Tahsilat makbuzunu göster
+  showReceiptModal(ct, cust);
+}
+
+function showReceiptModal(ct, cust) {
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const timeStr = today.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+  const materialsTotal = ct.materialsTotal || (ct.total - (ct.shippingCost || 0));
+  const shippingCost = ct.shippingCost || 0;
+  // KDV %20 (toplam içinden hesaplanır — Türkiye'de fiyatlar genelde KDV dahildir)
+  const subtotal = Math.round(ct.total / 1.20);
+  const vat = ct.total - subtotal;
+  const profit = ct.total - (ct.estimatedCost || 0);
+
+  // Şirket logosu (varsa)
+  const companyName = state.company?.name || 'YAPI TİCARET';
+  const companyLogo = state.company?.logo || '🏗';
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeReceipt()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-stamp">ÖDENDİ</div>
+
+      <div class="receipt-header">
+        <div class="r-company">${companyLogo} ${companyName}</div>
+        <div class="r-tagline">İnşaat Malzemeleri Toptan Ticaret</div>
+      </div>
+
+      <div class="receipt-title-bar">
+        <div class="r-title">TAHSİLAT MAKBUZU</div>
+        <div class="r-number">
+          <div>Belge No: <strong>${ct.receiptNo}</strong></div>
+          <div>Tarih: <strong>${dateStr}</strong></div>
+          <div>Saat: <strong>${timeStr}</strong></div>
+          <div>Oyun Günü: <strong>${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Müşteri Bilgileri</div>
+          <div class="ri-val">
+            ${cust.name}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">
+              ${ILCELER[cust.ilce].name} · ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası<br>
+              ihale@${cust.id}.com.tr
+            </span>
+          </div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">Ödeme Bilgileri</div>
+          <div class="ri-val">
+            Ödeme Türü: <strong>Banka Havalesi</strong><br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">
+              Sözleşme: ${ct.id.slice(-6).toUpperCase()}<br>
+              ${(ct.collectedDay - ct.startedDay)} günde tamamlandı
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr>
+              <th>Açıklama</th>
+              <th class="num">Miktar</th>
+              <th class="num">Birim Fiyat</th>
+              <th class="num">Tutar</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${ct.items.map((it, i) => {
+              const unit = ct.unitPrices[i] || 0;
+              const line = unit * it.qty;
+              return `<tr>
+                <td><span class="r-product">${PRODUCTS[it.productId].name}</span></td>
+                <td class="num">${it.qty} ${PRODUCTS[it.productId].unit}</td>
+                <td class="num">${fmt(unit)}</td>
+                <td class="num">${fmt(line)}</td>
+              </tr>`;
+            }).join('')}
+            ${shippingCost > 0 ? `<tr class="r-shipping">
+              <td colspan="3"><em>🚛 Nakliye Hizmeti${ct.shippingType ? ' (' + (VEHICLE_TYPES[ct.shippingType]?.name || ct.shippingType) + ')' : ''}</em></td>
+              <td class="num">${fmt(shippingCost)}</td>
+            </tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-totals">
+        <div class="rt-row subtotal">
+          <span>Ara Toplam (KDV Hariç)</span>
+          <span>${fmt(subtotal)}</span>
+        </div>
+        <div class="rt-row vat">
+          <span>KDV %20</span>
+          <span>${fmt(vat)}</span>
+        </div>
+        <div class="rt-row grand">
+          <span>GENEL TOPLAM</span>
+          <span>${fmt(ct.total)}</span>
+        </div>
+        <div class="rt-row profit">
+          <span>* Bu sözleşmedeki net kâr</span>
+          <span>${profit >= 0 ? '+' : ''}${fmt(profit)}</span>
+        </div>
+      </div>
+
+      <div class="receipt-footer">
+        <div class="rf-thanks">TEŞEKKÜR EDERİZ</div>
+        <div>Bu belge dijital olarak düzenlenmiştir · ${companyName}</div>
+      </div>
+
+      <div class="receipt-actions">
+        <button onclick="window.print()">🖨 YAZDIR</button>
+        <button class="primary" onclick="closeReceipt()">TAMAM</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function closeReceipt() {
+  closeModal();
   render();
 }
 
@@ -6440,7 +7005,347 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
   return av.svg(...(av.colors || []));
 }
 
-// State'e VIP bilgisi yükle
+// ============================================================
+// CHANGELOG / GÜNCELLEMELER
+// ============================================================
+
+const CURRENT_VERSION = 'v1.25';
+
+// Sürümler — en yenisi en üstte
+const CHANGELOG_DATA = [
+  {
+    version: 'v1.25',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'GÜNCELLEMELER SAYFASI',
+    items: [
+      { cat: 'major', text: 'Sol menüye <strong>Güncellemeler</strong> sekmesi eklendi' },
+      { cat: 'feature', text: 'Tüm sürüm geçmişi zaman çizelgesi şeklinde gösteriliyor' },
+      { cat: 'feature', text: 'Yeni güncelleme geldiğinde sidebar\'da <strong>YENİ</strong> rozeti çıkıyor' },
+      { cat: 'feature', text: 'Güncellemeyi okuduğunda rozet kayboluyor (tarayıcıda saklanır)' }
+    ]
+  },
+  {
+    version: 'v1.24',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'TAHSİLAT MAKBUZU',
+    items: [
+      { cat: 'major', text: 'Ödeme tahsil edildiğinde otomatik <strong>profesyonel makbuz</strong> açılıyor' },
+      { cat: 'feature', text: 'Sıralı belge numarası: <strong>TM-20260511-0001</strong>' },
+      { cat: 'feature', text: 'KDV %20 detaylı toplam blok (ara toplam + KDV + genel toplam)' },
+      { cat: 'feature', text: 'Müşteri & ödeme bilgileri 2 sütun halinde' },
+      { cat: 'feature', text: '<strong>ÖDENDİ</strong> damgası (yeşil mürekkep efekti)' },
+      { cat: 'feature', text: 'Yazıcıya çıktı alabilme (CSS print mode)' }
+    ]
+  },
+  {
+    version: 'v1.23',
+    date: '10 Mayıs 2026',
+    major: true,
+    title: 'PROFİL & AVATAR GALERİSİ',
+    items: [
+      { cat: 'major', text: 'Sol menüye <strong>Profilim</strong> sekmesi eklendi' },
+      { cat: 'feature', text: '<strong>22 avatar seçeneği</strong>: Google fotoğrafın, baş harf, 20 inşaat temalı SVG' },
+      { cat: 'feature', text: 'Avatarlar: sarı baret, çekiç, tuğla duvarı, vinç, buldozer, mühendis, elmas vs.' },
+      { cat: 'feature', text: 'Görünür ad değiştirme (3-20 karakter, Türkçe destekli)' },
+      { cat: 'feature', text: 'Profil istatistikleri: sıralama, aktif şirket, kasa, seviye/gün' },
+      { cat: 'feature', text: 'Avatarlar header, sıralama tablosu ve admin panelinde gösteriliyor' }
+    ]
+  },
+  {
+    version: 'v1.22',
+    date: '10 Mayıs 2026',
+    major: true,
+    title: 'VIP SİSTEMİ',
+    items: [
+      { cat: 'major', text: '<strong>3 VIP seviyesi</strong>: Gold, Diamond, Legend' },
+      { cat: 'feature', text: 'Animasyonlu rozetler (parlaklık efektli, Legend renk değiştirir)' },
+      { cat: 'feature', text: 'VIP süresi ayarlanabilir: 7/30/90/365 gün veya süresiz' },
+      { cat: 'feature', text: 'Rozet header, sıralama, profil ve admin panelinde görünür' },
+      { cat: 'feature', text: 'Admin paneli üzerinden VIP yönetimi' }
+    ]
+  },
+  {
+    version: 'v1.21',
+    date: '10 Mayıs 2026',
+    major: true,
+    title: 'SIRALAMA & ADMİN PANEL',
+    items: [
+      { cat: 'major', text: 'Tüm oyuncuların <strong>Top 50 sıralaması</strong> (4 kritere göre)' },
+      { cat: 'feature', text: 'Sıralama kriterleri: Kasa, Seviye, Toplam Gün, Sözleşme sayısı' },
+      { cat: 'feature', text: 'Madalyalar (🥇🥈🥉), kendi sıran vurgulanır' },
+      { cat: 'feature', text: 'Admin paneli (sadece yetkili görür)' },
+      { cat: 'feature', text: 'Bulut kayıt yapan herkes otomatik sıralamaya katılır' }
+    ]
+  },
+  {
+    version: 'v1.20',
+    date: '10 Mayıs 2026',
+    title: 'GİRİŞ EKRANI',
+    items: [
+      { cat: 'feature', text: 'Açılışta tam ekran giriş modalı' },
+      { cat: 'feature', text: 'Google ile giriş veya Misafir olarak oyna seçenekleri' },
+      { cat: 'feature', text: 'Giriş sonrası mevcut kayıtlar listelenir: "Devam Et" veya "Yeni Şirket Kur"' }
+    ]
+  },
+  {
+    version: 'v1.19',
+    date: '10 Mayıs 2026',
+    major: true,
+    title: 'BULUT KAYIT (FIREBASE)',
+    items: [
+      { cat: 'major', text: '<strong>Google ile giriş yap</strong> — oyununu kaybetme' },
+      { cat: 'feature', text: '3 bulut kayıt slotu (Slot 1 / 2 / 3)' },
+      { cat: 'feature', text: 'Ay sonu raporundan sonra otomatik bulut kaydı' },
+      { cat: 'feature', text: 'Farklı cihazlardan aynı kayıtla devam edebilme' },
+      { cat: 'feature', text: 'Sağ üstte kullanıcı butonu (avatar + ad)' }
+    ]
+  },
+  {
+    version: 'v1.18',
+    date: '9 Mayıs 2026',
+    title: 'KÂR YÜZDESİ DİP TOPLAMA YANSIYOR',
+    items: [
+      { cat: 'fix', text: 'Kâr yüzdesi artık <strong>malzeme + nakliye birlikte</strong> hesaplanıyor' },
+      { cat: 'fix', text: '%20 kâr yazınca, dip toplamda da %20 görünür (eskiden nakliye eklenince düşüyordu)' },
+      { cat: 'fix', text: 'Min Alış sütunu yenilendi: malzeme + nakliye payı ayrı görünür' }
+    ]
+  },
+  {
+    version: 'v1.17',
+    date: '9 Mayıs 2026',
+    title: 'BAŞARISIZ SÖZLEŞMEDE KISMİ TAHSİLAT',
+    items: [
+      { cat: 'feature', text: 'Termin geçtiğinde teslim edilen malzemelerin parası alınıyor' },
+      { cat: 'feature', text: 'Nakliye payı orantılı olarak tahsil edilir' },
+      { cat: 'fix', text: 'Ceza yumuşatıldı: kalan kısmın %30\'u (eskiden tümünün %30\'u idi)' },
+      { cat: 'fix', text: 'İtibar/güven kaybı tamamlanma oranına göre azalır' }
+    ]
+  },
+  {
+    version: 'v1.16',
+    date: '9 Mayıs 2026',
+    title: 'MÜŞTERİ BÜTÇESİ NAKLİYE DAHİL',
+    items: [
+      { cat: 'fix', text: 'Müşteri bütçeleri artık nakliye payını da içeriyor' },
+      { cat: 'feature', text: 'Uzak ilçelerde bütçe yüksek (gerçekçi)' }
+    ]
+  },
+  {
+    version: 'v1.15',
+    date: '9 Mayıs 2026',
+    title: 'NAKLİYE ARACI SEÇİMİ',
+    items: [
+      { cat: 'feature', text: 'Teklif ekranında istediğin aracı seçebilirsin (tıklanabilir tablo)' },
+      { cat: 'feature', text: 'Seçilen aracın yakıt maliyeti dip toplama eklenir' },
+      { cat: 'feature', text: 'Sözleşmeye seçilen araç bilgisi kaydedilir' }
+    ]
+  },
+  {
+    version: 'v1.13',
+    date: '9 Mayıs 2026',
+    title: 'ÇİFT INPUT: FİYAT / KÂR%',
+    items: [
+      { cat: 'feature', text: 'Her kalemde fiyat (₺) <strong>veya</strong> kâr yüzdesi (%) giriş yapabilirsin' },
+      { cat: 'feature', text: 'Hangisine yazılırsa diğeri otomatik hesaplanır' },
+      { cat: 'feature', text: '"Tümüne Uygula" hızlı butonları: +%10 / +%15 / +%20 / +%30 / +%50' }
+    ]
+  },
+  {
+    version: 'v1.12',
+    date: '9 Mayıs 2026',
+    title: 'MİN ALIŞ SÜTUNU',
+    items: [
+      { cat: 'feature', text: 'Teklif sayfasında en uygun tedarikçi fiyatı görünür' },
+      { cat: 'feature', text: 'Tedarikçi adı altta küçük yazıyla' },
+      { cat: 'fix', text: 'Marj hesabı: BASE_PRICE yerine gerçek min alış maliyetine göre' }
+    ]
+  },
+  {
+    version: 'v1.11',
+    date: '9 Mayıs 2026',
+    title: 'NAKLİYE HESABI',
+    items: [
+      { cat: 'feature', text: 'Teklif sayfasına <strong>Ağırlık</strong> sütunu' },
+      { cat: 'feature', text: 'Araç tablosu: kapasite, sefer sayısı, yakıt toplamı' },
+      { cat: 'feature', text: '★ Önerilen araç vurgulanır (yeşil)' }
+    ]
+  },
+  {
+    version: 'v1.10',
+    date: '9 Mayıs 2026',
+    major: true,
+    title: 'SÜRESİZ OYUN + AYLIK RAPOR',
+    items: [
+      { cat: 'major', text: '30 günlük süre limiti kaldırıldı — istediğin kadar oyna!' },
+      { cat: 'feature', text: 'Her 30 günde bir <strong>aylık performans raporu</strong>' },
+      { cat: 'feature', text: 'A+/A/B/C/D/F not sistemi' },
+      { cat: 'feature', text: 'Finansal + operasyon + şirket istatistikleri' },
+      { cat: 'feature', text: 'Sağ panelde "Ay Sonu Raporu" sayacı' },
+      { cat: 'fix', text: 'İflas eşiği: kasa -₺1.500.000' }
+    ]
+  },
+  {
+    version: 'v1.08',
+    date: '9 Mayıs 2026',
+    title: 'CANLI TEKLİF GERİ BİLDİRİMİ',
+    items: [
+      { cat: 'feature', text: 'Teklif satırları canlı renklenir: 🟢 kabul / 🟡 sınırda / 🔴 red' },
+      { cat: 'feature', text: 'Durum çubuğu: "KABUL EDİLECEK / SINIRDA / REDDEDİLECEK"' },
+      { cat: 'feature', text: 'Müşteri güveni + itibar görünür hale geldi' }
+    ]
+  },
+  {
+    version: 'v1.07',
+    date: '9 Mayıs 2026',
+    title: 'AKTİF SÖZLEŞME İHTİYACI',
+    items: [
+      { cat: 'feature', text: 'Aktif sözleşmelerden kalan ihtiyaç miktarı kırmızı rozetle gösterilir' },
+      { cat: 'feature', text: 'Satın alma miktarı otomatik dolduruluyor' }
+    ]
+  },
+  {
+    version: 'v1.06',
+    date: '9 Mayıs 2026',
+    title: 'ARAMA ÇUBUĞU',
+    items: [
+      { cat: 'feature', text: 'Malzeme Piyasası ve Tedarikçiler ekranlarında arama' },
+      { cat: 'feature', text: 'Kategori filtresi' }
+    ]
+  },
+  {
+    version: 'v1.05',
+    date: '9 Mayıs 2026',
+    title: 'GERÇEKÇİ FİYATLAR',
+    items: [
+      { cat: 'fix', text: 'Tüm malzeme fiyatları Mayıs 2026 İstanbul piyasasına göre güncellendi' },
+      { cat: 'fix', text: 'Çimento ₺200/torba, demir ₺35.000/ton, tuğla ₺6/adet, yakıt ₺52/L' }
+    ]
+  },
+  {
+    version: 'v1.04',
+    date: '9 Mayıs 2026',
+    title: 'AYLIK MAAŞ',
+    items: [
+      { cat: 'fix', text: 'Maaşlar artık aylık (her 30 günde bir) ödeniyor' },
+      { cat: 'feature', text: 'Yeni hire\'lar prorate ile ödeme alır' }
+    ]
+  },
+  {
+    version: 'v1.03',
+    date: '9 Mayıs 2026',
+    major: true,
+    title: 'MOBİL OPTİMİZASYON',
+    items: [
+      { cat: 'major', text: 'Telefon ve tabletler için yeniden tasarlandı' },
+      { cat: 'feature', text: 'Bottom navigation (5 sekme)' },
+      { cat: 'feature', text: 'Drawer menü, panel sekmeleri' },
+      { cat: 'feature', text: 'Touch-dostu butonlar (44px hedef)' }
+    ]
+  },
+  {
+    version: 'v1.02',
+    date: '9 Mayıs 2026',
+    major: true,
+    title: 'BÜYÜK GENİŞLEME — İSTANBUL',
+    items: [
+      { cat: 'major', text: '<strong>24 malzeme</strong> 8 kategoride' },
+      { cat: 'major', text: '<strong>14 tedarikçi</strong> aynı malzemeyi farklı fiyatla' },
+      { cat: 'major', text: '<strong>22 müşteri</strong> İstanbul\'un 23 ilçesinde' },
+      { cat: 'feature', text: 'Günlük fiyat dalgalanması (▲▼ trend okları)' },
+      { cat: 'feature', text: 'Müşteri cari hesap sistemi' },
+      { cat: 'feature', text: '4 araç tipi (Pikap 2t, Küçük 5t, Orta 10t, Tır 25t)' },
+      { cat: 'feature', text: 'Şöför işe alımı, seviye sistemi, maaş' },
+      { cat: 'feature', text: 'İrsaliye sistemi (numaralı belge)' },
+      { cat: 'feature', text: 'Banka & krediler (3 vade, faiz, taksit)' },
+      { cat: 'feature', text: 'Pazarlamacı işe alımı, saha ziyaretleri' },
+      { cat: 'feature', text: 'Seviye sistemi (Çırak → Efsane)' },
+      { cat: 'feature', text: 'Şirket özelleştirme (ad + logo + renk)' }
+    ]
+  },
+  {
+    version: 'v1.01',
+    date: '9 Mayıs 2026',
+    title: 'KALEM KALEM FİYAT',
+    items: [
+      { cat: 'feature', text: 'Her malzeme için ayrı birim fiyat girişi' },
+      { cat: 'feature', text: 'Otomatik toplam hesaplama' },
+      { cat: 'feature', text: 'Piyasa değeri referansı + kâr marjı önizlemesi' }
+    ]
+  },
+  {
+    version: 'v1.00',
+    date: '9 Mayıs 2026',
+    major: true,
+    title: 'İLK SÜRÜM 🎉',
+    items: [
+      { cat: 'major', text: 'YAPI TİCARET — İnşaat malzemeleri ticaret oyunu' },
+      { cat: 'feature', text: '₺50.000 başlangıç sermayesi' },
+      { cat: 'feature', text: '4 tedarikçi, 10 malzeme, 8 şantiye' },
+      { cat: 'feature', text: 'Gelen kutusu, teklif sistemi, sözleşme yönetimi' },
+      { cat: 'feature', text: 'İtibar sistemi' }
+    ]
+  }
+];
+
+function renderChangelog() {
+  const c = $('center');
+
+  // En son sürüm görüldü olarak işaretle
+  try {
+    localStorage.setItem('yt_lastSeenChangelog', CURRENT_VERSION);
+  } catch (e) {
+    // localStorage erişilemezse görmezden gel
+  }
+
+  c.innerHTML = `<h2>📰 GÜNCELLEMELER</h2>
+    <div class="subtitle">Mevcut sürüm: <strong style="color: var(--accent);">${CURRENT_VERSION}</strong> · Toplam ${CHANGELOG_DATA.length} sürüm</div>
+
+    <div class="changelog-intro">
+      <h3>🚧 ÜRETİME DEVAM</h3>
+      <p>YAPI TİCARET sürekli geliştirilen bir oyun. Yeni özellikler, hata düzeltmeleri ve dengeleme güncellemeleri burada paylaşılıyor.
+      Bir önerin veya hatayla karşılaştın mı? Geri bildirim her zaman değerli.</p>
+    </div>
+
+    <div class="changelog-timeline">
+      ${CHANGELOG_DATA.map((entry, i) => {
+        const isLatest = i === 0;
+        const classes = ['changelog-entry'];
+        if (isLatest) classes.push('latest');
+        if (entry.major) classes.push('major');
+
+        return `<div class="${classes.join(' ')}">
+          <div class="ce-header">
+            <div class="ce-title">
+              <span class="ce-version">${entry.version}</span>
+              ${entry.title}
+              ${isLatest ? '<span class="ce-new">YENİ</span>' : ''}
+            </div>
+            <div class="ce-date">${entry.date}</div>
+          </div>
+          <ul>
+            ${entry.items.map(it => `<li>
+              <span class="ce-category ${it.cat}">${it.cat === 'major' ? 'ÖNEMLİ' : it.cat === 'feature' ? 'YENİ' : 'DÜZELTME'}</span>
+              ${it.text}
+            </li>`).join('')}
+          </ul>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div style="text-align: center; padding: 30px 0; color: var(--ink-dim); font-size: 11px; letter-spacing: 2px;">
+      ━━━ OYUN BAŞLANGICI ━━━
+    </div>`;
+
+  // Sidebar update badge'i sıfırla
+  const updateBadge = $('update-badge');
+  if (updateBadge) updateBadge.style.display = 'none';
+}
+
+// ============================================================
+// VIP STATE CHECK
+// ============================================================
 function isVip() {
   if (!state.user) return false;
   const tier = state.user.vipTier;

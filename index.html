@@ -3437,7 +3437,15 @@ function priceTrend(productId) {
 }
 
 function totalDebt() {
-  return state.loans.reduce((s, l) => s + l.remaining, 0);
+  return state.loans.reduce((s, l) => {
+    // Yeni format: anapara + gelecek faizler tahmini
+    if (l.remainingPrincipal !== undefined) {
+      const remMonths = l.totalMonths - l.monthsPaid;
+      const estInterest = l.remainingPrincipal * l.monthlyRate * Math.max(0, remMonths);
+      return s + l.remainingPrincipal + estInterest;
+    }
+    return s + (l.remaining || 0);
+  }, 0);
 }
 
 function getCustomer(id) { return state.customers.find(c => c.id === id); }
@@ -5749,83 +5757,122 @@ function repVisit(custId) {
 
 // ----- BANK -----
 
+function totalRemainingLoan() {
+  // Yeni format için: kalan anapara + tahmini gelecek faizler
+  return state.loans.reduce((s, l) => {
+    if (l.remainingPrincipal !== undefined) {
+      const remMonths = l.totalMonths - l.monthsPaid;
+      const estInterest = l.remainingPrincipal * l.monthlyRate * (remMonths / 2); // ortalama tahmin
+      return s + l.remainingPrincipal + estInterest;
+    }
+    return s + (l.remaining || 0);
+  }, 0);
+}
+
 function renderBank() {
   const c = $('center');
-  const totalDebtVal = totalDebt();
-  const dailyPayment = state.loans.reduce((s, l) => s + l.dailyPayment, 0);
+  const totalDebtVal = totalRemainingLoan();
+  // Aylık toplam taksit (önümüzdeki ay)
+  const monthlyTotal = state.loans.reduce((s, l) => {
+    if (l.remainingPrincipal !== undefined) {
+      const remMonths = l.totalMonths - l.monthsPaid;
+      if (remMonths <= 0) return s;
+      const interest = l.remainingPrincipal * l.monthlyRate;
+      const principalPay = l.remainingPrincipal / remMonths;
+      return s + principalPay + interest;
+    }
+    return s + (l.dailyPayment || 0) * 30; // eski format
+  }, 0);
   // Limit: temel 250k + itibara göre, seviyeye göre büyür
   const maxLoan = Math.round(250000 + state.reputation * 20000 + state.level * 150000);
 
   c.innerHTML = `<h2>YAPI BANKASI</h2>
-    <div class="subtitle">Kredi çek, işletme sermayeni güçlendir · Düzensiz ödeme = itibar kaybı</div>
+    <div class="subtitle">Kredi çek, işletme sermayeni güçlendir · Aylık taksitler · Erken kapatmada sadece o ayın faizi alınır</div>
 
     <div class="stat-grid">
-      <div class="stat-tile"><div class="stat-label">Toplam Borç</div><div class="stat-val" style="color: var(--red)">${fmt(totalDebtVal)}</div></div>
-      <div class="stat-tile"><div class="stat-label">Günlük Taksit</div><div class="stat-val" style="color: var(--accent)">${fmt(dailyPayment)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Borç</div><div class="stat-val" style="color: var(--red)">${fmt(Math.round(totalDebtVal))}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aylık Taksit</div><div class="stat-val" style="color: var(--accent)">${fmt(Math.round(monthlyTotal))}</div></div>
       <div class="stat-tile"><div class="stat-label">Aktif Kredi</div><div class="stat-val">${state.loans.length}</div></div>
-      <div class="stat-tile"><div class="stat-label">Kredi Limiti</div><div class="stat-val" style="color: var(--green)">${fmt(Math.max(0, maxLoan - totalDebtVal))}</div></div>
+      <div class="stat-tile"><div class="stat-label">Kredi Limiti</div><div class="stat-val" style="color: var(--green)">${fmt(Math.max(0, maxLoan - state.loans.reduce((s,l) => s + (l.remainingPrincipal || l.remaining || 0), 0)))}</div></div>
     </div>
 
     ${state.loans.length > 0 ? `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">AKTİF KREDİLER</h3>
     <div class="table-scroll">
     <table class="data-table" style="margin-bottom: 24px;">
-      <thead><tr><th>Kredi No</th><th>Kalan</th><th>Faiz</th><th>Taksit</th><th>Gün</th><th>İşlem</th></tr></thead>
-      <tbody>${state.loans.map(l => `<tr>
-        <td>#${l.id.slice(-6).toUpperCase()}</td>
-        <td>${fmt(l.remaining)}</td>
-        <td>%${(l.interestRate * 100).toFixed(2)}/gün</td>
-        <td>${fmt(l.dailyPayment)}</td>
-        <td>${l.daysLeft}</td>
-        <td><button class="btn small" onclick="payOffLoan('${l.id}')" ${state.cash >= l.remaining ? '' : 'disabled'}>KAPAT</button></td>
-      </tr>`).join('')}</tbody>
+      <thead><tr><th>Kredi No</th><th>Kalan Anapara</th><th>Aylık Faiz</th><th>Aylık Taksit</th><th>Kalan Ay</th><th>Sonraki Tahsilat</th><th>İşlem</th></tr></thead>
+      <tbody>${state.loans.map(l => {
+        const remP = l.remainingPrincipal !== undefined ? l.remainingPrincipal : (l.remaining || 0);
+        const rate = l.monthlyRate !== undefined ? l.monthlyRate : ((l.interestRate || 0.005) * 30);
+        const remMonths = l.remainingPrincipal !== undefined ? (l.totalMonths - l.monthsPaid) : Math.ceil((l.daysLeft || 1) / 30);
+        const monthInterest = Math.round(remP * rate);
+        const monthlyPay = remMonths > 0 ? Math.round(remP / remMonths + monthInterest) : 0;
+        const lastDay = l.lastPaymentDay || l.takenDay || state.day;
+        const nextPaymentDay = lastDay + 30;
+        const daysToNext = nextPaymentDay - state.day;
+        const earlyPayoff = remP + monthInterest;
+        return `<tr>
+          <td>#${l.id.slice(-6).toUpperCase()}</td>
+          <td>${fmt(remP)}</td>
+          <td>%${(rate * 100).toFixed(2)}/ay</td>
+          <td>${fmt(monthlyPay)}</td>
+          <td>${remMonths}</td>
+          <td>Gün ${nextPaymentDay} <span style="color: var(--ink-dim); font-size: 10px;">(${daysToNext > 0 ? daysToNext + ' gün' : 'bugün'})</span></td>
+          <td><button class="btn small" onclick="payOffLoan('${l.id}')" ${state.cash >= earlyPayoff ? '' : 'disabled'} title="Erken kapat: ${fmt(earlyPayoff)}">KAPAT</button></td>
+        </tr>`;
+      }).join('')}</tbody>
     </table>
     </div>` : ''}
 
     <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">YENİ KREDİ BAŞVURUSU</h3>
     <div class="grid-3">
       ${[
-        { amount: 250000,  term: 30,  rateMod: 1.0,  label: 'Kısa Vade' },
-        { amount: 1000000, term: 60,  rateMod: 0.85, label: 'Orta Vade' },
-        { amount: 3000000, term: 120, rateMod: 0.75, label: 'Uzun Vade' }
+        { amount: 250000,  months: 1,  rateMod: 1.0,  label: 'Kısa Vade (1 ay)' },
+        { amount: 1000000, months: 2,  rateMod: 0.90, label: 'Orta Vade (2 ay)' },
+        { amount: 3000000, months: 4,  rateMod: 0.80, label: 'Uzun Vade (4 ay)' }
       ].map(opt => {
-        const rate = (0.0025 + (1 - state.reputation / 100) * 0.003) * opt.rateMod;
-        const totalRepay = opt.amount * Math.pow(1 + rate, opt.term);
-        const dailyP = Math.round(totalRepay / opt.term);
-        const canTake = totalDebtVal + opt.amount <= maxLoan;
+        // Aylık faiz: temel %5-8 arası, itibara göre düşer
+        const monthlyRate = (0.05 + (1 - state.reputation / 100) * 0.03) * opt.rateMod;
+        const totalRepay = opt.amount * Math.pow(1 + monthlyRate, opt.months);
+        const monthlyP = Math.round(totalRepay / opt.months);
+        const existingPrincipal = state.loans.reduce((s,l) => s + (l.remainingPrincipal || l.remaining || 0), 0);
+        const canTake = existingPrincipal + opt.amount <= maxLoan;
         return `<div class="card">
           <h3>${opt.label}</h3>
           <div style="font-size: 11px; line-height: 1.8;">
             <div>Tutar: <strong style="color: var(--green); font-size: 14px;">${fmt(opt.amount)}</strong></div>
-            <div>Vade: ${opt.term} gün</div>
-            <div>Günlük faiz: %${(rate * 100).toFixed(3)}</div>
-            <div>Günlük taksit: <strong>${fmt(dailyP)}</strong></div>
-            <div>Toplam geri ödeme: ${fmt(totalRepay)}</div>
+            <div>Vade: ${opt.months} ay</div>
+            <div>Aylık faiz: %${(monthlyRate * 100).toFixed(2)}</div>
+            <div>Aylık taksit: <strong>${fmt(monthlyP)}</strong></div>
+            <div>Toplam geri ödeme: ${fmt(Math.round(totalRepay))}</div>
           </div>
-          <button class="btn primary" style="margin-top: 12px;" onclick="takeLoan(${opt.amount}, ${opt.term}, ${rate})" ${canTake ? '' : 'disabled'}>
-            ${canTake ? 'KREDI ÇEK' : 'LIMIT YETMİYOR'}
+          <button class="btn primary" style="margin-top: 12px;" onclick="takeLoan(${opt.amount}, ${opt.months}, ${monthlyRate})" ${canTake ? '' : 'disabled'}>
+            ${canTake ? 'KREDI ÇEK' : 'LİMİT YETMİYOR'}
           </button>
         </div>`;
       }).join('')}
     </div>
     <div style="font-size: 10px; color: var(--ink-dim); margin-top: 14px; line-height: 1.6;">
-      💡 Yüksek itibar ve seviye kredi limitini ve faiz indirimini artırır. Şu anki limitin: ${fmt(maxLoan)}.
+      💡 Yüksek itibar ve seviye kredi limitini ve faiz indirimini artırır. Şu anki limitin: ${fmt(maxLoan)}.<br>
+      📌 Tahsilat aylıktır (30 gün). Erken kapatmada sadece o ayın faizi alınır, sonraki ayların faizi tahsil edilmez.
     </div>`;
 }
 
-function takeLoan(amount, term, rate) {
-  const totalRepay = amount * Math.pow(1 + rate, term);
-  const daily = Math.round(totalRepay / term);
+function takeLoan(amount, months, monthlyRate) {
+  const totalRepay = amount * Math.pow(1 + monthlyRate, months);
+  const monthly = Math.round(totalRepay / months);
   state.loans.push({
     id: 'l' + uid(),
     principal: amount,
-    remaining: Math.round(totalRepay),
-    interestRate: rate,
-    dailyPayment: daily,
-    daysLeft: term,
+    remainingPrincipal: amount,  // kalan anapara
+    monthlyRate,                  // aylık faiz oranı
+    totalMonths: months,          // toplam vade ay
+    monthsPaid: 0,                // ödenen ay sayısı
+    monthlyPayment: monthly,      // aylık taksit (bilgi amaçlı, yeniden hesaplanır)
+    lastPaymentDay: state.day,    // bir sonraki tahsilat günü için referans
     takenDay: state.day
   });
   earn(amount, 'noop');
-  toast(`💵 ${fmt(amount)} kredi alındı. ${term} gün boyunca günlük ${fmt(daily)} taksit ödeyeceksin.`, 'success');
+  toast(`💵 ${fmt(amount)} kredi alındı. ${months} ay vade, aylık ${fmt(monthly)} taksit.`, 'success');
   render();
 }
 
@@ -5833,10 +5880,24 @@ function payOffLoan(lid) {
   const idx = state.loans.findIndex(l => l.id === lid);
   if (idx < 0) return;
   const l = state.loans[idx];
-  if (state.cash < l.remaining) { toast('Yetersiz bakiye.', 'error'); return; }
-  spend(l.remaining, 'kredi');
+
+  // Erken kapatma: sadece mevcut ayın faizi alınır
+  // Eğer henüz mevcut ay tahsilatı yapılmadıysa, mevcut ayın faizini ekle
+  const remPrincipal = l.remainingPrincipal !== undefined ? l.remainingPrincipal : l.remaining;
+  const monthlyRate = l.monthlyRate !== undefined ? l.monthlyRate : (l.interestRate || 0.05) * 30;
+  const monthInterest = Math.round(remPrincipal * monthlyRate);
+  const earlyPayoff = remPrincipal + monthInterest;
+
+  if (state.cash < earlyPayoff) {
+    toast(`Yetersiz bakiye. Erken kapatma: ${fmt(earlyPayoff)} (anapara + 1 ay faiz)`, 'error');
+    return;
+  }
+
+  if (!confirm(`Kredi erken kapatılacak:\n\nKalan anapara: ${fmt(remPrincipal)}\nMevcut ay faizi: ${fmt(monthInterest)}\nToplam ödeme: ${fmt(earlyPayoff)}\n\nDevam edilsin mi?`)) return;
+
+  spend(earlyPayoff, 'kredi');
   state.loans.splice(idx, 1);
-  toast(`Kredi erken kapatıldı: ${fmt(l.remaining)}`, 'success');
+  toast(`✓ Kredi erken kapatıldı: ${fmt(earlyPayoff)}`, 'success');
   state.reputation = Math.min(100, state.reputation + 1);
   render();
 }
@@ -6895,23 +6956,45 @@ function nextDay() {
     }
   }
 
-  // 6) Loan payments
+  // 6) Loan payments — Aylık tahsilat (her kredi kendi 30 günlük döngüsünde)
   let loanTotal = 0;
   state.loans = state.loans.filter(l => {
-    const pay = Math.min(l.dailyPayment, l.remaining);
-    loanTotal += pay;
-    l.remaining -= pay;
-    l.daysLeft--;
-    if (l.remaining <= 0) {
-      toast(`✓ Kredi #${l.id.slice(-6).toUpperCase()} kapandı.`, 'success');
-      state.reputation = Math.min(100, state.reputation + 1);
+    // Eski format uyumluluğu (göç): eski kredilerde dailyPayment/daysLeft varsa monthly'ye çevir
+    if (l.remainingPrincipal === undefined) {
+      // Eski format → anaparayı kalan toplam ödeme olarak kabul et (yaklaşık)
+      l.remainingPrincipal = Math.round((l.remaining || 0) / (1 + ((l.interestRate || 0.005) * (l.daysLeft || 30))));
+      l.monthlyRate = (l.interestRate || 0.005) * 30;
+      l.totalMonths = Math.ceil((l.daysLeft || 30) / 30);
+      l.monthsPaid = 0;
+      l.lastPaymentDay = state.day;
+    }
+
+    // Bir önceki ödemeden 30 gün geçti mi?
+    const daysSinceLast = state.day - (l.lastPaymentDay || l.takenDay || state.day);
+    if (daysSinceLast < 30) return true; // henüz ay dolmadı
+
+    // Bu ay tahsil et
+    const monthInterest = Math.round(l.remainingPrincipal * l.monthlyRate);
+    const remMonths = l.totalMonths - l.monthsPaid;
+    const monthPrincipalPay = Math.round(l.remainingPrincipal / remMonths);
+    const monthPayment = monthPrincipalPay + monthInterest;
+
+    loanTotal += monthPayment;
+    l.remainingPrincipal -= monthPrincipalPay;
+    l.monthsPaid++;
+    l.lastPaymentDay = state.day;
+
+    if (l.monthsPaid >= l.totalMonths || l.remainingPrincipal <= 0) {
+      toast(`✓ Kredi #${l.id.slice(-6).toUpperCase()} tamamı ödendi.`, 'success');
+      state.reputation = Math.min(100, state.reputation + 2);
       return false;
     }
     return true;
   });
   if (loanTotal > 0) {
     spend(loanTotal, 'kredi-taksit');
-    state.agenda.push(`Kredi taksitleri: ${fmt(loanTotal)}`);
+    state.agenda.push(`💳 Aylık kredi taksitleri: ${fmt(loanTotal)}`);
+    toast(`💳 Kredi aylık tahsilat: ${fmt(loanTotal)}`, 'info');
   }
 
   // 7) Generate new tenders — base 1-2 plus more from high-trust customers
@@ -7603,10 +7686,25 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.27';
+const CURRENT_VERSION = 'v1.28';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.28',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'BANKA AYLIK TAKSİT SİSTEMİ',
+    items: [
+      { cat: 'major', text: 'Krediler artık <strong>aylık taksitle</strong> ödeniyor (eskiden günlüktü)' },
+      { cat: 'major', text: 'Erken kapatmada <strong>sadece o ayın faizi</strong> alınır, gelecek aylar muaf' },
+      { cat: 'feature', text: 'Vade artık ay cinsinden: 1 ay / 2 ay / 4 ay seçenekleri' },
+      { cat: 'feature', text: 'Aylık faiz oranı %5-8 (itibara göre düşer)' },
+      { cat: 'feature', text: 'Sonraki tahsilat günü kredi tablosunda görünür' },
+      { cat: 'feature', text: 'Erken kapatma onay popup\'ında anapara + 1 ay faizi detaylı görünür' },
+      { cat: 'fix', text: 'Eski kayıtlardaki krediler yeni formata otomatik dönüştürülür' }
+    ]
+  },
   {
     version: 'v1.27',
     date: '11 Mayıs 2026',

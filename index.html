@@ -1031,6 +1031,83 @@
     color: white;
     box-shadow: 0 0 0 1px #f472d6, 0 0 12px rgba(247, 114, 214, 0.6);
   }
+
+  /* ROL ROZETLERİ — ADMIN & MODERATOR */
+  .role-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    line-height: 1;
+    vertical-align: middle;
+    user-select: none;
+  }
+  .role-badge .role-icon {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+  }
+  .role-badge.admin {
+    background: linear-gradient(135deg, #dc2626 0%, #f87171 100%);
+    color: #fff;
+    box-shadow: 0 0 0 1px #dc2626, 0 0 6px rgba(220, 38, 38, 0.4);
+  }
+  .role-badge.moderator {
+    background: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+    color: #fff;
+    box-shadow: 0 0 0 1px #2563eb, 0 0 6px rgba(37, 99, 235, 0.4);
+  }
+  .role-badge.large {
+    padding: 4px 10px;
+    font-size: 12px;
+    gap: 6px;
+  }
+  .role-badge.large .role-icon {
+    width: 15px;
+    height: 15px;
+  }
+  /* Header'da küçültülmüş */
+  .auth-btn .role-badge {
+    margin-left: 4px;
+    padding: 1px 5px;
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+  .auth-btn .role-badge .role-icon {
+    width: 9px;
+    height: 9px;
+  }
+
+  /* Role selection in admin modal */
+  .role-selector {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 12px 0;
+  }
+  .role-option {
+    padding: 14px 8px;
+    border: 2px solid var(--border);
+    background: var(--panel-2);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .role-option:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .role-option.selected {
+    border-color: var(--accent);
+    background: var(--panel);
+    box-shadow: 0 0 12px rgba(244,160,32,0.2);
+  }
   @keyframes legend-flow {
     0%, 100% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
@@ -2709,6 +2786,15 @@
   window.fbAuth = {
     isAdmin: () => auth.currentUser && auth.currentUser.uid === ADMIN_UID,
     getAdminUid: () => ADMIN_UID,
+    // Kullanıcının rolü: 'admin' | 'moderator' | 'user'
+    // ADMIN_UID hardcoded admin, Firestore'da role 'moderator' olabilir
+    getUserRole: (userData) => {
+      if (!userData) return 'user';
+      if (userData.uid === ADMIN_UID) return 'admin';
+      if (userData.role === 'admin') return 'admin';
+      if (userData.role === 'moderator') return 'moderator';
+      return 'user';
+    },
 
     signIn: async () => {
       try {
@@ -2822,6 +2908,7 @@
           email: data.email,
           vipTier: data.vipTier || null,
           vipUntil: data.vipUntil || null,
+          role: data.role || null,
           lastSeen: data.lastSeen?.toDate?.()
         });
       });
@@ -2841,6 +2928,7 @@
           ...data,
           displayName: data.customDisplayName || data.displayName,
           originalDisplayName: data.displayName,
+          role: data.role || null,
           lastSeen: data.lastSeen?.toDate?.()
         });
       });
@@ -2906,6 +2994,17 @@
           update.vipUntil = null;
         }
       }
+      await setDoc(userRef, update, { merge: true });
+    },
+
+    // ============== ROLE MANAGEMENT (Admin only) ==============
+    adminSetRole: async (userUid, role) => {
+      // role: 'admin' | 'moderator' | 'user' (null veya 'user' → varsayılan)
+      const userRef = doc(db, 'users', userUid);
+      const update = {
+        role: (role === 'admin' || role === 'moderator') ? role : null,
+        roleGrantedAt: serverTimestamp()
+      };
       await setDoc(userRef, update, { merge: true });
     },
 
@@ -3145,6 +3244,7 @@ const state = {
   cloudSaving: false,
   lastCloudSave: 0,           // son bulut kaydetme günü
   hasUnsavedChanges: false,
+  activeSlot: null,           // 'slot1' | 'slot2' | 'slot3' — günlük otomatik kayıt slotu
 
   // Search filters (yeni)
   marketSearch: '',
@@ -3644,10 +3744,20 @@ function render() {
   else if (state.view === 'changelog') renderChangelog();
   else if (state.view === 'admin') renderAdmin();
 
-  // Admin sekmesi sadece admin için
+  // Admin sekmesi admin VEYA moderatör için görünür
   const adminNav = $('nav-admin');
   if (adminNav) {
-    adminNav.style.display = (window.fbAuth && window.fbAuth.isAdmin && window.fbAuth.isAdmin()) ? 'flex' : 'none';
+    const showPanel = isModeratorOrAdmin();
+    adminNav.style.display = showPanel ? 'flex' : 'none';
+    // Etiketi role göre değiştir
+    const span = adminNav.querySelector('span:first-child');
+    if (span) {
+      if (currentUserRole() === 'admin') {
+        span.innerHTML = '<span style="color: var(--red);">⚡ Admin Panel</span>';
+      } else if (currentUserRole() === 'moderator') {
+        span.innerHTML = '<span style="color: #60a5fa;">🛡 Mod Panel</span>';
+      }
+    }
   }
 
   // Update badge: kullanıcı son güncellemeyi görmediyse "YENİ" göster
@@ -5831,6 +5941,13 @@ function renderLeaderboardContent(rows) {
           }
           const vipHtml = userVipTier ? `<span class="leaderboard-vip">${vipBadgeHTML(userVipTier)}</span>` : '';
 
+          // Rol kontrolü
+          const isHardAdmin = r.uid === window.fbAuth.getAdminUid();
+          let userRole = r.role;
+          if (isHardAdmin) userRole = 'admin';
+          const roleHtml = (userRole === 'admin' || userRole === 'moderator')
+            ? `<span class="leaderboard-vip">${roleBadgeHTML(userRole)}</span>` : '';
+
           // Mini avatar
           const miniAv = (() => {
             const avId = r.avatarId;
@@ -5849,7 +5966,7 @@ function renderLeaderboardContent(rows) {
             <td>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="width: 28px; height: 28px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--panel-2); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border);">${miniAv}</span>
-                <span style="font-weight: 700; color: ${isMe ? 'var(--accent)' : 'var(--ink)'};">${r.displayName}${isMe ? ' (sen)' : ''}${vipHtml}</span>
+                <span style="font-weight: 700; color: ${isMe ? 'var(--accent)' : 'var(--ink)'};">${r.displayName}${isMe ? ' (sen)' : ''}${roleHtml}${vipHtml}</span>
               </div>
             </td>
             <td style="color: var(--ink-dim);">${r.companyName}</td>
@@ -5877,7 +5994,7 @@ let _adminUsersCache = null;
 
 function renderAdmin() {
   const c = $('center');
-  if (!state.user || !window.fbAuth.isAdmin()) {
+  if (!state.user || !isModeratorOrAdmin()) {
     c.innerHTML = `<h2>⚡ ADMİN PANELİ</h2>
       <div class="empty" style="color: var(--red);">
         🔒 Bu sayfaya erişim yetkin yok.
@@ -5885,8 +6002,15 @@ function renderAdmin() {
     return;
   }
 
-  c.innerHTML = `<h2 style="color: var(--red);">⚡ ADMİN PANELİ</h2>
-    <div class="subtitle">Sadece admin tarafından görülür · Tüm kullanıcılar ve istatistikler</div>
+  const isAdmin = currentUserRole() === 'admin';
+  const title = isAdmin ? '⚡ ADMİN PANELİ' : '🛡 MOD PANELİ';
+  const color = isAdmin ? 'var(--red)' : '#60a5fa';
+  const subtitle = isAdmin
+    ? 'Tüm kullanıcılar, istatistikler ve yönetim'
+    : 'Moderatör görünümü · Spam/sahte hesapları yönet';
+
+  c.innerHTML = `<h2 style="color: ${color};">${title}</h2>
+    <div class="subtitle">${subtitle}</div>
 
     <div id="admin-stats">
       <div class="empty">⏳ Veriler yükleniyor...</div>
@@ -5967,7 +6091,8 @@ function renderAdminStats(users) {
       </thead>
       <tbody>
         ${users.map(u => {
-          const isAdmin = u.uid === window.fbAuth.getAdminUid();
+          const isHardAdmin = u.uid === window.fbAuth.getAdminUid();
+          const viewerIsAdmin = currentUserRole() === 'admin';
           const lastSeenStr = u.lastSeen
             ? u.lastSeen.toLocaleDateString('tr-TR') + ' ' + u.lastSeen.toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'})
             : '—';
@@ -5983,6 +6108,11 @@ function renderAdminStats(users) {
           }
           const vipHtml = userVipTier ? ' ' + vipBadgeHTML(userVipTier) : '';
           const vipDate = u.vipUntil ? new Date(u.vipUntil).toLocaleDateString('tr-TR') : (userVipTier ? 'süresiz' : '');
+
+          // Rol kontrolü (ADMIN_UID hep admin)
+          let userRole = u.role;
+          if (isHardAdmin) userRole = 'admin';
+          const roleHtml = (userRole === 'admin' || userRole === 'moderator') ? ' ' + roleBadgeHTML(userRole) : '';
 
           // Mini avatar
           const miniAv = (() => {
@@ -6002,7 +6132,7 @@ function renderAdminStats(users) {
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="width: 24px; height: 24px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--panel-2); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border);">${miniAv}</span>
                 <div>
-                  <div style="font-weight: 700;">${u.displayName || 'Anonim'}${isAdmin ? ' 👑' : ''}${vipHtml}</div>
+                  <div style="font-weight: 700;">${u.displayName || 'Anonim'}${roleHtml}${vipHtml}</div>
                   <div style="font-size: 9px; color: var(--ink-dim);">${u.uid.slice(0, 12)}...</div>
                   ${userVipTier && vipDate ? `<div style="font-size: 9px; color: var(--accent);">VIP bitiş: ${vipDate}</div>` : ''}
                 </div>
@@ -6016,8 +6146,9 @@ function renderAdminStats(users) {
             <td style="font-size: 10px;">${lastSeenStr}</td>
             <td>
               <button class="btn small" onclick="adminViewUser('${u.uid}')">Kayıt</button>
-              <button class="btn small" style="background: linear-gradient(135deg, #f4a020, #ffcb52); color: #3d2304; border-color: #f4a020;" onclick="adminOpenVipModal('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}', '${userVipTier || ''}')">VIP</button>
-              ${isAdmin ? '' : `<button class="btn small danger" onclick="adminConfirmDelete('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}')">Sil</button>`}
+              ${viewerIsAdmin ? `<button class="btn small" style="background: linear-gradient(135deg, #f4a020, #ffcb52); color: #3d2304; border-color: #f4a020;" onclick="adminOpenVipModal('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}', '${userVipTier || ''}')">VIP</button>` : ''}
+              ${viewerIsAdmin && !isHardAdmin ? `<button class="btn small" style="background: linear-gradient(135deg, #2563eb, #60a5fa); color: #fff; border-color: #2563eb;" onclick="adminOpenRoleModal('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}', '${userRole || ''}')">ROL</button>` : ''}
+              ${isHardAdmin ? '' : `<button class="btn small danger" onclick="adminConfirmDelete('${u.uid}', '${(u.displayName||'').replace(/'/g, '')}')">Sil</button>`}
             </td>
           </tr>`;
         }).join('')}
@@ -6196,6 +6327,90 @@ async function vipConfirmRemove() {
   try {
     await window.fbAuth.adminSetVip(s.uid, null, 0);
     toast(`${s.name} → VIP kaldırıldı`, 'info');
+    closeModal();
+    renderAdmin();
+  } catch (err) {
+    toast('Hata: ' + err.message, 'error');
+  }
+}
+
+// ============================================================
+// ROL YÖNETİMİ (Admin only)
+// ============================================================
+
+let _roleModalState = { uid: null, name: '', currentRole: null, selectedRole: null };
+
+function adminOpenRoleModal(userUid, displayName, currentRole) {
+  _roleModalState = {
+    uid: userUid,
+    name: displayName,
+    currentRole: currentRole || null,
+    selectedRole: currentRole || 'user'
+  };
+  renderRoleModal();
+}
+
+function renderRoleModal() {
+  const s = _roleModalState;
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 500px;">
+      <h2>ROL YÖNETİMİ</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 4px;">
+        Kullanıcı: <strong style="color: var(--ink);">${s.name}</strong>
+      </p>
+      <p style="font-size: 11px; color: var(--ink-dim); margin-bottom: 16px;">
+        ${s.currentRole && s.currentRole !== 'user'
+          ? `Mevcut rol: ${roleBadgeHTML(s.currentRole, 'large')}`
+          : 'Mevcut rol: Standart kullanıcı'}
+      </p>
+
+      <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;">Rol Seç</div>
+      <div class="role-selector">
+        <div class="role-option ${s.selectedRole === 'user' ? 'selected' : ''}" onclick="roleSelectRole('user')">
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 2px; margin-bottom: 6px; color: var(--ink);">USER</div>
+          <div style="font-size: 10px; color: var(--ink-dim); line-height: 1.4;">Standart kullanıcı<br>Özel yetkisi yok</div>
+        </div>
+        <div class="role-option ${s.selectedRole === 'moderator' ? 'selected' : ''}" onclick="roleSelectRole('moderator')">
+          <div style="margin-bottom: 6px; display: flex; justify-content: center;">${roleBadgeHTML('moderator', 'large')}</div>
+          <div style="font-size: 10px; color: var(--ink-dim); line-height: 1.4;">Moderatör<br>Spam/uyumsuz kullanıcıları silebilir</div>
+        </div>
+        <div class="role-option ${s.selectedRole === 'admin' ? 'selected' : ''}" onclick="roleSelectRole('admin')">
+          <div style="margin-bottom: 6px; display: flex; justify-content: center;">${roleBadgeHTML('admin', 'large')}</div>
+          <div style="font-size: 10px; color: var(--ink-dim); line-height: 1.4;">Admin<br>Tüm yetkilere sahip</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px; line-height: 1.5; color: var(--ink-dim);">
+        <strong style="color: var(--accent);">Not:</strong> Moderatörler sadece spam/sahte hesapları silebilir. Admin yetkisi vermek üst sınır olmamalı.
+      </div>
+
+      <div class="actions" style="margin-top: 20px;">
+        <button class="btn primary" onclick="roleConfirmApply()" ${(s.selectedRole === (s.currentRole || 'user')) ? 'disabled' : ''}>
+          ROLÜ KAYDET
+        </button>
+        <button class="btn" onclick="closeModal()">İptal</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function roleSelectRole(role) {
+  _roleModalState.selectedRole = role;
+  renderRoleModal();
+}
+
+async function roleConfirmApply() {
+  const s = _roleModalState;
+  try {
+    // 'user' verilirse null olarak yazılır (rol yok demektir)
+    const roleToSave = (s.selectedRole === 'user' || !s.selectedRole) ? null : s.selectedRole;
+    await window.fbAuth.adminSetRole(s.uid, roleToSave);
+    if (roleToSave) {
+      toast(`✨ ${s.name} → ${roleToSave === 'admin' ? 'Admin' : 'Moderatör'} yapıldı`, 'success');
+    } else {
+      toast(`${s.name} → Rolü kaldırıldı (User)`, 'info');
+    }
     closeModal();
     renderAdmin();
   } catch (err) {
@@ -6456,11 +6671,17 @@ function nextDay() {
   if (reportDue) {
     // Rapor göster, hesapları sıfırla
     showMonthlyReport(monthNumber);
+    // Rapor sonrası kayıt yine yapılır (closeMonthlyReport zaten çağırıyor)
     return;
   }
 
   setView('inbox');
   render();
+
+  // Her gün geçişinde otomatik bulut kaydı (kullanıcı giriş yapmış ve slot seçmişse)
+  if (state.user && state.activeSlot && window.fbAuth) {
+    setTimeout(() => doAutoSave(), 400);
+  }
 }
 
 function showBankruptcy() {
@@ -6605,14 +6826,16 @@ function closeMonthlyReport() {
 // Sessiz otomatik kayıt (toast yok, sadece küçük indicator)
 async function doAutoSave() {
   if (!state.user || state.cloudSaving) return;
+  // Aktif slot seçilmemişse kaydetme
+  const slotId = state.activeSlot || 'slot1';
   state.cloudSaving = true;
   showCloudIndicator('☁ Otomatik kaydediliyor...', 'saving');
   try {
     const data = serializeState();
-    await window.fbAuth.saveGame(state.user.uid, 'slot1', data);
+    await window.fbAuth.saveGame(state.user.uid, slotId, data);
     state.lastCloudSave = state.day;
     state.hasUnsavedChanges = false;
-    showCloudIndicator('☁ Otomatik kaydedildi', 'success');
+    showCloudIndicator(`☁ Kaydedildi (${slotId.replace('slot', 'Slot ')})`, 'success');
   } catch (err) {
     console.error('Auto-save error:', err);
     showCloudIndicator('Otomatik kayıt hatası', 'error');
@@ -6733,6 +6956,71 @@ function startGame() {
   });
   toast(`Hoş geldin, ${state.company.name}! İlk şoförün ücretsiz olarak işe alındı.`, 'success');
   render();
+
+  // Eğer kullanıcı giriş yapmışsa, kayıt slotu seçtir
+  if (state.user && window.fbAuth) {
+    setTimeout(() => showSlotChoiceModal(), 600);
+  }
+}
+
+// Şirket kurulduktan sonra hangi slota kaydedileceğini sor
+async function showSlotChoiceModal() {
+  if (!state.user) return;
+  const html = `<div class="modal-bg" onclick="event.stopPropagation()">
+    <div class="modal" style="max-width: 480px;">
+      <h2 style="margin-bottom: 4px;">KAYIT SLOTU SEÇ</h2>
+      <p style="color: var(--ink-dim); margin-bottom: 16px; font-size: 12px;">
+        Şirket kuruldu! Her gün otomatik buluta kaydedilecek. Hangi slotu kullanalım?
+      </p>
+      <div id="slot-choice-list">
+        <div class="empty">⏳ Yükleniyor...</div>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+
+  try {
+    const slots = await window.fbAuth.listSaves(state.user.uid);
+    const list = $('slot-choice-list');
+    list.innerHTML = slots.map((s, i) => {
+      if (s.empty) {
+        return `<div class="save-slot" onclick="pickActiveSlot('${s.slotId}')">
+          <div class="slot-info">
+            <div class="slot-title">Slot ${i + 1} <span style="color: var(--green); font-weight: normal; font-size: 11px;">— Boş</span></div>
+            <div class="slot-meta">Bu slota kaydet</div>
+          </div>
+          <div class="slot-actions"><button class="btn small primary">SEÇ</button></div>
+        </div>`;
+      }
+      const date = s.updatedAt ? s.updatedAt.toLocaleDateString('tr-TR') + ' ' + s.updatedAt.toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'}) : '';
+      return `<div class="save-slot">
+        <div class="slot-info">
+          <div class="slot-title">${s.companyName} <span style="color: var(--ink-dim); font-weight: normal; font-size: 11px;">— Slot ${i + 1}</span></div>
+          <div class="slot-meta">Gün ${s.day} · Sv ${s.level} · ${fmt(s.cash)} · ${date}</div>
+        </div>
+        <div class="slot-actions">
+          <button class="btn small danger" onclick="confirmOverwriteSlot('${s.slotId}')">ÜZERİNE YAZ</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    console.error(err);
+    closeModal();
+    toast('Slot listesi yüklenemedi: ' + err.message, 'error');
+  }
+}
+
+async function pickActiveSlot(slotId) {
+  state.activeSlot = slotId;
+  closeModal();
+  await doAutoSave();
+  toast('Otomatik kayıt slotu: ' + slotId.replace('slot', 'Slot ') + ' · Her gün buluta kaydedilecek', 'success');
+}
+
+function confirmOverwriteSlot(slotId) {
+  if (confirm('Bu slottaki eski kayıt silinecek. Yeni şirketin buraya kaydedilecek. Devam edelim mi?')) {
+    pickActiveSlot(slotId);
+  }
 }
 
 // ============================================================
@@ -6889,6 +7177,7 @@ async function loadAndStart(slotId) {
     const result = await window.fbAuth.loadGame(state.user.uid, slotId);
     if (!result) throw new Error('Kayıt boş');
     deserializeState(result.data);
+    state.activeSlot = slotId;  // Hangi slottan yüklendiyse devamında oraya kaydet
     closeModal();
     setView('inbox');
     render();
@@ -6961,6 +7250,48 @@ function vipBadgeHTML(tier, size) {
 }
 
 // ============================================================
+// ROL ROZETLERİ
+// ============================================================
+
+const ROLE_BADGES = {
+  admin: {
+    label: 'Admin',
+    icon: `<svg class="role-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L4 6V12C4 17 7 20.5 12 22C17 20.5 20 17 20 12V6L12 2Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/>
+      <path d="M9 12L11 14L15 10" stroke="rgba(0,0,0,0.4)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>`,
+    text: 'ADMIN'
+  },
+  moderator: {
+    label: 'Moderatör',
+    icon: `<svg class="role-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L4 6V12C4 17 7 20.5 12 22C17 20.5 20 17 20 12V6L12 2Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/>
+    </svg>`,
+    text: 'MOD'
+  }
+};
+
+function roleBadgeHTML(role, size) {
+  if (!role || !ROLE_BADGES[role]) return '';
+  const r = ROLE_BADGES[role];
+  const cls = size === 'large' ? 'role-badge large ' + role : 'role-badge ' + role;
+  return `<span class="${cls}" title="${r.label}">${r.icon}<span>${r.text}</span></span>`;
+}
+
+// Kullanıcının rolü
+function currentUserRole() {
+  if (!state.user) return 'user';
+  if (window.fbAuth && window.fbAuth.isAdmin()) return 'admin';
+  if (state.user.role === 'admin') return 'admin';
+  if (state.user.role === 'moderator') return 'moderator';
+  return 'user';
+}
+function isModeratorOrAdmin() {
+  const r = currentUserRole();
+  return r === 'admin' || r === 'moderator';
+}
+
+// ============================================================
 // AVATAR GALERİSİ
 // ============================================================
 
@@ -7009,10 +7340,26 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.25';
+const CURRENT_VERSION = 'v1.26';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.26',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'ROL SİSTEMİ + GÜNLÜK OTOMATİK KAYIT',
+    items: [
+      { cat: 'major', text: '<strong>Admin / Moderatör / User</strong> rol sistemi eklendi' },
+      { cat: 'feature', text: 'Admin paneli üzerinden rol verme/değiştirme' },
+      { cat: 'feature', text: 'Admin (kırmızı kalkan) ve Moderatör (mavi kalkan) rozetleri' },
+      { cat: 'feature', text: 'Moderatörler sınırlı yetkiyle admin paneline erişebilir (kullanıcı silme)' },
+      { cat: 'feature', text: 'Roller header, sıralama ve admin panelinde görünür' },
+      { cat: 'major', text: 'Şirket kurulduktan sonra <strong>kayıt slotu seç</strong> ekranı' },
+      { cat: 'feature', text: 'Her gün geçişinde otomatik bulut kaydı (seçili slota)' },
+      { cat: 'feature', text: 'Yüklenen veya manuel kaydedilen slot otomatik kayıt slotu olur' }
+    ]
+  },
   {
     version: 'v1.25',
     date: '11 Mayıs 2026',
@@ -7384,7 +7731,9 @@ function renderAuthButton() {
 
     const tier = currentVipTier();
     const vipHtml = tier ? vipBadgeHTML(tier) : '';
-    name.innerHTML = displayName.split(' ')[0] + vipHtml;
+    const role = currentUserRole();
+    const roleHtml = (role === 'admin' || role === 'moderator') ? roleBadgeHTML(role) : '';
+    name.innerHTML = displayName.split(' ')[0] + roleHtml + vipHtml;
   } else {
     btn.classList.remove('signed-in');
     avatar.innerHTML = '👤';
@@ -7553,9 +7902,10 @@ async function doCloudSave(slotId) {
     await window.fbAuth.saveGame(state.user.uid, slotId, data);
     state.lastCloudSave = state.day;
     state.hasUnsavedChanges = false;
+    state.activeSlot = slotId;  // Bu slot artık otomatik kayıt slotu olsun
     showCloudIndicator('☁ Kaydedildi (Gün ' + state.day + ')', 'success');
     closeModal();
-    toast('✓ Bulut kaydı tamamlandı', 'success');
+    toast('✓ Bulut kaydı tamamlandı · Bu slot artık otomatik kayıt slotu', 'success');
   } catch (err) {
     console.error('Save error:', err);
     showCloudIndicator('Kayıt hatası: ' + err.message, 'error');
@@ -7572,11 +7922,12 @@ async function doCloudLoad(slotId) {
     const result = await window.fbAuth.loadGame(state.user.uid, slotId);
     if (!result) { toast('Slot boş', 'error'); return; }
     deserializeState(result.data);
+    state.activeSlot = slotId;  // Yüklenen slot artık otomatik kayıt slotu
     closeModal();
     setView('inbox');
     render();
     showCloudIndicator('☁ Yüklendi: Gün ' + state.day, 'success');
-    toast('✓ Kayıt yüklendi', 'success');
+    toast('✓ Kayıt yüklendi · ' + slotId.replace('slot', 'Slot ') + ' otomatik kayıt için aktif', 'success');
   } catch (err) {
     console.error('Load error:', err);
     showCloudIndicator('Yükleme hatası: ' + err.message, 'error');
@@ -7597,6 +7948,7 @@ window.addEventListener('fb:auth-changed', async (e) => {
         state.user.vipUntil = profile.vipUntil || null;
         state.user.avatarId = profile.avatarId || null;
         state.user.customDisplayName = profile.customDisplayName || null;
+        state.user.role = profile.role || null;
         state.user.memberSince = profile.lastSeen?.toDate?.() || null;
         renderAuthButton();
       }

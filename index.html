@@ -3177,6 +3177,94 @@ const VEHICLE_TYPES = {
 };
 const FUEL_PRICE = 52; // TL/litre (2026 Mayıs İstanbul motorin)
 
+// Bir aracın güncel değerini hesapla — KM'ye göre yıpranma
+// 0 km → %95 (sıfır indirim, hemen %5 değer kaybı)
+// 600.000 km → %20 (taban değer)
+function vehicleResaleValue(vehicle) {
+  const t = VEHICLE_TYPES[vehicle.type];
+  if (!t) return 0;
+  const km = vehicle.km || 0;
+  // Doğrusal yıpranma: her 100k km'de değer %12-13 düşer
+  const wearFactor = Math.max(0.20, 0.95 - (km / 600000) * 0.75);
+  return Math.round(t.cost * wearFactor);
+}
+
+// İkinci el alış fiyatı — piyasa, satıştan biraz pahalı (komisyon + kar)
+function vehicleSecondhandPrice(type, km) {
+  const t = VEHICLE_TYPES[type];
+  if (!t) return 0;
+  const wearFactor = Math.max(0.25, 0.95 - (km / 600000) * 0.75);
+  // İkinci el bayisinde %15 kar marjı var (satışa göre)
+  const dealer = wearFactor * 1.15;
+  return Math.round(t.cost * Math.min(dealer, 0.85));
+}
+
+// KM kategorisi (renk için)
+function kmCategory(km) {
+  if (km < 50000) return { label: 'Sıfır gibi', color: 'var(--green)' };
+  if (km < 150000) return { label: 'Az kullanılmış', color: 'var(--green)' };
+  if (km < 300000) return { label: 'Orta', color: 'var(--accent)' };
+  if (km < 500000) return { label: 'Yüksek KM', color: 'var(--red)' };
+  return { label: 'Çok yüksek KM', color: 'var(--red)' };
+}
+
+// İkinci el piyasası ilan üretici. Her gün rastgele 1-2 yeni ilan, eskiler 5 gün sonra silinir
+const USED_SELLER_NAMES = [
+  'Murat Otomotiv',
+  'Ankara Galericiler',
+  'İstanbul Oto Bayi',
+  'Kayseri Nakliye',
+  'Esenler Sanayi',
+  'İzmir Tır Pazarı',
+  'Bursa Ticari Araç',
+  'Kocaeli Galeri',
+  'Yıldız Otomotiv',
+  'Pendik Oto Pazar'
+];
+
+function generateUsedVehicleListing() {
+  const types = Object.keys(VEHICLE_TYPES);
+  const type = types[Math.floor(Math.random() * types.length)];
+  // KM dağılımı: çoğunluk 80k-250k, bazen 30k veya 400k+
+  let km;
+  const r = Math.random();
+  if (r < 0.15) km = Math.round(20000 + Math.random() * 30000);  // %15 — düşük KM (pahalı)
+  else if (r < 0.65) km = Math.round(80000 + Math.random() * 170000); // %50 — orta
+  else if (r < 0.9) km = Math.round(250000 + Math.random() * 200000); // %25 — yüksek
+  else km = Math.round(450000 + Math.random() * 150000); // %10 — çok yüksek
+
+  const basePrice = vehicleSecondhandPrice(type, km);
+  // Bayi kar marjı: rastgele ±%15 fiyat dalgalanması (pazarlık olabilir hissi)
+  const variance = 0.85 + Math.random() * 0.30;
+  const price = Math.round(basePrice * variance);
+
+  return {
+    id: 'used' + uid(),
+    type,
+    km,
+    price,
+    listedDay: state.day,
+    expiresDay: state.day + 5 + Math.floor(Math.random() * 3),
+    sellerName: USED_SELLER_NAMES[Math.floor(Math.random() * USED_SELLER_NAMES.length)]
+  };
+}
+
+// Piyasayı yenile — günde 1-2 yeni ilan, eski ilanlar süresi dolunca silinir
+function refreshUsedVehicleMarket() {
+  if (!state.usedVehicleMarket) state.usedVehicleMarket = [];
+
+  // Süresi dolanları sil
+  state.usedVehicleMarket = state.usedVehicleMarket.filter(v => v.expiresDay >= state.day);
+
+  // Hedef: piyasada her zaman 5-8 araç olsun
+  const target = 6 + Math.floor(Math.random() * 3);
+  while (state.usedVehicleMarket.length < target) {
+    state.usedVehicleMarket.push(generateUsedVehicleListing());
+  }
+
+  state.usedMarketLastRefresh = state.day;
+}
+
 // İsim havuzları
 const NAMES_M = ['Mehmet','Ahmet','Mustafa','Ali','Hasan','Hüseyin','İbrahim','Murat','Emre','Burak','Cem','Serkan','Tolga','Onur','Kemal','Selim','Yusuf','Kerem','Tarık','Bora','Volkan','Eren','Furkan'];
 const NAMES_F = ['Ayşe','Fatma','Zeynep','Elif','Merve','Sevgi','Pınar','Selin','Deniz','Esra','Burcu','Tuğba','Yasemin','Damla'];
@@ -3246,6 +3334,10 @@ const state = {
   hasUnsavedChanges: false,
   activeSlot: null,           // 'slot1' | 'slot2' | 'slot3' — günlük otomatik kayıt slotu
 
+  // İkinci el araç piyasası
+  usedVehicleMarket: [],      // {id, type, km, price, listedDay, expiresDay, sellerName}
+  usedMarketLastRefresh: 0,   // son yenileme günü
+
   // Search filters (yeni)
   marketSearch: '',
   marketCategory: 'all',
@@ -3276,7 +3368,7 @@ rollPrices();
 
 // Starting vehicle (free 1.5t pickup)
 state.vehicles.push({
-  id: 'v1', type: 'kamyonet', busyUntil: 0, deliveringContractId: null, name: 'Pikabımız'
+  id: 'v1', type: 'kamyonet', busyUntil: 0, deliveringContractId: null, name: 'Pikabımız', km: 0, purchaseDay: 1
 });
 
 // ============================================================
@@ -4846,54 +4938,160 @@ function closeReceipt() {
 
 // ----- FLEET / DISPATCH -----
 
+// Filo görünümü için aktif sekme state'i (sadece UI)
+let _fleetTab = 'mine';
+
 function renderFleet() {
   const c = $('center');
+  // İlk ziyarette piyasa boşsa hemen doldur
+  if (!state.usedVehicleMarket || state.usedVehicleMarket.length === 0) {
+    refreshUsedVehicleMarket();
+  }
+
+  // Filo özeti
+  const totalKm = state.vehicles.reduce((s, v) => s + (v.km || 0), 0);
+  const totalResale = state.vehicles.reduce((s, v) => s + vehicleResaleValue(v), 0);
+
   c.innerHTML = `<h2>FİLO & SEVKİYAT</h2>
-    <div class="subtitle">${state.vehicles.length} araç · ${state.drivers.length} şoför</div>
+    <div class="subtitle">${state.vehicles.length} araç · ${state.drivers.length} şoför · Filo değeri: ${fmt(totalResale)}</div>
 
     <div class="stat-grid">
       <div class="stat-tile"><div class="stat-label">Araç Sayısı</div><div class="stat-val" style="color: var(--blue)">${state.vehicles.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Toplam Tonaj</div><div class="stat-val">${state.vehicles.reduce((s,v) => s + VEHICLE_TYPES[v.type].tonaj, 0)} ton</div></div>
       <div class="stat-tile"><div class="stat-label">Aktif Sevkiyat</div><div class="stat-val" style="color: var(--accent)">${state.vehicles.filter(v => v.busyUntil > state.day).length}</div></div>
-      <div class="stat-tile"><div class="stat-label">Şoförsüz Araç</div><div class="stat-val" style="color: var(--red)">${state.vehicles.filter(v => !state.drivers.some(d => d.vehicleId === v.id)).length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam KM</div><div class="stat-val">${totalKm.toLocaleString('tr-TR')}</div></div>
     </div>
 
-    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">ARAÇLAR</h3>
-    <div class="grid-2">
-      ${state.vehicles.map(v => {
-        const t = VEHICLE_TYPES[v.type];
-        const driver = state.drivers.find(d => d.vehicleId === v.id);
-        const busy = v.busyUntil > state.day;
-        return `<div class="card">
-          <h3>${v.name || t.name}</h3>
-          <div class="loc">${t.name} · ${t.tonaj} ton kapasite</div>
-          <div style="font-size: 11px; line-height: 1.7;">
-            <div>📍 Durum: <strong style="color: ${busy ? 'var(--accent)' : 'var(--green)'}">${busy ? 'Yolda (G' + v.busyUntil + ' dönüş)' : 'Garajda'}</strong></div>
-            <div>👤 Şoför: ${driver ? `<strong>${driver.name}</strong> (Sv ${driver.level})` : '<span style="color: var(--red)">Atanmamış</span>'}</div>
-            <div>⛽ Yakıt: ${t.fuelPerKm} L/km · Hız çarpanı: ×${t.speed}</div>
+    <div class="filter-chips" style="margin-bottom: 18px;">
+      <div class="filter-chip ${_fleetTab === 'mine' ? 'active' : ''}" onclick="changeFleetTab('mine')">🚛 Filomuz (${state.vehicles.length})</div>
+      <div class="filter-chip ${_fleetTab === 'new' ? 'active' : ''}" onclick="changeFleetTab('new')">🆕 Sıfır Araç</div>
+      <div class="filter-chip ${_fleetTab === 'used' ? 'active' : ''}" onclick="changeFleetTab('used')">🔄 İkinci El (${(state.usedVehicleMarket || []).length})</div>
+    </div>
+
+    <div id="fleet-content"></div>`;
+
+  renderFleetContent();
+}
+
+function changeFleetTab(tab) {
+  _fleetTab = tab;
+  renderFleet();
+}
+
+function renderFleetContent() {
+  const c = $('fleet-content');
+  if (!c) return;
+
+  if (_fleetTab === 'mine') {
+    c.innerHTML = renderMyFleet();
+  } else if (_fleetTab === 'new') {
+    c.innerHTML = renderNewVehicles();
+  } else if (_fleetTab === 'used') {
+    c.innerHTML = renderUsedMarket();
+  }
+}
+
+// FİLOMUZ — KM, durum, şoför, sat butonu
+function renderMyFleet() {
+  if (state.vehicles.length === 0) {
+    return '<div class="empty">Henüz aracın yok. "Sıfır Araç" veya "İkinci El" sekmesinden satın al.</div>';
+  }
+
+  return `<div class="grid-2">
+    ${state.vehicles.map(v => {
+      const t = VEHICLE_TYPES[v.type];
+      const driver = state.drivers.find(d => d.vehicleId === v.id);
+      const busy = v.busyUntil > state.day;
+      const km = v.km || 0;
+      const kmCat = kmCategory(km);
+      const resaleValue = vehicleResaleValue(v);
+      const ageDay = state.day - (v.purchaseDay || 1);
+
+      return `<div class="card">
+        <h3>${v.name || t.name}</h3>
+        <div class="loc">${t.name} · ${t.tonaj} ton kapasite</div>
+        <div style="font-size: 11px; line-height: 1.7;">
+          <div>📍 Durum: <strong style="color: ${busy ? 'var(--accent)' : 'var(--green)'}">${busy ? 'Yolda (G' + v.busyUntil + ' dönüş)' : 'Garajda'}</strong></div>
+          <div>👤 Şoför: ${driver ? `<strong>${driver.name}</strong> (Sv ${driver.level})` : '<span style="color: var(--red)">Atanmamış</span>'}</div>
+          <div>📏 KM: <strong style="color: ${kmCat.color};">${km.toLocaleString('tr-TR')}</strong> <span style="color: var(--ink-dim); font-size: 10px;">(${kmCat.label})</span></div>
+          <div>⛽ Yakıt: ${t.fuelPerKm} L/km · Hız: ×${t.speed}</div>
+          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--ink-dim);">
+            🏷 Satış değeri: <strong style="color: var(--green);">${fmt(resaleValue)}</strong>
+            ${ageDay > 0 ? ` · ${ageDay} gündür filoda` : ''}
           </div>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
           ${!driver && state.drivers.filter(d => !d.vehicleId).length > 0 ? `
-            <select class="text-input" id="assign-${v.id}" style="margin-top: 8px;">
+            <select class="text-input" id="assign-${v.id}" style="flex: 1; min-width: 140px;">
               ${state.drivers.filter(d => !d.vehicleId).map(d => `<option value="${d.id}">${d.name} (Sv ${d.level})</option>`).join('')}
             </select>
-            <button class="btn small primary" style="margin-top: 6px;" onclick="assignDriver('${v.id}')">ŞOFÖR ATA</button>
+            <button class="btn small primary" onclick="assignDriver('${v.id}')">ATA</button>
           ` : ''}
-        </div>`;
-      }).join('')}
-    </div>
-
-    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 24px; margin-bottom: 10px;">YENİ ARAÇ AL</h3>
-    <div class="grid-2">
-      ${Object.entries(VEHICLE_TYPES).map(([k, t]) => `<div class="card">
-        <h3>${t.name}</h3>
-        <div style="font-size: 11px; line-height: 1.7;">
-          <div>Tonaj: <strong>${t.tonaj} ton</strong></div>
-          <div>Yakıt: ${t.fuelPerKm} L/km · Hız: ×${t.speed}</div>
-          <div style="margin-top: 6px; color: var(--accent); font-size: 14px; font-weight: 700;">${fmt(t.cost)}</div>
+          ${!busy ? `<button class="btn small danger" onclick="sellVehicle('${v.id}')">SAT</button>` : ''}
         </div>
-        <button class="btn primary" style="margin-top: 10px;" onclick="buyVehicle('${k}')" ${state.cash >= t.cost ? '' : 'disabled'}>SATIN AL</button>
-      </div>`).join('')}
-    </div>`;
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// SIFIR ARAÇ
+function renderNewVehicles() {
+  return `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--green); font-size: 11px;">
+    <strong style="color: var(--green);">Sıfır araçlar</strong> — Galeriden teslim alınır, 0 km, garanti dahil. Yıllar içinde değer kaybeder.
+  </div>
+  <div class="grid-2">
+    ${Object.entries(VEHICLE_TYPES).map(([k, t]) => `<div class="card">
+      <h3>${t.name}</h3>
+      <div style="font-size: 11px; line-height: 1.7;">
+        <div>Tonaj: <strong>${t.tonaj} ton</strong></div>
+        <div>Yakıt: ${t.fuelPerKm} L/km · Hız çarpanı: ×${t.speed}</div>
+        <div style="margin-top: 6px; color: var(--accent); font-size: 14px; font-weight: 700;">${fmt(t.cost)}</div>
+      </div>
+      <button class="btn primary" style="margin-top: 10px; width: 100%;" onclick="buyVehicle('${k}')" ${state.cash >= t.cost ? '' : 'disabled'}>
+        ${state.cash >= t.cost ? 'SATIN AL (SIFIR)' : 'KASADA YETMEZ'}
+      </button>
+    </div>`).join('')}
+  </div>`;
+}
+
+// İKİNCİ EL PİYASASI
+function renderUsedMarket() {
+  const listings = state.usedVehicleMarket || [];
+  if (listings.length === 0) {
+    return '<div class="empty">İkinci el piyasasında henüz ilan yok. Bir gün geçince yeni ilanlar gelir.</div>';
+  }
+
+  return `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--blue); font-size: 11px;">
+    <strong style="color: var(--blue);">İkinci el piyasası</strong> — Galericilerden gelen güncel ilanlar. Her ilan birkaç gün sonra kalkar.
+    Fiyatlar KM ve modele göre değişir. Sıfırın yaklaşık <strong>%25-75</strong>'i kadar.
+  </div>
+  <div class="grid-2">
+    ${listings.map(l => {
+      const t = VEHICLE_TYPES[l.type];
+      const kmCat = kmCategory(l.km);
+      const newPriceDiff = Math.round((1 - l.price / t.cost) * 100);
+      const daysLeft = l.expiresDay - state.day;
+      return `<div class="card">
+        <h3>${t.name}</h3>
+        <div class="loc">${l.sellerName}</div>
+        <div style="font-size: 11px; line-height: 1.7;">
+          <div>📏 KM: <strong style="color: ${kmCat.color}; font-size: 13px;">${l.km.toLocaleString('tr-TR')}</strong> <span style="color: var(--ink-dim); font-size: 10px;">(${kmCat.label})</span></div>
+          <div>Tonaj: <strong>${t.tonaj} ton</strong> · Yakıt: ${t.fuelPerKm} L/km</div>
+          <div style="margin-top: 4px;">
+            <span style="color: var(--ink-dim); text-decoration: line-through;">${fmt(t.cost)} sıfır</span>
+            <span style="color: var(--green); margin-left: 6px;">-%${newPriceDiff}</span>
+          </div>
+          <div style="margin-top: 4px; color: var(--accent); font-size: 16px; font-weight: 700;">${fmt(l.price)}</div>
+          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 10px; color: var(--ink-dim);">
+            ⏰ ${daysLeft <= 1 ? 'Son gün!' : daysLeft + ' gün sonra ilan düşer'}
+          </div>
+        </div>
+        <button class="btn primary" style="margin-top: 10px; width: 100%;" onclick="buyUsedVehicle('${l.id}')" ${state.cash >= l.price ? '' : 'disabled'}>
+          ${state.cash >= l.price ? 'SATIN AL' : 'KASADA YETMEZ'}
+        </button>
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 
 function assignDriver(vid) {
@@ -4915,10 +5113,71 @@ function buyVehicle(type) {
     type,
     busyUntil: 0,
     deliveringContractId: null,
-    name: t.name + ' #' + (state.vehicles.length + 1)
+    name: t.name + ' #' + (state.vehicles.length + 1),
+    km: 0,
+    purchaseDay: state.day
   });
-  toast(`${t.name} satın alındı.`, 'success');
+  toast(`${t.name} satın alındı (sıfır).`, 'success');
   addXP(15, 'yeni araç');
+  render();
+}
+
+// İkinci el alım
+function buyUsedVehicle(listingId) {
+  if (!state.usedVehicleMarket) state.usedVehicleMarket = [];
+  const idx = state.usedVehicleMarket.findIndex(v => v.id === listingId);
+  if (idx < 0) { toast('İlan artık mevcut değil.', 'error'); return; }
+  const listing = state.usedVehicleMarket[idx];
+  if (state.cash < listing.price) { toast('Kasada yetmez.', 'error'); return; }
+  const t = VEHICLE_TYPES[listing.type];
+  spend(listing.price, 'arac');
+  state.vehicles.push({
+    id: 'v' + uid(),
+    type: listing.type,
+    busyUntil: 0,
+    deliveringContractId: null,
+    name: t.name + ' #' + (state.vehicles.length + 1),
+    km: listing.km,
+    purchaseDay: state.day
+  });
+  state.usedVehicleMarket.splice(idx, 1);
+  toast(`${t.name} (${listing.km.toLocaleString('tr-TR')} km) satın alındı: ${fmt(listing.price)}`, 'success');
+  addXP(10, 'ikinci el araç');
+  render();
+}
+
+// Aracı sat
+function sellVehicle(vehicleId) {
+  const idx = state.vehicles.findIndex(v => v.id === vehicleId);
+  if (idx < 0) return;
+  const v = state.vehicles[idx];
+
+  // Sevkiyatta mı?
+  if (v.busyUntil > state.day || v.deliveringContractId) {
+    toast('Bu araç şu anda görevde. Sevkiyat bitince satabilirsin.', 'error');
+    return;
+  }
+
+  // Şoför atanmış mı?
+  const driver = state.drivers.find(d => d.vehicleId === v.id);
+  const resaleValue = vehicleResaleValue(v);
+  const t = VEHICLE_TYPES[v.type];
+
+  let warning = '';
+  if (driver) {
+    warning = `\n\nŞoför ${driver.name} bu araca atanmış. Satıştan sonra şoför boşa kalacak.`;
+  }
+
+  if (!confirm(`${t.name} satılacak\nKM: ${v.km.toLocaleString('tr-TR')}\nSatış değeri: ${fmt(resaleValue)}${warning}\n\nDevam edilsin mi?`)) return;
+
+  // Şoförün vehicleId'sini temizle
+  if (driver) {
+    driver.vehicleId = null;
+  }
+
+  earn(resaleValue, 'arac-satis');
+  state.vehicles.splice(idx, 1);
+  toast(`✓ ${t.name} satıldı: +${fmt(resaleValue)}`, 'success');
   render();
 }
 
@@ -5090,6 +5349,9 @@ function executeDispatch(ctId) {
   load.forEach(l => state.inventory[l.productId] -= l.qty);
   const fuelCost = Math.round(t.fuelPerKm * dist * 2 * FUEL_PRICE);
   spend(fuelCost, 'yakit');
+
+  // Aracın KM'si gidiş-dönüş kadar artar
+  v.km = (v.km || 0) + dist * 2;
 
   // Driver speed bonus
   const driverSpeedBonus = 1 + (driver ? (driver.level - 1) * 0.05 : 0);
@@ -6426,6 +6688,7 @@ function nextDay() {
   state.day++;
   state.agenda = [];
   rollPrices();
+  refreshUsedVehicleMarket();
 
   // 1) Process answered tenders → win/loss
   const stillInbox = [];
@@ -7340,10 +7603,26 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.26';
+const CURRENT_VERSION = 'v1.27';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.27',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'ARAÇ KM + İKİNCİ EL PİYASASI',
+    items: [
+      { cat: 'major', text: 'Tüm araçların artık <strong>KM bilgisi</strong> var, sevkiyatlarla artar' },
+      { cat: 'major', text: '<strong>İkinci el araç piyasası</strong> açıldı — her gün yeni ilanlar' },
+      { cat: 'feature', text: 'Filo sayfasında 3 sekme: Filomuz · Sıfır Araç · İkinci El' },
+      { cat: 'feature', text: 'Kendi araçlarını <strong>SAT</strong> edebilirsin (KM\'ye göre değer kaybı)' },
+      { cat: 'feature', text: 'Her aracın güncel satış değeri kartta görünür' },
+      { cat: 'feature', text: 'KM kategorileri: Sıfır gibi · Az kullanılmış · Orta · Yüksek · Çok yüksek' },
+      { cat: 'feature', text: 'Galericiler: Murat Otomotiv, İstanbul Oto Bayi, Bursa Ticari Araç vs.' },
+      { cat: 'feature', text: 'İlanların 5-7 gün ömrü var, süresi geçince düşer ve yenisi gelir' }
+    ]
+  },
   {
     version: 'v1.26',
     date: '11 Mayıs 2026',

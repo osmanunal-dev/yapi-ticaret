@@ -3305,6 +3305,7 @@ const state = {
   drivers: [],        // { id, name, salary, level, xp, hireDay, vehicleId }
   salesReps: [],      // { id, name, salary, level, xp, hireDay, ilce, busyUntil, visitingCustomerId }
   fieldSalesReps: [], // Saha Satış Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDeals, totalRevenue }
+  purchasers: [],     // Satın Alma Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalPurchases, totalSavings }
 
   // Bank
   loans: [],          // { id, principal, remaining, interestRate, dailyPayment, daysLeft, takenDay }
@@ -3338,6 +3339,10 @@ const state = {
   // İkinci el araç piyasası
   usedVehicleMarket: [],      // {id, type, km, price, listedDay, expiresDay, sellerName}
   usedMarketLastRefresh: 0,   // son yenileme günü
+
+  // Tedarikçi ilişki sistemi (Satın Alma Sorumlusu için)
+  // Her tedarikçi için 0-100 arası bağ puanı (alış yapıldıkça artar)
+  supplierLoyalty: {},        // { supplierId: 0-100 }
 
   // Search filters (yeni)
   marketSearch: '',
@@ -3402,6 +3407,27 @@ function currentPrice(productId) {
 }
 function supplierPrice(supplier, productId) {
   return Math.round(currentPrice(productId) * supplier.priceMod);
+}
+
+// Satın Alma Sorumlusu için indirimli fiyat — tedarikçi bağı + personel seviyesi
+// İndirim formülü: (loyalty/100) × 5% × (personel level / 3)
+// Sv1 max %1.67, Sv2 max %3.33, Sv3 max %5
+function supplierPriceWithLoyalty(supplier, productId, purchaserLevel) {
+  const base = supplierPrice(supplier, productId);
+  const loyalty = (state.supplierLoyalty || {})[supplier.id] || 0;
+  const levelMult = (purchaserLevel || 1) / 3;
+  const discount = (loyalty / 100) * 0.05 * levelMult;
+  return Math.round(base * (1 - discount));
+}
+
+// Bağ seviyesini metin olarak döndür
+function loyaltyLabel(supplierId) {
+  const l = (state.supplierLoyalty || {})[supplierId] || 0;
+  if (l < 10) return { label: 'Yeni', color: 'var(--ink-dim)' };
+  if (l < 30) return { label: 'Tanışıyor', color: 'var(--blue)' };
+  if (l < 60) return { label: 'İyi ilişki', color: 'var(--accent)' };
+  if (l < 85) return { label: 'Yakın bağ', color: 'var(--green)' };
+  return { label: 'Güçlü ortak', color: 'var(--purple)' };
 }
 
 // Bir malzeme için piyasada bulunan en ucuz tedarikçi fiyatı
@@ -3880,6 +3906,116 @@ function tryFieldSalesVisit(rep) {
 }
 
 // ============================================================
+// SATIN ALMA SORUMLUSU — Sözleşme ihtiyaçlarını analiz et
+// ============================================================
+
+// Bir satın alma sorumlusu çalışır: sözleşme ihtiyaçlarını analiz eder, alış paketleri oluşturur
+// returns: { purchases: [{supplier, items: [{productId, qty, unit, total}], total, savings}], totalCost, totalSavings } | null
+function tryPurchaserProposal(rep) {
+  // Aktif sözleşmelerden malzeme ihtiyaçlarını hesapla
+  const needs = {}; // { productId: needed_qty }
+  state.contracts.forEach(ct => {
+    if (ct.delivered) return;
+    ct.items.forEach(it => {
+      const delivered = (ct.deliveries || []).reduce((s, d) =>
+        s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+      const remaining = Math.max(0, it.qty - delivered);
+      if (remaining > 0) {
+        needs[it.productId] = (needs[it.productId] || 0) + remaining;
+      }
+    });
+  });
+
+  // Stoktan düş — sadece gerçekten eksik olanları al
+  const shortages = {};
+  Object.entries(needs).forEach(([pid, qty]) => {
+    const stock = state.inventory[pid] || 0;
+    const short = qty - stock;
+    if (short > 0) shortages[pid] = short;
+  });
+
+  // Hiç eksik yoksa boş döndür
+  if (Object.keys(shortages).length === 0) return null;
+
+  // Her eksik malzeme için en uygun tedarikçi (loyalty indirimi dahil)
+  // Tedarikçi başına grupla
+  const supplierPackages = {}; // { supplierId: { supplier, items: [], total } }
+
+  Object.entries(shortages).forEach(([pid, qty]) => {
+    // En uygun tedarikçiyi bul (loyalty indirimi dahil)
+    const sellers = SUPPLIERS.filter(s => s.products.includes(pid));
+    if (sellers.length === 0) return; // bu malzemeyi kimse satmıyor (olmamalı)
+
+    let bestSupplier = sellers[0];
+    let bestPrice = supplierPriceWithLoyalty(sellers[0], pid, rep.level);
+    for (const s of sellers) {
+      const p = supplierPriceWithLoyalty(s, pid, rep.level);
+      if (p < bestPrice) {
+        bestPrice = p;
+        bestSupplier = s;
+      }
+    }
+
+    // Bu satın almanın "indirimsiz" karşılığı (tasarruf hesabı için)
+    const undiscountedPrice = supplierPrice(bestSupplier, pid);
+    const savings = (undiscountedPrice - bestPrice) * qty;
+
+    if (!supplierPackages[bestSupplier.id]) {
+      supplierPackages[bestSupplier.id] = {
+        supplier: bestSupplier,
+        items: [],
+        total: 0,
+        savings: 0
+      };
+    }
+    supplierPackages[bestSupplier.id].items.push({
+      productId: pid,
+      qty,
+      unitPrice: bestPrice,
+      undiscountedPrice,
+      lineTotal: bestPrice * qty
+    });
+    supplierPackages[bestSupplier.id].total += bestPrice * qty;
+    supplierPackages[bestSupplier.id].savings += savings;
+  });
+
+  const purchases = Object.values(supplierPackages);
+  const totalCost = purchases.reduce((s, p) => s + p.total, 0);
+  const totalSavings = purchases.reduce((s, p) => s + p.savings, 0);
+
+  // Mail
+  const intros = [
+    `Patron, aktif sözleşmelerimiz için malzeme analizi yaptım.`,
+    `Şefim, sözleşmelerimizin eksik kalemlerini tarayıp en uygun tedarikçileri seçtim.`,
+    `Selam patron, satın alma önerilerim hazır. Onayınla anında alırım.`,
+    `Patron, malzeme ihtiyaçları için piyasayı taradım, alım listesi şu şekilde:`
+  ];
+
+  const supplierSummary = purchases.map(p => {
+    const loyalty = (state.supplierLoyalty || {})[p.supplier.id] || 0;
+    const loyaltyInfo = loyalty > 10 ? ` (bağ %${loyalty.toFixed(0)})` : '';
+    return `• ${p.supplier.name}${loyaltyInfo}: ${p.items.length} kalem · ${fmt(p.total)}`;
+  }).join('\n');
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'purchase-proposal',
+    repId: rep.id,
+    repName: rep.name,
+    purchases,
+    totalCost,
+    totalSavings,
+    receivedDay: state.day,
+    expiresDay: state.day + 2,
+    subject: `🛒 Satın Alma Önerisi — ${purchases.length} tedarikçi, ${Object.keys(shortages).length} kalem`,
+    body: choice(intros) + `\n\nEksik malzeme tespit edildi: ${Object.keys(shortages).length} kalem\nÖnerilen tedarikçiler:\n\n${supplierSummary}\n\nToplam alış: ${fmt(totalCost)}${totalSavings > 0 ? `\nİlişkilerimiz sayesinde indirim: ${fmt(totalSavings)}` : ''}\n\nOnaylarsan hepsini tek seferde alıp stoğa eklerim.`,
+    unread: true,
+    answered: false,
+    sender: 'employee'
+  };
+}
+
+// ============================================================
 // VIEWS
 // ============================================================
 
@@ -4143,6 +4279,20 @@ function renderInbox() {
           </div>`;
         }
 
+        if (e.type === 'purchase-proposal') {
+          // Satın alma sorumlusundan gelen alış önerisi
+          const totalItems = e.purchases.reduce((s, p) => s + p.items.length, 0);
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--accent);">
+            <div class="top">
+              <span class="from">🛒 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Satın Alma</span></span>
+              <span class="date">Gün ${e.receivedDay}</span>
+            </div>
+            <div class="subject">${e.subject}</div>
+            <div class="preview">${e.purchases.length} tedarikçi · ${totalItems} kalem · Toplam: ${fmt(e.totalCost)}${e.totalSavings > 0 ? ` · Tasarruf: <strong style="color: var(--green);">${fmt(e.totalSavings)}</strong>` : ''}</div>
+            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+          </div>`;
+        }
+
         // Varsayılan: tender (müşteri ihalesi)
         return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
           <div class="top">
@@ -4325,6 +4475,156 @@ function rejectFSProposal(emailId) {
   render();
 }
 
+// Satın alma önerisinin detay ekranı
+function renderPurchaseProposalDetail(e) {
+  const c = $('center');
+  const expIn = e.expiresDay - state.day;
+
+  const supplierBlocks = e.purchases.map(p => {
+    const loyalty = (state.supplierLoyalty || {})[p.supplier.id] || 0;
+    const loyaltyInfo = loyaltyLabel(p.supplier.id);
+    const discount = loyalty > 0 && p.savings > 0 ? `<span style="color: var(--green); font-size: 11px;">İlişki indirimi: -${fmt(p.savings)}</span>` : '';
+
+    const itemRows = p.items.map(it => {
+      const product = PRODUCTS[it.productId];
+      return `<tr>
+        <td><strong>${product.name}</strong></td>
+        <td class="num">${it.qty} ${product.unit}</td>
+        <td class="num">${fmt(it.unitPrice)}</td>
+        <td class="num">${fmt(it.lineTotal)}</td>
+      </tr>`;
+    }).join('');
+
+    return `<div style="background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 14px; margin-bottom: 14px;">
+      <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; align-items: flex-start; margin-bottom: 10px;">
+        <div>
+          <div style="font-family: 'Bebas Neue'; font-size: 16px; letter-spacing: 1px;">${p.supplier.name}</div>
+          <div style="font-size: 10px; color: var(--ink-dim);">${ILCELER[p.supplier.ilce].name} · Bağ: <strong style="color: ${loyaltyInfo.color};">${loyaltyInfo.label} (${loyalty.toFixed(0)}/100)</strong></div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; color: var(--accent);">${fmt(p.total)}</div>
+          ${discount}
+        </div>
+      </div>
+      <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th>Malzeme</th><th class="num">Miktar</th><th class="num">Birim</th><th class="num">Tutar</th></tr></thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      </div>
+    </div>`;
+  }).join('');
+
+  c.innerHTML = `<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+      <button class="btn" onclick="state.selectedEmail=null; render()">← Geri</button>
+      <h2 style="margin: 0; flex: 1;">🛒 SATIN ALMA ÖNERİSİ</h2>
+    </div>
+
+    <div style="background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 16px; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+        <div>
+          <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Personelden</div>
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1px; color: var(--accent);">🛒 ${e.repName}</div>
+        </div>
+      </div>
+      <div style="font-size: 12px; line-height: 1.7; color: var(--ink); white-space: pre-line; padding: 12px; background: var(--panel-2); border-left: 2px solid var(--accent);">${e.body}</div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">TEDARİKÇİ ÖNERİLERİ (${e.purchases.length})</h3>
+    ${supplierBlocks}
+
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile">
+        <div class="stat-label">Toplam Alış</div>
+        <div class="stat-val" style="color: var(--red);">${fmt(e.totalCost)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Toplam Tasarruf</div>
+        <div class="stat-val" style="color: var(--green); font-size: 14px;">${fmt(e.totalSavings)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Kasandaki Para</div>
+        <div class="stat-val" style="color: ${state.cash >= e.totalCost ? 'var(--green)' : 'var(--red)'}; font-size: 14px;">${fmt(state.cash)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Cevap Süresi</div>
+        <div class="stat-val" style="font-size: 14px;">${expIn <= 0 ? 'Bugün son!' : expIn + ' gün'}</div>
+      </div>
+    </div>
+
+    <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
+      <strong>📌 Bilgi:</strong> Onaylarsan tüm malzemeler tek seferde alınır ve stoğa eklenir. Tedarikçilerle bağ kuvvetlenir.
+      ${state.cash < e.totalCost ? '<br><span style="color: var(--red);">⚠️ Kasanda yetersiz para! Kısmi alım yapamazsın. Önce krediye/tahsilata bak.</span>' : ''}
+    </div>
+
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px;" onclick="approvePurchaseProposal(${e.id})" ${state.cash >= e.totalCost ? '' : 'disabled'}>
+        ✓ ALIŞI ONAYLA (${fmt(e.totalCost)})
+      </button>
+      <button class="btn danger" style="padding: 14px;" onclick="rejectPurchaseProposal(${e.id})">
+        ✕ REDDET
+      </button>
+    </div>`;
+}
+
+function approvePurchaseProposal(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  if (state.cash < e.totalCost) {
+    toast('Yetersiz bakiye.', 'error');
+    return;
+  }
+
+  const rep = (state.purchasers || []).find(r => r.id === e.repId);
+
+  // Tüm alımları yap
+  spend(e.totalCost, 'malzeme');
+  if (!state.supplierLoyalty) state.supplierLoyalty = {};
+
+  e.purchases.forEach(p => {
+    p.items.forEach(it => {
+      state.inventory[it.productId] = (state.inventory[it.productId] || 0) + it.qty;
+    });
+    // Bağ artışı (toplu alımda daha fazla artar)
+    state.supplierLoyalty[p.supplier.id] = Math.min(100, (state.supplierLoyalty[p.supplier.id] || 0) + Math.max(1, p.total / 80000));
+  });
+
+  // Personel istatistik
+  if (rep) {
+    rep.totalPurchases = (rep.totalPurchases || 0) + e.purchases.length;
+    rep.totalSavings = (rep.totalSavings || 0) + e.totalSavings;
+    rep.xp += 20;
+  }
+
+  // Mail arşivle
+  e.answered = true;
+  state.archive.push({ ...e, type: 'purchase-proposal', status: 'approved', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  addXP(8, 'satın alma onayı');
+  toast(`✓ Alış tamamlandı: ${fmt(e.totalCost)}${e.totalSavings > 0 ? ` (${fmt(e.totalSavings)} tasarruf)` : ''}`, 'success');
+  setView('warehouse');
+  render();
+}
+
+function rejectPurchaseProposal(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+
+  if (!confirm(`${e.repName}'in satın alma önerisini reddetmek istiyor musun?`)) return;
+
+  e.answered = true;
+  state.archive.push({ ...e, type: 'purchase-proposal', status: 'rejected', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  toast(`✕ Satın alma önerisi reddedildi.`, 'info');
+  render();
+}
+
 // Tek bir teklif değerlendirme mantığı (hem live preview hem nextDay aynısını kullanır)
 // returns: { status: 'good'|'risky'|'bad', willAccept: bool, reason: string }
 function evaluateOffer(userOffer, email) {
@@ -4367,6 +4667,12 @@ function renderEmailDetail() {
   // Saha satış önerileri için ayrı sayfa
   if (e.type === 'fs-proposal') {
     renderFSProposalDetail(e);
+    return;
+  }
+
+  // Satın alma önerileri için ayrı sayfa
+  if (e.type === 'purchase-proposal') {
+    renderPurchaseProposalDetail(e);
     return;
   }
 
@@ -4996,7 +5302,12 @@ function renderSuppliers() {
           ? s.products.filter(pid => matchedProductFilter.includes(pid))
           : s.products;
         return `<div class="card">
-          <h3>${s.name}</h3>
+          <h3>${s.name} ${(() => {
+            const loyalty = (state.supplierLoyalty || {})[s.id] || 0;
+            if (loyalty < 10) return '';
+            const info = loyaltyLabel(s.id);
+            return `<span style="font-size: 9px; color: ${info.color}; background: var(--panel-2); padding: 2px 6px; border-radius: 2px; letter-spacing: 1px; font-weight: 700; margin-left: 6px; vertical-align: middle;">${info.label.toUpperCase()} · ${loyalty.toFixed(0)}/100</span>`;
+          })()}</h3>
           <div class="loc">📍 ${ILCELER[s.ilce].name} · ${s.priceMod < 0.95 ? 'Ekonomik' : s.priceMod > 1.08 ? 'Premium' : 'Standart'} · ×${s.priceMod.toFixed(2)}</div>
           ${productsToShow.length === 0 ? '<div style="font-size: 11px; color: var(--ink-dim); padding: 6px 0;">Bu tedarikçinin eşleşen ürünü yok.</div>' : ''}
           ${productsToShow.map(pid => {
@@ -5076,6 +5387,9 @@ function buyFromSupplier(sid, pid) {
   if (state.cash < cost) { toast('Kasanda yeterli para yok. Krediye bak.', 'error'); return; }
   spend(cost, 'malzeme');
   state.inventory[pid] = (state.inventory[pid] || 0) + qty;
+  // Tedarikçi bağı artar (her ₺100k için +1 puan, max 100)
+  if (!state.supplierLoyalty) state.supplierLoyalty = {};
+  state.supplierLoyalty[sid] = Math.min(100, (state.supplierLoyalty[sid] || 0) + Math.max(0.5, cost / 100000));
   toast(`${qty} ${PRODUCTS[pid].unit} ${PRODUCTS[pid].name} alındı (${fmt(cost)}) — ${s.name}`, 'success');
   addXP(2);
   render();
@@ -5820,14 +6134,16 @@ function showIrsaliye(ctId, delivery) {
 function renderHR() {
   const c = $('center');
   const fieldSalesList = state.fieldSalesReps || [];
+  const purchasersList = state.purchasers || [];
   const totalMonthly = state.drivers.reduce((s,d) => s + d.salary, 0)
     + state.salesReps.reduce((s,r) => s + r.salary, 0)
-    + fieldSalesList.reduce((s,r) => s + r.salary, 0);
+    + fieldSalesList.reduce((s,r) => s + r.salary, 0)
+    + purchasersList.reduce((s,r) => s + r.salary, 0);
   const nextPayDay = state.lastPayrollDay + 30;
   const daysToPay = nextPayDay - state.day;
 
   c.innerHTML = `<h2>PERSONEL YÖNETİMİ</h2>
-    <div class="subtitle">Şoför, pazarlamacı ve saha satış sorumluları · Maaşlar 30 günde bir ödenir</div>
+    <div class="subtitle">Şoför, pazarlamacı, saha satış ve satın alma sorumluları · Maaşlar 30 günde bir ödenir</div>
 
     ${totalMonthly > 0 ? `<div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel); border-left: 3px solid ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'}; font-size: 12px;">
       <strong style="color: ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'};">📅 SONRAKI MAAŞ ÖDEMESI:</strong>
@@ -5839,13 +6155,14 @@ function renderHR() {
       <div class="stat-tile"><div class="stat-label">Şoför</div><div class="stat-val" style="color: var(--blue)">${state.drivers.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Pazarlamacı</div><div class="stat-val" style="color: var(--purple)">${state.salesReps.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Saha Satış</div><div class="stat-val" style="color: var(--green)">${fieldSalesList.length}</div></div>
-      <div class="stat-tile"><div class="stat-label">Aylık Bordro</div><div class="stat-val" style="color: var(--red); font-size: 18px;">${fmt(totalMonthly)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Satın Alma</div><div class="stat-val" style="color: var(--accent)">${purchasersList.length}</div></div>
     </div>
 
     <div class="tabs">
       <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖRLER (${state.drivers.length})</div>
       <div class="tab" onclick="switchHRTab('sales')">PAZARLAMACILAR (${state.salesReps.length})</div>
       <div class="tab" onclick="switchHRTab('fieldsales')">SAHA SATIŞ (${fieldSalesList.length})</div>
+      <div class="tab" onclick="switchHRTab('purchasers')">SATIN ALMA (${purchasersList.length})</div>
     </div>
     <div id="hr-content"></div>`;
   switchHRTab('drivers');
@@ -5855,7 +6172,7 @@ function switchHRTab(tab) {
   document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
   if (event && event.target) event.target.classList.add('active');
   else {
-    const idx = tab === 'drivers' ? 0 : tab === 'sales' ? 1 : 2;
+    const idx = tab === 'drivers' ? 0 : tab === 'sales' ? 1 : tab === 'fieldsales' ? 2 : 3;
     document.querySelectorAll('.tabs .tab')[idx]?.classList.add('active');
   }
 
@@ -5983,6 +6300,54 @@ function switchHRTab(tab) {
         </div>`;
       }).join('')}
     </div>`;
+  } else if (tab === 'purchasers') {
+    const pcList = state.purchasers || [];
+    c.innerHTML = `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px; line-height: 1.5;">
+      <strong style="color: var(--accent);">Satın Alma Sorumlusu</strong> — Aktif sözleşmelerin malzeme ihtiyacını taradı, en uygun fiyatları bulur ve <strong>tek tık alış</strong> önerisi getirir.
+      Aldıkça tedarikçilerle bağ kuvvetlenir, bağa göre <strong>%5'e kadar indirim</strong> uygulanır.
+    </div>
+    <div class="grid-2">
+      ${pcList.length === 0 ? '<div class="card"><div class="empty">Henüz satın alma sorumlusu yok. İlkini işe alarak malzeme yönetimini otomatikleştir.</div></div>' : ''}
+      ${pcList.map(r => {
+        const xpReq = 100 * r.level;
+        const busy = r.busyUntil > state.day;
+        const maxDiscount = (r.level / 3) * 5; // Sv1: 1.67%, Sv2: 3.33%, Sv3: 5%
+        return `<div class="emp-card sales" style="border-left: 3px solid var(--accent);">
+          <div class="emp-avatar" style="background: var(--accent);">🛒</div>
+          <div class="emp-info">
+            <div class="emp-name">${r.name}</div>
+            <div class="emp-role">Satın Alma · Seviye ${r.level} · <span class="stars">${'★'.repeat(r.level)}${'☆'.repeat(Math.max(0, 5 - r.level))}</span></div>
+            <div class="emp-stats">Maaş: ${fmt(r.salary)}/ay · Max indirim: <strong>%${maxDiscount.toFixed(1)}</strong></div>
+            <div class="emp-stats">Toplam alış: <strong>${r.totalPurchases || 0}</strong> · Tasarruf: <strong style="color: var(--green);">${fmt(r.totalSavings || 0)}</strong></div>
+            <div class="emp-stats">Durum: ${busy ? `<strong style="color: var(--accent)">Sahada (G${r.busyUntil} dönüş)</strong>` : '<strong style="color: var(--green)">Müsait</strong>'}</div>
+            <div class="emp-stats">XP: ${r.xp}/${xpReq}</div>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${(r.xp / xpReq) * 100}%; background: var(--accent);"></div></div>
+          </div>
+          <div>
+            <button class="btn small danger" onclick="fireEmployee('purchaser', '${r.id}')">KOVA</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 20px;">YENİ SATIN ALMA SORUMLUSU İŞE AL</h3>
+    <div class="grid-3">
+      ${[1, 2, 3].map(lvl => {
+        const monthlySalary = 42000 + (lvl - 1) * 21500;
+        const hireFee = 14000 + (lvl - 1) * 23000;
+        const maxDiscount = (lvl / 3) * 5;
+        const titles = ['Tedarik Asistanı', 'Satın Alma Uzmanı', 'Satın Alma Müdürü'];
+        return `<div class="card">
+          <h3>${titles[lvl - 1]} (Sv ${lvl})</h3>
+          <div style="font-size: 11px; line-height: 1.7;">
+            <div>Max indirim: <strong style="color: var(--green);">%${maxDiscount.toFixed(1)}</strong></div>
+            <div>İlişki yönetimi: <strong>${lvl === 1 ? 'Temel' : lvl === 2 ? 'Orta' : 'Uzman'}</strong></div>
+            <div>Aylık maaş: <strong>${fmt(monthlySalary)}</strong></div>
+            <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(hireFee)}</span></div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px;" onclick="hirePurchaser(${lvl})" ${state.cash >= hireFee ? '' : 'disabled'}>İŞE AL</button>
+        </div>`;
+      }).join('')}
+    </div>`;
   }
 }
 
@@ -6048,6 +6413,29 @@ function hireFieldSales(lvl) {
   render();
 }
 
+// Satın Alma Sorumlusu işe alımı
+function hirePurchaser(lvl) {
+  // 2026 satın alma sorumlusu maaşları
+  const monthlySalary = 42000 + (lvl - 1) * 21500;  // Sv1: 42k, Sv2: 63.5k, Sv3: 85k
+  const fee = 14000 + (lvl - 1) * 23000;
+  if (state.cash < fee) { toast('Yetersiz para.', 'error'); return; }
+  if (!state.purchasers) state.purchasers = [];
+  spend(fee, "ise-alim");
+  state.purchasers.push({
+    id: 'pc' + uid(),
+    name: fullName(),
+    salary: monthlySalary,
+    level: lvl,
+    xp: 0,
+    hireDay: state.day,
+    busyUntil: 0,
+    totalPurchases: 0,
+    totalSavings: 0
+  });
+  toast(`✓ Yeni satın alma sorumlusu işe alındı: Sv${lvl}`, 'success');
+  render();
+}
+
 function fireEmployee(type, id) {
   if (type === 'driver') {
     state.drivers = state.drivers.filter(d => d.id !== id);
@@ -6055,6 +6443,8 @@ function fireEmployee(type, id) {
     state.salesReps = state.salesReps.filter(r => r.id !== id);
   } else if (type === 'fieldsales') {
     state.fieldSalesReps = (state.fieldSalesReps || []).filter(r => r.id !== id);
+  } else if (type === 'purchaser') {
+    state.purchasers = (state.purchasers || []).filter(r => r.id !== id);
   }
   toast('Personel işten çıkarıldı.', 'info');
   render();
@@ -7198,6 +7588,17 @@ function nextDay() {
       continue;
     }
 
+    // Satın alma önerileri de ayrı (approvePurchaseProposal/rejectPurchaseProposal)
+    if (e.type === 'purchase-proposal') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-purchase' });
+        state.agenda.push(`🛒 Satın alma önerisi süresi doldu: ${e.repName}`);
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
     if (e.answered) {
       const cust = getCustomer(e.customerId);
       // Aynı evaluateOffer mantığı kullanılır — canlı önizleme ile bire bir tutarlı
@@ -7361,7 +7762,7 @@ function nextDay() {
 
   // 5) Salaries - Maaşlar her 30 günde bir ödenir
   const nextPayrollDay = state.lastPayrollDay + 30;
-  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0))) {
+  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0) || (state.purchasers && state.purchasers.length > 0))) {
     let totalPayroll = 0;
     const breakdown = [];
 
@@ -7393,6 +7794,16 @@ function nextDay() {
       const pay = Math.round(r.salary * (daysWorked / 30));
       totalPayroll += pay;
       breakdown.push({ name: r.name, role: 'Saha Satış', pay, daysWorked });
+    });
+
+    // Satın Alma Sorumluları
+    (state.purchasers || []).forEach(r => {
+      const periodStart = state.lastPayrollDay;
+      const effectiveStart = Math.max(r.hireDay, periodStart);
+      const daysWorked = Math.min(30, state.day - effectiveStart);
+      const pay = Math.round(r.salary * (daysWorked / 30));
+      totalPayroll += pay;
+      breakdown.push({ name: r.name, role: 'Satın Alma', pay, daysWorked });
     });
 
     if (totalPayroll > 0) {
@@ -7480,6 +7891,29 @@ function nextDay() {
       }
     } else {
       rep.xp += 3; // boş dönse de tecrübe kazanır
+    }
+  });
+
+  // 7c) Satın alma sorumluları analiz yapar — her 4-7 günde bir
+  (state.purchasers || []).forEach(rep => {
+    // Sıklık: Sv1 her 7 günde, Sv2 her 5 günde, Sv3 her 4 günde
+    const interval = rep.level >= 3 ? 4 : rep.level === 2 ? 5 : 7;
+    const lastAnalysis = rep.lastAnalysisDay || (rep.hireDay - interval);
+    if (state.day - lastAnalysis < interval) return;
+
+    rep.lastAnalysisDay = state.day;
+
+    const proposal = tryPurchaserProposal(rep);
+    if (proposal) {
+      state.inbox.push(proposal);
+      rep.xp += 10;
+      // Level up?
+      const xpReq = 100 * rep.level;
+      if (rep.xp >= xpReq && rep.level < 3) {
+        rep.level++;
+        rep.xp = 0;
+        toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
+      }
     }
   });
 
@@ -8168,10 +8602,29 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.29';
+const CURRENT_VERSION = 'v1.30';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.30',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'SATIN ALMA SORUMLUSU',
+    items: [
+      { cat: 'major', text: 'Yeni personel: <strong>Satın Alma Sorumlusu</strong> (3 seviye)' },
+      { cat: 'major', text: 'Sözleşme ihtiyaçlarını otomatik tarar, <strong>en uygun tedarikçileri</strong> bulur' },
+      { cat: 'major', text: '<strong>Tek tık alış</strong> — bütün gerekli malzemeleri tek seferde alır' },
+      { cat: 'feature', text: 'Tedarikçi-bağ sistemi: alış yaptıkça bağ kuvvetlenir (0-100)' },
+      { cat: 'feature', text: 'Bağ rozetleri: Yeni / Tanışıyor / İyi ilişki / Yakın bağ / Güçlü ortak' },
+      { cat: 'feature', text: 'Bağ + personel seviyesine göre <strong>%5\'e kadar indirim</strong>' },
+      { cat: 'feature', text: 'İndirim formülü: (bağ/100) × 5% × (personel level / 3)' },
+      { cat: 'feature', text: 'Sv1 max %1.67 · Sv2 max %3.33 · Sv3 max %5' },
+      { cat: 'feature', text: 'Tedarikçi sayfasında bağ rozetleri görünür' },
+      { cat: 'feature', text: 'Personel istatistikleri: toplam alış sayısı + toplam tasarruf' },
+      { cat: 'fix', text: 'HR sayfasında 4. sekme: "Satın Alma" eklendi' }
+    ]
+  },
   {
     version: 'v1.29',
     date: '11 Mayıs 2026',

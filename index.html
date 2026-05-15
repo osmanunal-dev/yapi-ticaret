@@ -3304,6 +3304,7 @@ const state = {
   vehicles: [],       // { id, type, busyUntil, deliveringContractId }
   drivers: [],        // { id, name, salary, level, xp, hireDay, vehicleId }
   salesReps: [],      // { id, name, salary, level, xp, hireDay, ilce, busyUntil, visitingCustomerId }
+  fieldSalesReps: [], // Saha Satış Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDeals, totalRevenue }
 
   // Bank
   loans: [],          // { id, principal, remaining, interestRate, dailyPayment, daysLeft, takenDay }
@@ -3712,6 +3713,173 @@ function generateTender() {
 }
 
 // ============================================================
+// SAHA SATIŞ SORUMLUSU — Şansa bağlı iş bulma
+// ============================================================
+
+// Bir saha satış sorumlusu ziyaret yapar, sonuç döner
+// Şans tablosu (level bonusu eklenir):
+//   Sv1: %33 başarı  →  bulduğu işin profil: çoğunluk %10-15 kâr
+//   Sv2: %41 başarı  →  ortalama %15-20 kâr
+//   Sv3: %49 başarı  →  yüksek %20-30 kâr şansı
+function tryFieldSalesVisit(rep) {
+  const successRate = 0.25 + rep.level * 0.08; // Sv1=33%, Sv2=41%, Sv3=49%
+  if (Math.random() > successRate) {
+    return null; // boş döndü
+  }
+
+  // İş buldu! Şimdi kâr marjı belirle (Sv level yüksek seviye işi getirme şansını artırır)
+  // 6 katmanlı şans: %10, %15, %20, %30, %50 kâr
+  // Sv1: çoğunluk %10-15, Sv3: yüksek şans %20-30
+  const r = Math.random();
+  let profitMargin;
+  if (rep.level === 1) {
+    if (r < 0.55) profitMargin = 0.10;
+    else if (r < 0.85) profitMargin = 0.15;
+    else if (r < 0.96) profitMargin = 0.20;
+    else if (r < 0.995) profitMargin = 0.30;
+    else profitMargin = 0.50;
+  } else if (rep.level === 2) {
+    if (r < 0.30) profitMargin = 0.10;
+    else if (r < 0.62) profitMargin = 0.15;
+    else if (r < 0.86) profitMargin = 0.20;
+    else if (r < 0.98) profitMargin = 0.30;
+    else profitMargin = 0.50;
+  } else { // Sv 3
+    if (r < 0.15) profitMargin = 0.10;
+    else if (r < 0.40) profitMargin = 0.15;
+    else if (r < 0.72) profitMargin = 0.20;
+    else if (r < 0.94) profitMargin = 0.30;
+    else profitMargin = 0.50;
+  }
+
+  // Müşteri seç (tercihen güveni yüksek olanlardan)
+  const customers = state.customers.slice().sort((a, b) => b.trust - a.trust);
+  const top = customers.slice(0, Math.min(8, customers.length));
+  const customer = choice(top);
+
+  // İş büyüklüğü (kâr marjı yüksek olanlar daha büyük olur)
+  let scaleMult;
+  if (profitMargin <= 0.15) scaleMult = 1 + Math.random() * 1.5; // 1-2.5x
+  else if (profitMargin <= 0.20) scaleMult = 1.5 + Math.random() * 2; // 1.5-3.5x
+  else if (profitMargin <= 0.30) scaleMult = 2 + Math.random() * 2; // 2-4x
+  else scaleMult = 3 + Math.random() * 3; // 3-6x (büyük iş!)
+
+  // Ürünler seç (2-5 kalem)
+  const allProducts = Object.keys(PRODUCTS);
+  const numItems = rand(2, profitMargin >= 0.30 ? 5 : 4);
+  const items = [];
+  const used = new Set();
+  for (let i = 0; i < numItems; i++) {
+    let pid; let tries = 0;
+    do { pid = choice(allProducts); tries++; } while (used.has(pid) && tries < 10);
+    used.add(pid);
+    let qty;
+    switch (pid) {
+      case 'cement': qty = Math.round(rand(20, 80) * scaleMult); break;
+      case 'sand':   qty = Math.round(rand(5, 20) * scaleMult); break;
+      case 'gravel': qty = Math.round(rand(5, 20) * scaleMult); break;
+      case 'brick':  qty = Math.round(rand(500, 2000) * scaleMult); break;
+      case 'briket': qty = Math.round(rand(200, 800) * scaleMult); break;
+      case 'rebar':  qty = Math.max(1, Math.round(rand(1, 5) * scaleMult)); break;
+      case 'hasir':  qty = Math.round(rand(5, 20) * scaleMult); break;
+      case 'profil': qty = Math.round(rand(50, 200) * scaleMult); break;
+      case 'tile':   qty = Math.round(rand(50, 200) * scaleMult); break;
+      case 'granit': qty = Math.round(rand(20, 80) * scaleMult); break;
+      case 'parke':  qty = Math.round(rand(40, 150) * scaleMult); break;
+      case 'paint':  qty = Math.round(rand(10, 30) * scaleMult); break;
+      case 'discephe':qty= Math.round(rand(8, 25) * scaleMult); break;
+      case 'vernik': qty = Math.round(rand(5, 15) * scaleMult); break;
+      case 'insul':  qty = Math.round(rand(50, 200) * scaleMult); break;
+      case 'taşyunu':qty = Math.round(rand(20, 60) * scaleMult); break;
+      case 'membran':qty = Math.round(rand(3, 12) * scaleMult); break;
+      case 'plaster':qty = Math.round(rand(15, 50) * scaleMult); break;
+      case 'alcipan':qty = Math.round(rand(20, 80) * scaleMult); break;
+      case 'pipe':   qty = Math.round(rand(20, 100) * scaleMult); break;
+      case 'pprc':   qty = Math.round(rand(20, 100) * scaleMult); break;
+      case 'kablo':  qty = Math.round(rand(50, 300) * scaleMult); break;
+      case 'pano':   qty = Math.round(rand(1, 4) * scaleMult); break;
+      case 'cam':    qty = Math.round(rand(10, 40) * scaleMult); break;
+      default: qty = 10;
+    }
+    items.push({ productId: pid, qty });
+  }
+
+  // Maliyet hesabı (min alış fiyatlarıyla)
+  let materialCost = 0;
+  const unitPrices = []; // Anlaşılan birim fiyatları (kâr eklenmiş)
+  items.forEach(it => {
+    // Min alış fiyatı bul
+    let minBuy = Infinity;
+    state.suppliers.forEach(sup => {
+      const sp = sup.products[it.productId];
+      if (sp) {
+        const adjustedPrice = sp.price * (state.priceModifiers[it.productId] || 1);
+        if (adjustedPrice < minBuy) minBuy = adjustedPrice;
+      }
+    });
+    if (!isFinite(minBuy)) minBuy = BASE_PRICE[it.productId] * 1.1;
+    materialCost += minBuy * it.qty;
+    // Anlaşılan fiyat: min alış × (1 + kâr marjı)
+    unitPrices.push(Math.round(minBuy * (1 + profitMargin)));
+  });
+
+  // Nakliye maliyeti tahmini
+  const distanceKm = ILCELER[customer.ilce].km;
+  const totalWeightT = items.reduce((s, it) => s + (PRODUCTS[it.productId].weight * it.qty), 0) / 1000;
+  let assumedFuelPerKm;
+  if (totalWeightT <= 2)        assumedFuelPerKm = VEHICLE_TYPES.kamyonet.fuelPerKm;
+  else if (totalWeightT <= 5)   assumedFuelPerKm = VEHICLE_TYPES.kucuk.fuelPerKm;
+  else if (totalWeightT <= 10)  assumedFuelPerKm = VEHICLE_TYPES.orta.fuelPerKm;
+  else                          assumedFuelPerKm = VEHICLE_TYPES.buyuk.fuelPerKm;
+  const tripsAssumed = Math.max(1, Math.ceil(totalWeightT / (totalWeightT <= 2 ? 2 : totalWeightT <= 5 ? 5 : totalWeightT <= 10 ? 10 : 25)));
+  const shippingCost = Math.round(distanceKm * 2 * assumedFuelPerKm * FUEL_PRICE * tripsAssumed);
+
+  // Anlaşılan toplam
+  const materialsTotal = items.reduce((s, it, i) => s + unitPrices[i] * it.qty, 0);
+  const totalDeal = materialsTotal + shippingCost;
+  const estimatedCost = Math.round(materialCost + shippingCost);
+
+  // Termin: 5-10 gün
+  const deadline = state.day + rand(5, 10);
+
+  // Mail içeriği
+  const intros = [
+    `Patron, müjdem var! Az önce ${customer.name} ile görüştüm.`,
+    `Selam patron, ${ILCELER[customer.ilce].name}'da güzel bir iş kovaladım.`,
+    `Bir saatlik görüşmeden sonra ${customer.name} ile anlaştık sayılır.`,
+    `Patron, ${customer.name}'in projesi için anlaşma yaptım, onayını bekliyorum.`
+  ];
+  const closes = [
+    `\n\nNet kâr marjı yaklaşık %${(profitMargin * 100).toFixed(0)}. Yeşil yakı düşüyor.\n\nOnaylarsanız sözleşme bağlanır, onaylamazsanız müşteriye haber veririm.`,
+    `\n\nKâr marjı: %${(profitMargin * 100).toFixed(0)}. Sözleşme şartlarını sundum, onayınızı bekliyorum.`,
+    `\n\nÖngörülen kâr: ${fmt(totalDeal - estimatedCost)} (%${(profitMargin * 100).toFixed(0)} marj). Karar size kalmış.`
+  ];
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'fs-proposal',
+    repId: rep.id,
+    repName: rep.name,
+    customerId: customer.id,
+    items,
+    unitPrices,
+    materialsTotal,
+    shippingCost,
+    total: totalDeal,
+    estimatedCost,
+    profitMargin,
+    deadline,
+    receivedDay: state.day,
+    expiresDay: state.day + 2, // Müşteri sabırsız
+    subject: `📞 Yeni İş Önerisi — ${customer.name}`,
+    body: choice(intros) + `\n\nMüşteri: ${customer.name}\nKonum: ${ILCELER[customer.ilce].name}\nTermin: Gün ${deadline}\n\nAnlaşılan fiyat: ${fmt(totalDeal)} (malzeme + nakliye)\nTahmini maliyet: ${fmt(estimatedCost)}\nNet kâr: ${fmt(totalDeal - estimatedCost)}` + choice(closes),
+    unread: true,
+    answered: false,
+    sender: 'employee'
+  };
+}
+
+// ============================================================
 // VIEWS
 // ============================================================
 
@@ -3949,16 +4117,33 @@ function renderInbox() {
   const c = $('center');
   if (state.inbox.length === 0) {
     c.innerHTML = `<h2>GELEN KUTUSU</h2>
-      <div class="subtitle">Müşterilerden gelen ihale talepleri</div>
-      <div class="empty">Şu anda yeni e-posta yok. "Sonraki Gün" tuşuna bas, ya da Saha Ziyaretleri ile yeni iş kovala.</div>`;
+      <div class="subtitle">Müşterilerden ve personelden gelen iletiler</div>
+      <div class="empty">Şu anda yeni e-posta yok. "Sonraki Gün" tuşuna bas.</div>`;
     return;
   }
   c.innerHTML = `<h2>GELEN KUTUSU</h2>
-    <div class="subtitle">Müşterilerden gelen ihale talepleri · ${state.inbox.length} talep</div>
+    <div class="subtitle">${state.inbox.length} mesaj</div>
     <div class="email-list">
       ${state.inbox.map(e => {
         const cust = getCustomer(e.customerId);
         const expIn = e.expiresDay - state.day;
+
+        if (e.type === 'fs-proposal') {
+          // Saha satış personelinden gelen iş önerisi
+          const profitPct = (e.profitMargin * 100).toFixed(0);
+          const profit = e.total - e.estimatedCost;
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
+            <div class="top">
+              <span class="from">🤝 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">→ ${cust.name}</span></span>
+              <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce].name}</span>
+            </div>
+            <div class="subject">${e.subject}</div>
+            <div class="preview">${e.items.length} kalem · ${fmt(e.total)} · Kâr: <strong style="color: var(--green);">${fmt(profit)} (%${profitPct})</strong></div>
+            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+          </div>`;
+        }
+
+        // Varsayılan: tender (müşteri ihalesi)
         return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
           <div class="top">
             <span class="from">${cust.name}</span>
@@ -3977,6 +4162,166 @@ function openEmail(id) {
   if (!e) return;
   e.unread = false;
   state.selectedEmail = e;
+  render();
+}
+
+// Saha satış önerisinin detay ekranı (gelen mailden açılır)
+function renderFSProposalDetail(e) {
+  const c = $('center');
+  const cust = getCustomer(e.customerId);
+  const expIn = e.expiresDay - state.day;
+  const profit = e.total - e.estimatedCost;
+  const profitPct = (e.profitMargin * 100).toFixed(0);
+
+  const itemRows = e.items.map((it, i) => {
+    const p = PRODUCTS[it.productId];
+    const unit = e.unitPrices[i];
+    const lineTotal = unit * it.qty;
+    return `<tr>
+      <td><strong>${p.name}</strong></td>
+      <td class="num">${it.qty} ${p.unit}</td>
+      <td class="num">${fmt(unit)}</td>
+      <td class="num">${fmt(lineTotal)}</td>
+    </tr>`;
+  }).join('');
+
+  c.innerHTML = `<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+      <button class="btn" onclick="state.selectedEmail=null; render()">← Geri</button>
+      <h2 style="margin: 0; flex: 1;">📞 SAHA SATIŞ ÖNERİSİ</h2>
+    </div>
+
+    <div style="background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--green); padding: 16px; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+        <div>
+          <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Personelden</div>
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1px; color: var(--green);">🤝 ${e.repName}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Müşteri</div>
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1px;">${cust.name}</div>
+          <div style="font-size: 10px; color: var(--ink-dim);">${ILCELER[cust.ilce].name} · Güven ${Math.round(cust.trust)}/100</div>
+        </div>
+      </div>
+      <div style="font-size: 12px; line-height: 1.7; color: var(--ink); white-space: pre-line; padding: 12px; background: var(--panel-2); border-left: 2px solid var(--green);">${e.body}</div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">SÖZLEŞME KALEMLERİ</h3>
+    <div class="table-scroll">
+    <table class="data-table" style="margin-bottom: 16px;">
+      <thead><tr><th>Malzeme</th><th class="num">Miktar</th><th class="num">Birim Fiyat</th><th class="num">Tutar</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+      <tfoot>
+        <tr><td colspan="3" style="text-align: right; color: var(--ink-dim);">Malzemeler:</td><td class="num">${fmt(e.materialsTotal)}</td></tr>
+        <tr><td colspan="3" style="text-align: right; color: var(--ink-dim);">Nakliye (tahmini):</td><td class="num">${fmt(e.shippingCost)}</td></tr>
+        <tr style="border-top: 2px solid var(--accent);"><td colspan="3" style="text-align: right; font-weight: 700;">TOPLAM ANLAŞMA:</td><td class="num" style="color: var(--green); font-weight: 700; font-size: 14px;">${fmt(e.total)}</td></tr>
+      </tfoot>
+    </table>
+    </div>
+
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile">
+        <div class="stat-label">Tahmini Maliyet</div>
+        <div class="stat-val" style="font-size: 14px; color: var(--red);">${fmt(e.estimatedCost)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Net Kâr</div>
+        <div class="stat-val" style="font-size: 16px; color: var(--green);">${fmt(profit)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Kâr Marjı</div>
+        <div class="stat-val" style="font-size: 16px; color: var(--green);">%${profitPct}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Termin</div>
+        <div class="stat-val" style="font-size: 14px;">Gün ${e.deadline} <span style="font-size: 10px; color: var(--ink-dim);">(${e.deadline - state.day} gün)</span></div>
+      </div>
+    </div>
+
+    <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
+      <strong>📌 Önemli:</strong> Müşteri ${expIn <= 0 ? '<span style="color: var(--red);">bugün son cevabını bekliyor!</span>' : expIn + ' gün içinde cevap bekliyor.'}
+      Onaylarsan sözleşme imzalanır, doğrudan aktif sözleşmelerine eklenir. İhale aşaması yok — sadece onayını ver.
+    </div>
+
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px;" onclick="approveFSProposal(${e.id})">
+        ✓ ANLAŞMAYI ONAYLA (${fmt(e.total)})
+      </button>
+      <button class="btn danger" style="padding: 14px;" onclick="rejectFSProposal(${e.id})">
+        ✕ REDDET
+      </button>
+    </div>`;
+}
+
+// Saha satış önerisini onayla → sözleşme oluştur
+function approveFSProposal(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  const cust = getCustomer(e.customerId);
+  const rep = (state.fieldSalesReps || []).find(r => r.id === e.repId);
+
+  // Sözleşme oluştur
+  const contract = {
+    id: 'c' + uid(),
+    customerId: e.customerId,
+    items: e.items,
+    unitPrices: e.unitPrices,
+    deliveries: [], // boşken başlar
+    deadline: e.deadline,
+    startedDay: state.day,
+    total: e.total,
+    materialsTotal: e.materialsTotal,
+    shippingCost: e.shippingCost,
+    estimatedCost: e.estimatedCost,
+    shippingType: null, // sevkiyat sırasında belirlenir
+    delivered: false,
+    paid: false,
+    fromFieldSales: true,
+    salesRepName: e.repName
+  };
+
+  state.contracts.push(contract);
+
+  // Personel istatistikleri güncelle
+  if (rep) {
+    rep.totalDeals = (rep.totalDeals || 0) + 1;
+    rep.totalRevenue = (rep.totalRevenue || 0) + e.total;
+    rep.xp += 25 + Math.round(e.profitMargin * 100); // yüksek marj = yüksek XP
+  }
+
+  // Mail arşivle
+  e.answered = true;
+  state.archive.push({ ...e, type: 'fs-proposal', status: 'approved', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  // Bonus XP ve itibar
+  addXP(15, 'saha satış onayı');
+  cust.trust = Math.min(100, cust.trust + 2);
+
+  toast(`✓ Anlaşma onaylandı! ${cust.name} ile ${fmt(e.total)}'lik sözleşme oluşturuldu.`, 'success');
+  setView('contracts');
+  render();
+}
+
+function rejectFSProposal(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  const cust = getCustomer(e.customerId);
+
+  if (!confirm(`${e.repName}'in ${cust.name} ile yaptığı anlaşmayı reddetmek istediğinden emin misin?\n\nMüşteri ile ilişki biraz zedelenebilir (güven -2).`)) return;
+
+  // Mail arşivle
+  e.answered = true;
+  state.archive.push({ ...e, type: 'fs-proposal', status: 'rejected', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  // Müşteri biraz küstü
+  cust.trust = Math.max(0, cust.trust - 2);
+
+  toast(`✕ Anlaşma reddedildi. ${cust.name} güveni biraz düştü.`, 'info');
   render();
 }
 
@@ -4018,6 +4363,13 @@ function evaluateOffer(userOffer, email) {
 function renderEmailDetail() {
   const e = state.selectedEmail;
   const c = $('center');
+
+  // Saha satış önerileri için ayrı sayfa
+  if (e.type === 'fs-proposal') {
+    renderFSProposalDetail(e);
+    return;
+  }
+
   const cust = getCustomer(e.customerId);
 
   // Seçili nakliyeyi (varsayılan: önerilen) önceden hesapla — kalem maliyetlerine pay düşelim
@@ -5467,12 +5819,15 @@ function showIrsaliye(ctId, delivery) {
 
 function renderHR() {
   const c = $('center');
-  const totalMonthly = state.drivers.reduce((s,d) => s + d.salary, 0) + state.salesReps.reduce((s,r) => s + r.salary, 0);
+  const fieldSalesList = state.fieldSalesReps || [];
+  const totalMonthly = state.drivers.reduce((s,d) => s + d.salary, 0)
+    + state.salesReps.reduce((s,r) => s + r.salary, 0)
+    + fieldSalesList.reduce((s,r) => s + r.salary, 0);
   const nextPayDay = state.lastPayrollDay + 30;
   const daysToPay = nextPayDay - state.day;
 
   c.innerHTML = `<h2>PERSONEL YÖNETİMİ</h2>
-    <div class="subtitle">Şoför ve pazarlamacılar · Maaşlar her ayın sonunda (30 günde bir) ödenir</div>
+    <div class="subtitle">Şoför, pazarlamacı ve saha satış sorumluları · Maaşlar 30 günde bir ödenir</div>
 
     ${totalMonthly > 0 ? `<div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel); border-left: 3px solid ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'}; font-size: 12px;">
       <strong style="color: ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'};">📅 SONRAKI MAAŞ ÖDEMESI:</strong>
@@ -5483,13 +5838,14 @@ function renderHR() {
     <div class="stat-grid">
       <div class="stat-tile"><div class="stat-label">Şoför</div><div class="stat-val" style="color: var(--blue)">${state.drivers.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Pazarlamacı</div><div class="stat-val" style="color: var(--purple)">${state.salesReps.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Saha Satış</div><div class="stat-val" style="color: var(--green)">${fieldSalesList.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Aylık Bordro</div><div class="stat-val" style="color: var(--red); font-size: 18px;">${fmt(totalMonthly)}</div></div>
-      <div class="stat-tile"><div class="stat-label">Yıllık (Tahmini)</div><div class="stat-val" style="font-size: 18px;">${fmt(totalMonthly * 12)}</div></div>
     </div>
 
     <div class="tabs">
       <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖRLER (${state.drivers.length})</div>
       <div class="tab" onclick="switchHRTab('sales')">PAZARLAMACILAR (${state.salesReps.length})</div>
+      <div class="tab" onclick="switchHRTab('fieldsales')">SAHA SATIŞ (${fieldSalesList.length})</div>
     </div>
     <div id="hr-content"></div>`;
   switchHRTab('drivers');
@@ -5498,7 +5854,10 @@ function renderHR() {
 function switchHRTab(tab) {
   document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
   if (event && event.target) event.target.classList.add('active');
-  else document.querySelectorAll('.tabs .tab')[tab === 'drivers' ? 0 : 1].classList.add('active');
+  else {
+    const idx = tab === 'drivers' ? 0 : tab === 'sales' ? 1 : 2;
+    document.querySelectorAll('.tabs .tab')[idx]?.classList.add('active');
+  }
 
   const c = $('hr-content');
   if (tab === 'drivers') {
@@ -5539,7 +5898,7 @@ function switchHRTab(tab) {
         </div>`;
       }).join('')}
     </div>`;
-  } else {
+  } else if (tab === 'sales') {
     c.innerHTML = `<div class="grid-2">
       ${state.salesReps.length === 0 ? '<div class="card"><div class="empty">Henüz pazarlamacı yok. Saha ziyaretleri için ilk pazarlamacını işe al.</div></div>' : ''}
       ${state.salesReps.map(r => {
@@ -5574,6 +5933,53 @@ function switchHRTab(tab) {
             <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(hireFee)}</span></div>
           </div>
           <button class="btn primary" style="margin-top: 10px;" onclick="hireSales(${lvl})" ${state.cash >= hireFee ? '' : 'disabled'}>İŞE AL</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  } else if (tab === 'fieldsales') {
+    const fsList = state.fieldSalesReps || [];
+    c.innerHTML = `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--green); font-size: 11px; line-height: 1.5;">
+      <strong style="color: var(--green);">Saha Satış Sorumlusu</strong> — Müşteri portföyünü gezerek <strong>iş getirir</strong>. Şansa bağlı olarak kâr marjı %10-50 arası işler bulur. İş bulduğunda mail ile onayını ister.
+    </div>
+    <div class="grid-2">
+      ${fsList.length === 0 ? '<div class="card"><div class="empty">Henüz saha satış sorumlusu yok. İlkini işe alarak gelir kanalları aç.</div></div>' : ''}
+      ${fsList.map(r => {
+        const xpReq = 100 * r.level;
+        const busy = r.busyUntil > state.day;
+        const successRate = 25 + r.level * 8; // Sv1: %33, Sv2: %41, Sv3: %49 iş getirme oranı
+        return `<div class="emp-card sales" style="border-left: 3px solid var(--green);">
+          <div class="emp-avatar" style="background: var(--green);">🤝</div>
+          <div class="emp-info">
+            <div class="emp-name">${r.name}</div>
+            <div class="emp-role">Saha Satış · Seviye ${r.level} · <span class="stars">${'★'.repeat(r.level)}${'☆'.repeat(Math.max(0, 5 - r.level))}</span></div>
+            <div class="emp-stats">Maaş: ${fmt(r.salary)}/ay · İş bulma şansı: %${successRate}</div>
+            <div class="emp-stats">Toplam anlaşma: <strong>${r.totalDeals || 0}</strong> · Getirisi: <strong style="color: var(--green);">${fmt(r.totalRevenue || 0)}</strong></div>
+            <div class="emp-stats">Durum: ${busy ? `<strong style="color: var(--accent)">Sahada (G${r.busyUntil} dönüş)</strong>` : '<strong style="color: var(--green)">Müsait</strong>'}</div>
+            <div class="emp-stats">XP: ${r.xp}/${xpReq}</div>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${(r.xp / xpReq) * 100}%; background: var(--green);"></div></div>
+          </div>
+          <div>
+            <button class="btn small danger" onclick="fireEmployee('fieldsales', '${r.id}')">KOVA</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 20px;">YENİ SAHA SATIŞ SORUMLUSU İŞE AL</h3>
+    <div class="grid-3">
+      ${[1, 2, 3].map(lvl => {
+        const monthlySalary = 45000 + (lvl - 1) * 22500;
+        const hireFee = 15000 + (lvl - 1) * 25000;
+        const successRate = 25 + lvl * 8;
+        const titles = ['Junior Saha Temsilcisi', 'Saha Satış Uzmanı', 'Saha Satış Müdürü'];
+        return `<div class="card">
+          <h3>${titles[lvl - 1]} (Sv ${lvl})</h3>
+          <div style="font-size: 11px; line-height: 1.7;">
+            <div>İş bulma şansı: <strong style="color: var(--green);">%${successRate}</strong></div>
+            <div>Yüksek kâr şansı: <strong>${lvl === 1 ? 'Düşük' : lvl === 2 ? 'Orta' : 'Yüksek'}</strong></div>
+            <div>Aylık maaş: <strong>${fmt(monthlySalary)}</strong></div>
+            <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(hireFee)}</span></div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px;" onclick="hireFieldSales(${lvl})" ${state.cash >= hireFee ? '' : 'disabled'}>İŞE AL</button>
         </div>`;
       }).join('')}
     </div>`;
@@ -5619,11 +6025,36 @@ function hireSales(lvl) {
   render();
 }
 
+// Saha Satış Sorumlusu işe alımı — daha kıdemli, şansa bağlı satış getirir
+function hireFieldSales(lvl) {
+  // 2026 saha satış sorumlusu maaşları (üst düzey personel)
+  const monthlySalary = 45000 + (lvl - 1) * 22500;  // Sv1: 45k, Sv2: 67.5k, Sv3: 90k
+  const fee = 15000 + (lvl - 1) * 25000;
+  if (state.cash < fee) { toast('Yetersiz para.', 'error'); return; }
+  if (!state.fieldSalesReps) state.fieldSalesReps = [];
+  spend(fee, "ise-alim");
+  state.fieldSalesReps.push({
+    id: 'fs' + uid(),
+    name: fullName(),
+    salary: monthlySalary,
+    level: lvl,
+    xp: 0,
+    hireDay: state.day,
+    busyUntil: 0,
+    totalDeals: 0,
+    totalRevenue: 0
+  });
+  toast(`✓ Yeni saha satış sorumlusu işe alındı: Sv${lvl}`, 'success');
+  render();
+}
+
 function fireEmployee(type, id) {
   if (type === 'driver') {
     state.drivers = state.drivers.filter(d => d.id !== id);
-  } else {
+  } else if (type === 'sales') {
     state.salesReps = state.salesReps.filter(r => r.id !== id);
+  } else if (type === 'fieldsales') {
+    state.fieldSalesReps = (state.fieldSalesReps || []).filter(r => r.id !== id);
   }
   toast('Personel işten çıkarıldı.', 'info');
   render();
@@ -6754,6 +7185,19 @@ function nextDay() {
   // 1) Process answered tenders → win/loss
   const stillInbox = [];
   for (const e of state.inbox) {
+    // Saha satış önerileri ayrı işleniyor (approveFSProposal/rejectFSProposal); burada sadece süre kontrolü
+    if (e.type === 'fs-proposal') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-fs' });
+        const cust = getCustomer(e.customerId);
+        if (cust) cust.trust = Math.max(0, cust.trust - 1);
+        state.agenda.push(`📞 Saha satış önerisi süresi doldu: ${cust ? cust.name : ''}`);
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
     if (e.answered) {
       const cust = getCustomer(e.customerId);
       // Aynı evaluateOffer mantığı kullanılır — canlı önizleme ile bire bir tutarlı
@@ -6917,7 +7361,7 @@ function nextDay() {
 
   // 5) Salaries - Maaşlar her 30 günde bir ödenir
   const nextPayrollDay = state.lastPayrollDay + 30;
-  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0)) {
+  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0))) {
     let totalPayroll = 0;
     const breakdown = [];
 
@@ -6939,6 +7383,16 @@ function nextDay() {
       const pay = Math.round(r.salary * (daysWorked / 30));
       totalPayroll += pay;
       breakdown.push({ name: r.name, role: 'Pazarlamacı', pay, daysWorked });
+    });
+
+    // Saha Satış Sorumluları
+    (state.fieldSalesReps || []).forEach(r => {
+      const periodStart = state.lastPayrollDay;
+      const effectiveStart = Math.max(r.hireDay, periodStart);
+      const daysWorked = Math.min(30, state.day - effectiveStart);
+      const pay = Math.round(r.salary * (daysWorked / 30));
+      totalPayroll += pay;
+      breakdown.push({ name: r.name, role: 'Saha Satış', pay, daysWorked });
     });
 
     if (totalPayroll > 0) {
@@ -7000,6 +7454,34 @@ function nextDay() {
   // 7) Generate new tenders — base 1-2 plus more from high-trust customers
   const numNew = rand(1, 3) + (state.reputation > 70 ? 1 : 0) + (state.level > 3 ? 1 : 0);
   for (let i = 0; i < numNew; i++) state.inbox.push(generateTender());
+
+  // 7b) Saha satış sorumluları ziyaret yapar — her 2-3 günde bir
+  (state.fieldSalesReps || []).forEach(rep => {
+    if (rep.busyUntil > state.day) return; // hâlâ sahada
+
+    // Sıklık: Sv1 her 3 günde, Sv2 her 2 günde, Sv3 her 1-2 günde
+    const visitInterval = rep.level >= 3 ? 1.5 : rep.level === 2 ? 2 : 3;
+    const lastVisit = rep.lastVisitDay || (rep.hireDay - visitInterval);
+    if (state.day - lastVisit < visitInterval) return;
+
+    rep.lastVisitDay = state.day;
+    rep.busyUntil = state.day + 1; // 1 gün sahada
+
+    const proposal = tryFieldSalesVisit(rep);
+    if (proposal) {
+      state.inbox.push(proposal);
+      rep.xp += 15;
+      // Level up?
+      const xpReq = 100 * rep.level;
+      if (rep.xp >= xpReq && rep.level < 3) {
+        rep.level++;
+        rep.xp = 0;
+        toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
+      }
+    } else {
+      rep.xp += 3; // boş dönse de tecrübe kazanır
+    }
+  });
 
   // 8) Aylık rapor — her 30 günde bir
   const monthNumber = Math.floor(state.day / 30);
@@ -7686,10 +8168,27 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.28';
+const CURRENT_VERSION = 'v1.29';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.29',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'SAHA SATIŞ SORUMLUSU',
+    items: [
+      { cat: 'major', text: 'Yeni personel: <strong>Saha Satış Sorumlusu</strong> (3 seviye)' },
+      { cat: 'major', text: 'Saha satış sorumluları müşterileri ziyaret eder ve <strong>şansa bağlı iş getirir</strong>' },
+      { cat: 'feature', text: 'Kâr marjı dağılımı: %10 / %15 / %20 / %30 / %50 (level yüksek olunca büyük iş şansı artar)' },
+      { cat: 'feature', text: 'İş bulunca inbox\'a yeşil mail gelir: "Şu müşteriden iş aldım, onaylar mısın?"' },
+      { cat: 'feature', text: 'Onay → sözleşme oluşur, ihale aşaması yok' },
+      { cat: 'feature', text: 'Reddet → müşteri güveni biraz düşer' },
+      { cat: 'feature', text: 'Personel istatistikleri: toplam anlaşma sayısı + getirisi takip edilir' },
+      { cat: 'feature', text: 'Seviye sistemi: XP biriktirip Sv2/Sv3\'e yükselir' },
+      { cat: 'fix', text: 'HR sayfasında 3. sekme: "Saha Satış" eklendi' }
+    ]
+  },
   {
     version: 'v1.28',
     date: '11 Mayıs 2026',

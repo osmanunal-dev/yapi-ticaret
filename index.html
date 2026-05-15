@@ -3600,15 +3600,41 @@ function startConstruction(landId, buildingType) {
 // Her gün inşaatı ilerlet — `nextDay`'de çağrılır
 function progressConstruction(land) {
   const b = land.building;
-  if (!b || b.status !== 'building') return;
+  if (!b || b.status === 'completed') return;
 
-  // Bugün için tüketilecek malzeme: her malzemenin günlük payı
+  // Yıkım fazı (kentsel dönüşüm) — 20 gün boyunca sadece zaman geçer
+  if (b.status === 'demolition') {
+    b.daysPassed++;
+    if (b.daysPassed >= 0) {
+      // Yıkım bitti, inşaat başlıyor
+      b.status = 'building';
+      state.agenda.push(`🏗 ${ILCELER[land.ilce].name} kentsel dönüşüm: yıkım tamam, inşaat başlıyor`);
+      toast(`🏗 ${ILCELER[land.ilce].name} yıkım tamam, inşaat başlıyor!`, 'info');
+    }
+    return;
+  }
+
+  // Taşeronda mı? Eğer öyleyse sadece gün sayıyoruz, malzeme/işçilik düşmüyor
+  if (b.isSubcontracted) {
+    b.daysPassed++;
+    if (b.daysPassed >= b.totalDays) {
+      // Bina hazır
+      b.status = 'completed';
+      b.apartments = generateApartmentsFor(b.type, land.m2);
+      b.completedDay = state.day;
+      handleBuildingCompleted(land);
+    }
+    return;
+  }
+
+  // Normal inşaat — malzeme + işçilik
   let canProgress = true;
   const totalDays = b.totalDays;
   const consumptionToday = [];
 
   for (const m of b.materialsNeeded) {
     const remaining = m.qty - m.consumed;
+    if (remaining <= 0) continue;
     const remainingDays = Math.max(1, totalDays - b.daysPassed);
     const todayNeed = Math.ceil(remaining / remainingDays);
     const have = state.inventory[m.productId] || 0;
@@ -3621,7 +3647,6 @@ function progressConstruction(land) {
   }
 
   if (!canProgress) {
-    // Malzeme yetmiyor — inşaat durdu
     if (b.status !== 'paused-warned') {
       b.status = 'paused-warned';
       state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaatı malzeme yetmediği için durdu`);
@@ -3630,27 +3655,25 @@ function progressConstruction(land) {
     return;
   }
 
-  // Eğer önce duraklamışsa, devam et
   if (b.status === 'paused-warned') {
     b.status = 'building';
   }
 
-  // Bugünkü malzemeyi tüket + işçilik bedeli
+  // Malzeme tüket
   consumptionToday.forEach(c => {
     state.inventory[c.productId] -= c.qty;
     const m = b.materialsNeeded.find(x => x.productId === c.productId);
     if (m) m.consumed += c.qty;
   });
 
-  // İşçilik: günlük m²-bazlı işçilik bedeli
+  // İşçilik
   const t = BUILDING_TYPES[b.type];
   const totalArea = land.m2 * t.floorMultiplier;
-  const dailyLabor = Math.round(totalArea * 80); // m² başına ₺80/gün işçilik
+  const dailyLabor = Math.round(totalArea * 80);
   if (state.cash >= dailyLabor) {
     spend(dailyLabor, 'insaat-iscilik');
     b.totalCost += dailyLabor;
   } else {
-    // İşçilik ödenemedi — inşaat duruyor
     b.status = 'paused-warned';
     state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaat işçiliği ödenemedi`);
     toast(`⚠️ İşçilik ödenemedi, ${ILCELER[land.ilce].name} inşaatı durdu!`, 'error');
@@ -3659,14 +3682,47 @@ function progressConstruction(land) {
 
   b.daysPassed++;
 
-  // İnşaat bitti mi?
   if (b.daysPassed >= b.totalDays) {
     b.status = 'completed';
     b.apartments = generateApartmentsFor(b.type, land.m2);
     b.completedDay = state.day;
-    state.agenda.push(`✅ ${ILCELER[land.ilce].name} ${t.name} inşaatı tamamlandı! ${b.apartments.length} daire teslime hazır.`);
+    handleBuildingCompleted(land);
+  }
+}
+
+// İnşaat tamamlanınca olanlar — kentsel dönüşümse müşteriye payını ver
+function handleBuildingCompleted(land) {
+  const b = land.building;
+  const t = BUILDING_TYPES[b.type];
+
+  state.agenda.push(`✅ ${ILCELER[land.ilce].name} ${t.name} inşaatı tamamlandı!`);
+  addXP(200 + b.apartments.length * 5, 'inşaat tamamlama');
+
+  if (land.isUrbanRenewal && land.urbanProjectId) {
+    // Kentsel dönüşüm: müşteriye payını ver
+    const project = state.urbanProjects.find(p => p.id === land.urbanProjectId);
+    if (project && !project.deliveredToCustomer) {
+      // İlk N daireyi müşteriye ver (en küçükler)
+      const sorted = b.apartments.slice().sort((a, b) => a.m2 - b.m2);
+      const theirApts = sorted.slice(0, project.theirShare);
+      theirApts.forEach(a => {
+        a.status = 'delivered-to-customer';
+        a.deliveredToCustomerDay = state.day;
+      });
+      project.deliveredToCustomer = true;
+      project.completedDay = state.day;
+
+      // Müşteri güveni artar (büyük güven kazanımı)
+      const cust = getCustomer(project.customerId);
+      if (cust) {
+        cust.trust = Math.min(100, cust.trust + 15);
+      }
+      state.reputation = Math.min(100, state.reputation + 5);
+
+      toast(`🎉 ${project.customerName}: ${project.theirShare} daire teslim edildi. ${project.ourShare} daire bizde kaldı.`, 'success');
+    }
+  } else {
     toast(`🎉 ${t.name} inşaatı tamamlandı! ${b.apartments.length} daire teslime hazır.`, 'success');
-    addXP(200 + b.apartments.length * 5, 'inşaat tamamlama');
   }
 }
 
@@ -3789,6 +3845,7 @@ function openApartmentsModal(landId) {
   const rows = b.apartments.map(a => {
     const statusBadge = a.status === 'unsold' ? '<span style="color: var(--accent);">SATILIK</span>'
       : a.status === 'sold' ? '<span style="color: var(--green);">SATILDI</span>'
+      : a.status === 'delivered-to-customer' ? '<span style="color: var(--purple);">MÜŞTERİDE</span>'
       : `<span style="color: var(--blue);">KİRADA (${a.tenantName || '?'})</span>`;
 
     let action;
@@ -3921,6 +3978,238 @@ function terminateRent(landId, aptId) {
   openApartmentsModal(landId);
 }
 
+// ============================================================
+// KENTSEL DÖNÜŞÜM
+// ============================================================
+
+// Müşteriden kentsel dönüşüm teklifi üret
+function generateUrbanRenewalProposal() {
+  // Sadece güvenilir müşterilerden gelir (trust > 40) + belli bir reputation gerekli
+  if (state.reputation < 35) return null;
+
+  const eligibleCustomers = state.customers.filter(c => c.trust >= 40);
+  if (eligibleCustomers.length === 0) return null;
+
+  const customer = choice(eligibleCustomers);
+  const ilceData = ILCELER[customer.ilce];
+
+  // Eski bina boyutu — orta büyüklük (400-1500 m²)
+  const oldM2 = 400 + Math.floor(Math.random() * 1100);
+  const oldApartmentCount = Math.floor(oldM2 / 90); // ~90m² başına 1 daire eski binada
+  const buildingAge = 25 + Math.floor(Math.random() * 30); // 25-55 yaş
+
+  // Yapılacak yeni bina: aynı arsaya rezidans veya apartman
+  // Arsa muhtemelen 500-1500 m² civarı
+  const landM2 = Math.round(oldM2 * (0.8 + Math.random() * 0.5)); // arsa biraz daha büyük olabilir
+  const newType = landM2 >= 1000 ? 'rezidans' : 'apartman';
+  const newM2Total = landM2 * BUILDING_TYPES[newType].floorMultiplier;
+  const newAptCount = BUILDING_TYPES[newType].apartmentsCalc(landM2);
+
+  // Daire paylaşımı — müşteri payı %40-55 arası (eski bina başına daire telafisi)
+  const theirShareRatio = 0.40 + Math.random() * 0.15;
+  const theirShare = Math.max(oldApartmentCount, Math.floor(newAptCount * theirShareRatio));
+  const ourShare = newAptCount - theirShare;
+
+  // Yıkım maliyeti tahmini (eski bina m²'si × ₺150/m²)
+  const demolitionCost = Math.round(oldM2 * 150);
+
+  // İnşaat süresi
+  const buildDays = calculateConstructionDays(newType, landM2);
+  const totalDays = buildDays + 20; // yıkım için +20 gün
+
+  // Tahmini inşaat maliyeti
+  const materials = calculateConstructionMaterials(newType, landM2);
+  let estMaterialCost = 0;
+  materials.forEach(m => {
+    const cheapest = cheapestSupplier(m.productId);
+    if (cheapest) estMaterialCost += cheapest.price * m.qty;
+  });
+  const dailyLabor = Math.round(newM2Total * 80);
+  const totalLabor = dailyLabor * buildDays;
+  const totalCost = demolitionCost + estMaterialCost + totalLabor + Math.round(newM2Total * 200);
+
+  // Bizim payımızın değeri (tahmini)
+  const avgAptSize = BUILDING_TYPES[newType].avgApartmentSize(landM2, newAptCount);
+  const ourShareValue = ourShare * avgAptSize * BUILDING_TYPES[newType].pricePerSqm;
+  const estProfit = ourShareValue - totalCost;
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'urban-renewal',
+    customerId: customer.id,
+    customerName: customer.name,
+    ilce: customer.ilce,
+    oldM2,
+    oldApartmentCount,
+    buildingAge,
+    landM2,
+    newType,
+    newAptCount,
+    ourShare,
+    theirShare,
+    theirShareRatio,
+    demolitionCost,
+    totalDays,
+    buildDays,
+    estTotalCost: totalCost,
+    estMaterialCost,
+    estLabor: totalLabor,
+    ourShareValue,
+    estProfit,
+    receivedDay: state.day,
+    expiresDay: state.day + 4, // 4 gün cevap süresi
+    subject: `🏚 Kentsel Dönüşüm Teklifi — ${ilceData.name}`,
+    body: `${customer.name} olarak ${ilceData.name}'da bulunan ${buildingAge} yıllık binamızı yenilemek istiyoruz. Şirketinizle anlaşmak isterim.\n\nEski bina: ${oldM2} m² · ${oldApartmentCount} daire\nMevcut arsa: ${landM2} m² (yeni inşaata uygun)\nYıkım sonrası planlanan: ${BUILDING_TYPES[newType].name} (${newAptCount} daire)\n\nDaire paylaşımı önerimiz: bize ${theirShare} daire, size ${ourShare} daire.\n\nTahmini yıkım: ${fmt(demolitionCost)}\nToplam süre: ${totalDays} gün\n\nİlginizi bekliyoruz.`,
+    unread: true,
+    answered: false,
+    sender: 'urban-customer'
+  };
+}
+
+// Onayla → urbanProject oluştur, yıkım maliyeti hemen ödenir
+function approveUrbanRenewal(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+
+  if (state.cash < e.demolitionCost) {
+    toast(`Yetersiz bakiye. Yıkım için ${fmt(e.demolitionCost)} gerekli.`, 'error');
+    return;
+  }
+
+  if (!confirm(`${e.customerName} kentsel dönüşüm projesi onaylanacak\n\n• Yıkım maliyeti: ${fmt(e.demolitionCost)} (hemen ödenir)\n• Yıkım süresi: 20 gün\n• Sonra ${e.totalDays - 20} gün inşaat\n• Bize ${e.ourShare} daire kalacak\n\nDevam edelim mi?`)) return;
+
+  spend(e.demolitionCost, 'yikim');
+
+  // Sanal bir arsa oluştur (kentsel dönüşüm arazisi)
+  const urbanLandId = 'UL' + uid();
+  state.lands.push({
+    id: urbanLandId,
+    ilce: e.ilce,
+    m2: e.landM2,
+    purchasePrice: 0, // bizim arsa değil, müşterinin
+    purchaseDay: state.day,
+    isUrbanRenewal: true,
+    urbanProjectId: null, // aşağıda dolduracağız
+    building: {
+      id: state.buildingNextId++,
+      type: e.newType,
+      startDay: state.day + 20, // yıkım sonrası
+      totalDays: e.buildDays,
+      daysPassed: -20, // negative = yıkım fazında
+      status: 'demolition', // demolition | building | paused-warned | completed
+      materialsNeeded: calculateConstructionMaterials(e.newType, e.landM2).map(m => ({ ...m, consumed: 0 })),
+      totalCost: e.demolitionCost,
+      isUrbanRenewal: true
+    }
+  });
+
+  // Proje kaydını da tut
+  const projectId = 'UP' + uid();
+  state.urbanProjects.push({
+    id: projectId,
+    customerId: e.customerId,
+    customerName: e.customerName,
+    landId: urbanLandId,
+    ourShare: e.ourShare,
+    theirShare: e.theirShare,
+    startDay: state.day,
+    deliveredToCustomer: false
+  });
+  // Land'e bağla
+  const newLand = state.lands.find(l => l.id === urbanLandId);
+  newLand.urbanProjectId = projectId;
+
+  // Müşteri güveni artar
+  const cust = getCustomer(e.customerId);
+  if (cust) cust.trust = Math.min(100, cust.trust + 5);
+
+  // Mail arşivle
+  e.answered = true;
+  state.archive.push({ ...e, type: 'urban-renewal', status: 'approved', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  toast(`✓ Kentsel dönüşüm projesi başladı! Yıkım: ${fmt(e.demolitionCost)}`, 'success');
+  addXP(80, 'kentsel dönüşüm onayı');
+  setView('lands');
+  render();
+}
+
+function rejectUrbanRenewal(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+
+  if (!confirm(`${e.customerName} kentsel dönüşüm teklifini reddetmek istiyor musun?`)) return;
+
+  // Güven biraz düşer
+  const cust = getCustomer(e.customerId);
+  if (cust) cust.trust = Math.max(0, cust.trust - 3);
+
+  e.answered = true;
+  state.archive.push({ ...e, type: 'urban-renewal', status: 'rejected', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  toast(`✕ Kentsel dönüşüm reddedildi. ${e.customerName} güveni biraz düştü.`, 'info');
+  render();
+}
+
+// ============================================================
+// TAŞERON SİSTEMİ
+// ============================================================
+
+// Mevcut inşaatı taşerona devret (sabit fiyat öder, hızlı bitiş)
+function subcontractBuilding(landId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  const b = land.building;
+  if (b.status === 'completed') return;
+  if (b.isSubcontracted) {
+    toast('Bu inşaat zaten taşeronda', 'error');
+    return;
+  }
+
+  const t = BUILDING_TYPES[b.type];
+  const remainingDays = b.totalDays - b.daysPassed;
+  if (remainingDays <= 0) return;
+
+  // Taşeron ücreti: kalan günlerin maliyeti + %15 kar marjı (taşeron kazancı)
+  const totalArea = land.m2 * t.floorMultiplier;
+  const labourRemaining = Math.round(totalArea * 80 * remainingDays);
+  // Kalan malzeme maliyetini de hesapla
+  let remainingMaterialCost = 0;
+  b.materialsNeeded.forEach(m => {
+    const remaining = m.qty - m.consumed;
+    const cheapest = cheapestSupplier(m.productId);
+    if (cheapest && remaining > 0) remainingMaterialCost += cheapest.price * remaining;
+  });
+  const subcontractFee = Math.round((labourRemaining + remainingMaterialCost) * 1.18); // %18 marj
+  const speedupFactor = 0.6; // taşeron %40 daha hızlı
+  const newRemainingDays = Math.ceil(remainingDays * speedupFactor);
+
+  if (state.cash < subcontractFee) {
+    toast(`Taşerona vermek için kasada ${fmt(subcontractFee)} olması lazım`, 'error');
+    return;
+  }
+
+  if (!confirm(`İnşaatı taşerona devret\n\n• Kalan süre: ${remainingDays} → ${newRemainingDays} gün (%${Math.round((1 - speedupFactor) * 100)} daha hızlı)\n• Sabit fiyat: ${fmt(subcontractFee)} (hemen ödenir)\n• Malzeme + işçilik dahil — sen artık ödeme yapmayacaksın\n\nDevam edelim mi?`)) return;
+
+  spend(subcontractFee, 'taseron');
+  b.isSubcontracted = true;
+  b.subcontractFee = subcontractFee;
+  b.subcontractedDay = state.day;
+  // Süreyi yeniden ayarla
+  b.totalDays = b.daysPassed + newRemainingDays;
+  b.totalCost += subcontractFee;
+  b.status = 'building'; // emin olalım
+
+  toast(`✓ İnşaat taşerona devredildi. ${newRemainingDays} gün sonra teslim.`, 'success');
+  addXP(40, 'taşeron anlaşması');
+  render();
+}
+
 // İsim havuzları
 const NAMES_M = ['Mehmet','Ahmet','Mustafa','Ali','Hasan','Hüseyin','İbrahim','Murat','Emre','Burak','Cem','Serkan','Tolga','Onur','Kemal','Selim','Yusuf','Kerem','Tarık','Bora','Volkan','Eren','Furkan'];
 const NAMES_F = ['Ayşe','Fatma','Zeynep','Elif','Merve','Sevgi','Pınar','Selin','Deniz','Esra','Burcu','Tuğba','Yasemin','Damla'];
@@ -4002,6 +4291,9 @@ const state = {
   landMarket: [],             // piyasadaki arsa ilanları { id, ilce, m2, price, listedDay, expiresDay, sellerName }
   landMarketLastRefresh: 0,
   buildingNextId: 1,          // İnşaat sıralı id sayacı
+
+  // Kentsel dönüşüm projeleri (kabul ettiğim, aktif olarak işlenen)
+  urbanProjects: [],          // { id, customerId, ilce, oldM2, agreement: {our, theirs}, ... }
 
   // Tedarikçi ilişki sistemi (Satın Alma Sorumlusu için)
   // Her tedarikçi için 0-100 arası bağ puanı (alış yapıldıkça artar)
@@ -5114,6 +5406,19 @@ function renderInbox() {
           </div>`;
         }
 
+        if (e.type === 'urban-renewal') {
+          // Kentsel dönüşüm teklifi
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--purple);">
+            <div class="top">
+              <span class="from">🏚 ${e.customerName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Kentsel Dönüşüm</span></span>
+              <span class="date">Gün ${e.receivedDay} · ${ILCELER[e.ilce].name}</span>
+            </div>
+            <div class="subject">${e.subject}</div>
+            <div class="preview">Bize ${e.ourShare} daire, müşteriye ${e.theirShare} · Tahmini kâr: <strong style="color: ${e.estProfit >= 0 ? 'var(--green)' : 'var(--red)'};">${e.estProfit >= 0 ? '+' : ''}${fmt(e.estProfit)}</strong></div>
+            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+          </div>`;
+        }
+
         // Varsayılan: tender (müşteri ihalesi)
         return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
           <div class="top">
@@ -5592,6 +5897,120 @@ function rejectDispatchPlan(emailId) {
   render();
 }
 
+// Kentsel dönüşüm teklifi detay sayfası
+function renderUrbanRenewalDetail(e) {
+  const c = $('center');
+  const expIn = e.expiresDay - state.day;
+  const ilceData = ILCELER[e.ilce];
+  const newType = BUILDING_TYPES[e.newType];
+  const avgAptSize = newType.avgApartmentSize(e.landM2, e.newAptCount);
+
+  c.innerHTML = `<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+      <button class="btn" onclick="state.selectedEmail=null; render()">← Geri</button>
+      <h2 style="margin: 0; flex: 1;">🏚 KENTSEL DÖNÜŞÜM TEKLİFİ</h2>
+    </div>
+
+    <div style="background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--purple); padding: 16px; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+        <div>
+          <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Müşteri</div>
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1px; color: var(--purple);">${e.customerName}</div>
+          <div style="font-size: 10px; color: var(--ink-dim);">${ilceData.name} · ${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 11px; color: var(--ink-dim);">Cevap Süresi</div>
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; color: ${expIn <= 1 ? 'var(--red)' : 'var(--accent)'};">${expIn <= 0 ? 'BUGÜN SON' : expIn + ' gün'}</div>
+        </div>
+      </div>
+      <div style="font-size: 12px; line-height: 1.7; color: var(--ink); white-space: pre-line; padding: 12px; background: var(--panel-2); border-left: 2px solid var(--purple);">${e.body}</div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">PROJE DETAYLARI</h3>
+
+    <div class="grid-2" style="margin-bottom: 16px;">
+      <div class="card">
+        <h3>🏚 Eski Bina</h3>
+        <div style="font-size: 12px; line-height: 1.8;">
+          <div>Yaş: <strong>${e.buildingAge} yıl</strong></div>
+          <div>Alan: <strong>${e.oldM2} m²</strong></div>
+          <div>Daire sayısı: <strong>${e.oldApartmentCount}</strong></div>
+          <div style="color: var(--red); font-weight: 700; margin-top: 8px;">Yıkım maliyeti: ${fmt(e.demolitionCost)}</div>
+          <div style="font-size: 10px; color: var(--ink-dim);">(Onay sonrası hemen ödenir)</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>🏗 Yeni Bina (${newType.name})</h3>
+        <div style="font-size: 12px; line-height: 1.8;">
+          <div>Arsa: <strong>${e.landM2} m²</strong></div>
+          <div>Toplam alan: <strong>${(e.landM2 * newType.floorMultiplier).toFixed(0)} m²</strong></div>
+          <div>Daire sayısı: <strong>${e.newAptCount}</strong> · Ortalama: <strong>${avgAptSize} m²</strong></div>
+          <div>Süre: <strong>${e.totalDays} gün</strong> (yıkım 20 + inşaat ${e.buildDays})</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">DAİRE PAYLAŞIMI</h3>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+      <div style="padding: 16px; background: var(--panel); border-left: 3px solid var(--green);">
+        <div style="font-size: 11px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">SİZE</div>
+        <div style="font-family: 'Bebas Neue'; font-size: 28px; color: var(--green); letter-spacing: 2px;">${e.ourShare} DAİRE</div>
+        <div style="font-size: 11px; color: var(--ink-dim);">≈ ${fmt(e.ourShareValue)} değerinde</div>
+        <div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">İstediğin gibi sat veya kiraya ver</div>
+      </div>
+      <div style="padding: 16px; background: var(--panel); border-left: 3px solid var(--blue);">
+        <div style="font-size: 11px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">MÜŞTERİYE</div>
+        <div style="font-family: 'Bebas Neue'; font-size: 28px; color: var(--blue); letter-spacing: 2px;">${e.theirShare} DAİRE</div>
+        <div style="font-size: 11px; color: var(--ink-dim);">Tamamlanınca otomatik teslim</div>
+        <div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">%${Math.round(e.theirShareRatio * 100)} pay</div>
+      </div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">MALİYET & KAR ANALİZİ</h3>
+
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile">
+        <div class="stat-label">Yıkım</div>
+        <div class="stat-val" style="color: var(--red); font-size: 13px;">${fmt(e.demolitionCost)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Malzeme</div>
+        <div class="stat-val" style="color: var(--red); font-size: 13px;">${fmt(e.estMaterialCost)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">İşçilik</div>
+        <div class="stat-val" style="color: var(--red); font-size: 13px;">${fmt(e.estLabor)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Toplam Maliyet</div>
+        <div class="stat-val" style="color: var(--red);">${fmt(e.estTotalCost)}</div>
+      </div>
+    </div>
+
+    <div style="padding: 14px; background: var(--panel-2); border-left: 3px solid ${e.estProfit >= 0 ? 'var(--green)' : 'var(--red)'}; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Tahmini Net Kâr</div>
+          <div style="font-family: 'Bebas Neue'; font-size: 22px; color: ${e.estProfit >= 0 ? 'var(--green)' : 'var(--red)'};">${e.estProfit >= 0 ? '+' : ''}${fmt(e.estProfit)}</div>
+        </div>
+        <div style="text-align: right; font-size: 11px;">
+          <div>Bizim payın değeri: ${fmt(e.ourShareValue)}</div>
+          <div>– Toplam maliyet: ${fmt(e.estTotalCost)}</div>
+          <div style="color: var(--ink-dim); margin-top: 4px;">Bunlara ek olarak müşteri güveni +5 ve itibar +5</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px;" onclick="approveUrbanRenewal(${e.id})" ${state.cash >= e.demolitionCost ? '' : 'disabled'}>
+        ✓ ANLAŞMAYI ONAYLA (yıkım: ${fmt(e.demolitionCost)})
+      </button>
+      <button class="btn danger" style="padding: 14px;" onclick="rejectUrbanRenewal(${e.id})">
+        ✕ REDDET
+      </button>
+    </div>`;
+}
+
 // Tek bir teklif değerlendirme mantığı (hem live preview hem nextDay aynısını kullanır)
 // returns: { status: 'good'|'risky'|'bad', willAccept: bool, reason: string }
 function evaluateOffer(userOffer, email) {
@@ -5646,6 +6065,12 @@ function renderEmailDetail() {
   // Sevkiyat planı için ayrı sayfa
   if (e.type === 'dispatch-plan') {
     renderDispatchPlanDetail(e);
+    return;
+  }
+
+  // Kentsel dönüşüm için ayrı sayfa
+  if (e.type === 'urban-renewal') {
+    renderUrbanRenewalDetail(e);
     return;
   }
 
@@ -7869,26 +8294,44 @@ function renderMyLands() {
         `;
       } else if (b.status === 'completed') {
         // Tamamlanmış bina
+        const isUrban = l.isUrbanRenewal;
         const unsold = b.apartments.filter(a => a.status === 'unsold').length;
         const sold = b.apartments.filter(a => a.status === 'sold').length;
         const rented = b.apartments.filter(a => a.status === 'rented').length;
+        const customerDelivered = b.apartments.filter(a => a.status === 'delivered-to-customer').length;
         buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--green);">
-          <strong style="color: var(--green);">✅ ${BUILDING_TYPES[b.type].name} tamamlandı</strong><br>
-          <span style="font-size: 10px; color: var(--ink-dim);">${b.apartments.length} daire · ${unsold} satılık · ${sold} satılmış · ${rented} kirada</span>
+          <strong style="color: var(--green);">✅ ${BUILDING_TYPES[b.type].name} tamamlandı${isUrban ? ' (Kentsel Dönüşüm)' : ''}</strong><br>
+          <span style="font-size: 10px; color: var(--ink-dim);">${b.apartments.length} daire · ${unsold} satılık · ${sold} satılmış · ${rented} kirada${customerDelivered > 0 ? ' · ' + customerDelivered + ' müşteride' : ''}</span>
         </div>`;
         actions = `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
+      } else if (b.status === 'demolition') {
+        // Yıkım fazı
+        const demoDay = Math.abs(b.daysPassed);
+        const demoTotal = 20;
+        const pct = Math.round((demoDay / demoTotal) * 100);
+        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--red);">
+          <strong style="color: var(--red);">🏚 YIKIM SÜRECİ</strong>
+          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: var(--red);"></div></div>
+          <span style="font-size: 10px; color: var(--ink-dim);">${demoDay}/${demoTotal} gün · %${pct} · Kentsel dönüşüm</span>
+        </div>`;
+        actions = `<button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>`;
       } else if (b.status === 'building' || b.status === 'paused-warned') {
-        // Devam eden veya duran inşaat
         const pct = Math.round((b.daysPassed / b.totalDays) * 100);
         const remaining = b.totalDays - b.daysPassed;
         const paused = b.status === 'paused-warned';
-        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : 'var(--accent)'};">
-          <strong style="color: ${paused ? 'var(--red)' : 'var(--accent)'};">${paused ? '⚠️' : '🏗'} ${BUILDING_TYPES[b.type].name} ${paused ? '(DURDU)' : 'inşa ediliyor'}</strong>
-          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : 'var(--accent)'};"></div></div>
+        const isUrban = l.isUrbanRenewal;
+        const isSub = b.isSubcontracted;
+        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">
+          <strong style="color: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">${paused ? '⚠️' : '🏗'} ${BUILDING_TYPES[b.type].name} ${paused ? '(DURDU)' : (isSub ? '(TAŞERONDA)' : 'inşa ediliyor')}${isUrban ? ' · Kentsel Dönüşüm' : ''}</strong>
+          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};"></div></div>
           <span style="font-size: 10px; color: var(--ink-dim);">${b.daysPassed}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
           ${paused ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
+          ${isSub ? '<br><span style="font-size: 10px; color: var(--purple);">Taşeron firma bitiriyor</span>' : ''}
         </div>`;
-        actions = `<button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>`;
+        actions = `
+          ${!b.isSubcontracted ? `<button class="btn small" style="background: var(--purple); color: #fff; border-color: var(--purple);" onclick="subcontractBuilding('${l.id}')">🤝 TAŞERONA VER</button>` : ''}
+          <button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>
+        `;
       }
 
       return `<div class="card">
@@ -8860,6 +9303,19 @@ function nextDay() {
       continue;
     }
 
+    // Kentsel dönüşüm teklifleri
+    if (e.type === 'urban-renewal') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-urban' });
+        const cust = getCustomer(e.customerId);
+        if (cust) cust.trust = Math.max(0, cust.trust - 2);
+        state.agenda.push(`🏚 Kentsel dönüşüm teklifi süresi doldu: ${e.customerName}`);
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
     if (e.answered) {
       const cust = getCustomer(e.customerId);
       // Aynı evaluateOffer mantığı kullanılır — canlı önizleme ile bire bir tutarlı
@@ -9136,6 +9592,15 @@ function nextDay() {
   // 7) Generate new tenders — base 1-2 plus more from high-trust customers
   const numNew = rand(1, 3) + (state.reputation > 70 ? 1 : 0) + (state.level > 3 ? 1 : 0);
   for (let i = 0; i < numNew; i++) state.inbox.push(generateTender());
+
+  // 7a) Kentsel dönüşüm teklifleri — her 12-20 günde bir şans, reputation şartı
+  if (state.reputation >= 50 && Math.random() < 0.08) {
+    const urbanProposal = generateUrbanRenewalProposal();
+    if (urbanProposal) {
+      state.inbox.push(urbanProposal);
+      toast(`📧 Yeni kentsel dönüşüm teklifi: ${urbanProposal.customerName}`, 'info');
+    }
+  }
 
   // 7b) Saha satış sorumluları ziyaret yapar — her 2-3 günde bir
   (state.fieldSalesReps || []).forEach(rep => {
@@ -9896,10 +10361,30 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.33';
+const CURRENT_VERSION = 'v1.34';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.34',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'KENTSEL DÖNÜŞÜM + TAŞERON SİSTEMİ',
+    items: [
+      { cat: 'major', text: '🏚 <strong>Kentsel dönüşüm projeleri</strong>: müşteri eski binası, sen yıkıp yeniden inşa ediyorsun' },
+      { cat: 'major', text: '<strong>Daire paylaşımı</strong>: müşteriye %40-55, sana kalanı (sat/kirala)' },
+      { cat: 'major', text: '🤝 <strong>Taşeron sistemi</strong>: aktif inşaatını başka müteahhide devredebilirsin' },
+      { cat: 'feature', text: 'Kentsel dönüşüm teklifleri reputation ≥ 50 olunca gelir' },
+      { cat: 'feature', text: 'Yıkım fazı 20 gün + inşaat fazı (yapı tipine göre)' },
+      { cat: 'feature', text: 'Onay sonrası yıkım maliyeti hemen ödenir' },
+      { cat: 'feature', text: 'Müşteri payı (en küçük daireler) bina hazır olunca otomatik teslim' },
+      { cat: 'feature', text: 'Tamamlanınca müşteri güveni +15, itibar +5' },
+      { cat: 'feature', text: 'Taşeron: kalan süre %40 kısalır, sabit fiyatla devirilir (~%18 marj)' },
+      { cat: 'feature', text: 'Taşeronda artık malzeme/işçilik ödeme yok — tek seferlik ödeme yeterli' },
+      { cat: 'feature', text: 'Yeşil sınırlı mail tipi: 🏚 Kentsel Dönüşüm Teklifi' },
+      { cat: 'major', text: '✨ <strong>10 maddelik büyük genişleme tamamlandı!</strong>' }
+    ]
+  },
   {
     version: 'v1.33',
     date: '11 Mayıs 2026',

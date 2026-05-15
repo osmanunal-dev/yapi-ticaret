@@ -3306,6 +3306,7 @@ const state = {
   salesReps: [],      // { id, name, salary, level, xp, hireDay, ilce, busyUntil, visitingCustomerId }
   fieldSalesReps: [], // Saha Satış Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDeals, totalRevenue }
   purchasers: [],     // Satın Alma Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalPurchases, totalSavings }
+  dispatchers: [],    // Sevkiyat Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDispatches }
 
   // Bank
   loans: [],          // { id, principal, remaining, interestRate, dailyPayment, daysLeft, takenDay }
@@ -3906,8 +3907,152 @@ function tryFieldSalesVisit(rep) {
 }
 
 // ============================================================
-// SATIN ALMA SORUMLUSU — Sözleşme ihtiyaçlarını analiz et
+// SEVKİYAT SORUMLUSU — Optimum sevkiyat planı
 // ============================================================
+
+// Sevkiyat planı üretici
+// returns: { plan: [{ctId, vehicleId, items, weight, distance, tripDays}], totalDispatches, totalFuelCost } | null
+function tryDispatcherProposal(rep) {
+  // Aktif, tamamlanmamış sözleşmeler — termin tarihine göre sırala
+  const pendingContracts = state.contracts
+    .filter(ct => !ct.delivered)
+    .map(ct => {
+      // Bu sözleşme için kalan yük
+      const remaining = ct.items.map(it => {
+        const delivered = (ct.deliveries || []).reduce((s, d) =>
+          s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+        return { productId: it.productId, qty: Math.max(0, it.qty - delivered) };
+      }).filter(r => r.qty > 0);
+      return { ct, remaining };
+    })
+    .filter(x => x.remaining.length > 0)
+    .sort((a, b) => a.ct.deadline - b.ct.deadline); // termin tarihine göre
+
+  if (pendingContracts.length === 0) return null;
+
+  // Boş ve şoförü atanmış araçlar (boş = busyUntil <= state.day)
+  const availableVehicles = state.vehicles
+    .filter(v => v.busyUntil <= state.day)
+    .filter(v => state.drivers.some(d => d.vehicleId === v.id)) // şoförü olmalı
+    .slice();
+
+  if (availableVehicles.length === 0) return null;
+
+  // Plan: her sözleşmeye en uygun aracı eşleştir
+  // Strateji: termin yakın olanlardan başla
+  const plan = [];
+  const usedVehicles = new Set();
+
+  for (const { ct, remaining } of pendingContracts) {
+    // Bu sözleşmenin toplam ağırlığı (kalan)
+    const totalWeight = remaining.reduce((s, r) =>
+      s + (PRODUCTS[r.productId].weight * r.qty / 1000), 0);
+
+    // Bu yük için en uygun araç boyutu (en küçük ama yeterli olan)
+    const sortedTypes = ['kamyonet', 'kucuk', 'orta', 'buyuk'];
+    let chosenVehicle = null;
+
+    for (const vt of sortedTypes) {
+      const tonaj = VEHICLE_TYPES[vt].tonaj;
+      if (tonaj < totalWeight && rep.level < 3) continue; // tek seferlik prensibi, Sv3 split de yapabilir
+      // Bu tipte boş bir araç var mı?
+      const v = availableVehicles.find(av => av.type === vt && !usedVehicles.has(av.id));
+      if (v) {
+        chosenVehicle = v;
+        break;
+      }
+    }
+
+    // Yeterli kapasitede araç yok → mevcut en büyük boş araçla kısmi sevkiyat
+    if (!chosenVehicle) {
+      // Sv2+: en büyük boş araçla kısmen yükle
+      if (rep.level >= 2) {
+        chosenVehicle = availableVehicles
+          .filter(av => !usedVehicles.has(av.id))
+          .sort((a, b) => VEHICLE_TYPES[b.type].tonaj - VEHICLE_TYPES[a.type].tonaj)[0];
+      }
+      if (!chosenVehicle) continue; // bu sözleşme atlanır
+    }
+
+    // Stoktan yükleyebileceğimizi belirle (stoktan al, eksikse atla)
+    const tonajLimit = VEHICLE_TYPES[chosenVehicle.type].tonaj;
+    const load = [];
+    let currentWeight = 0;
+
+    for (const r of remaining) {
+      const stockHave = state.inventory[r.productId] || 0;
+      if (stockHave <= 0) continue;
+      const maxByStock = Math.min(r.qty, stockHave);
+      // Bu kalemin birim ağırlığı
+      const unitWeight = PRODUCTS[r.productId].weight / 1000;
+      // Kapasite kontrolü
+      const remainingCap = tonajLimit - currentWeight;
+      const maxByCapacity = unitWeight > 0 ? Math.floor(remainingCap / unitWeight) : maxByStock;
+      const qty = Math.min(maxByStock, maxByCapacity);
+      if (qty > 0) {
+        load.push({ productId: r.productId, qty });
+        currentWeight += unitWeight * qty;
+      }
+    }
+
+    if (load.length === 0) continue; // hiç yüklenebilir kalem yok (stok yetmiyor)
+
+    const cust = getCustomer(ct.customerId);
+    const dist = ILCELER[cust.ilce].km;
+    const fuelCost = Math.round(VEHICLE_TYPES[chosenVehicle.type].fuelPerKm * dist * 2 * FUEL_PRICE);
+
+    plan.push({
+      ctId: ct.id,
+      customerName: cust.name,
+      deadline: ct.deadline,
+      vehicleId: chosenVehicle.id,
+      vehicleName: chosenVehicle.name || VEHICLE_TYPES[chosenVehicle.type].name,
+      vehicleType: chosenVehicle.type,
+      items: load,
+      weight: currentWeight,
+      distance: dist,
+      fuelCost
+    });
+    usedVehicles.add(chosenVehicle.id);
+
+    // Tüm araçlar kullanıldıysa dur
+    if (usedVehicles.size >= availableVehicles.length) break;
+  }
+
+  if (plan.length === 0) return null;
+
+  const totalFuelCost = plan.reduce((s, p) => s + p.fuelCost, 0);
+
+  // Mail
+  const intros = [
+    `Patron, aktif sözleşmelerin sevkiyat planını hazırladım. Onayına sunuyorum.`,
+    `Şefim, termin sırasına göre öncelikleri belirledim ve araçları eşleştirdim.`,
+    `Selam patron, ${plan.length} sevkiyat planlandı. Tek tuşla başlatabiliriz.`,
+    `Hazırım patron — stok, araç ve termin hepsi yerli yerinde. Onay bekleniyor.`
+  ];
+
+  const summary = plan.map(p => {
+    const daysToDeadline = p.deadline - state.day;
+    const urgent = daysToDeadline <= 2;
+    return `• ${p.customerName}: ${p.items.length} kalem (${p.weight.toFixed(1)}t) → ${p.vehicleName}${urgent ? ' ⚠️ ACİL' : ''}`;
+  }).join('\n');
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'dispatch-plan',
+    repId: rep.id,
+    repName: rep.name,
+    plan,
+    totalFuelCost,
+    receivedDay: state.day,
+    expiresDay: state.day + 1, // Sevkiyat aciliyet ister
+    subject: `🚛 Sevkiyat Planı — ${plan.length} sözleşme, ${plan.length} araç`,
+    body: choice(intros) + `\n\nSevkiyat listesi:\n${summary}\n\nToplam yakıt maliyeti: ${fmt(totalFuelCost)}\n\nOnaylarsan tüm sevkiyatlar tek seferde başlar.`,
+    unread: true,
+    answered: false,
+    sender: 'employee'
+  };
+}
 
 // Bir satın alma sorumlusu çalışır: sözleşme ihtiyaçlarını analiz eder, alış paketleri oluşturur
 // returns: { purchases: [{supplier, items: [{productId, qty, unit, total}], total, savings}], totalCost, totalSavings } | null
@@ -4293,6 +4438,19 @@ function renderInbox() {
           </div>`;
         }
 
+        if (e.type === 'dispatch-plan') {
+          // Sevkiyat sorumlusundan gelen sevkiyat planı
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--red);">
+            <div class="top">
+              <span class="from">🚛 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Sevkiyat</span></span>
+              <span class="date">Gün ${e.receivedDay}</span>
+            </div>
+            <div class="subject">${e.subject}</div>
+            <div class="preview">${e.plan.length} sevkiyat · Yakıt: ${fmt(e.totalFuelCost)}</div>
+            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+          </div>`;
+        }
+
         // Varsayılan: tender (müşteri ihalesi)
         return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
           <div class="top">
@@ -4625,6 +4783,152 @@ function rejectPurchaseProposal(emailId) {
   render();
 }
 
+// Sevkiyat planı detay ekranı
+function renderDispatchPlanDetail(e) {
+  const c = $('center');
+  const expIn = e.expiresDay - state.day;
+
+  const planRows = e.plan.map(p => {
+    const daysToDeadline = p.deadline - state.day;
+    const urgent = daysToDeadline <= 2;
+    const itemsList = p.items.map(it => `${PRODUCTS[it.productId].name} (${it.qty} ${PRODUCTS[it.productId].unit})`).join(', ');
+    return `<tr style="${urgent ? 'background: rgba(239, 68, 68, 0.08);' : ''}">
+      <td>
+        <strong>${p.customerName}</strong>
+        ${urgent ? '<span style="color: var(--red); font-size: 10px; margin-left: 6px;">⚠️ ACİL</span>' : ''}
+        <div style="font-size: 10px; color: var(--ink-dim);">Termin: G${p.deadline} (${daysToDeadline} gün)</div>
+      </td>
+      <td>
+        <strong>${p.vehicleName}</strong>
+        <div style="font-size: 10px; color: var(--ink-dim);">${VEHICLE_TYPES[p.vehicleType].name} · ${p.weight.toFixed(1)}t yük</div>
+      </td>
+      <td style="font-size: 11px;">${itemsList}</td>
+      <td class="num">${p.distance} km</td>
+      <td class="num">${fmt(p.fuelCost)}</td>
+    </tr>`;
+  }).join('');
+
+  c.innerHTML = `<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+      <button class="btn" onclick="state.selectedEmail=null; render()">← Geri</button>
+      <h2 style="margin: 0; flex: 1;">🚛 SEVKİYAT PLANI</h2>
+    </div>
+
+    <div style="background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--red); padding: 16px; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+        <div>
+          <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Personelden</div>
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1px; color: var(--red);">🚛 ${e.repName}</div>
+        </div>
+      </div>
+      <div style="font-size: 12px; line-height: 1.7; color: var(--ink); white-space: pre-line; padding: 12px; background: var(--panel-2); border-left: 2px solid var(--red);">${e.body}</div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">SEVKİYAT LİSTESİ (${e.plan.length})</h3>
+    <div class="table-scroll">
+    <table class="data-table" style="margin-bottom: 16px;">
+      <thead>
+        <tr>
+          <th>Müşteri / Termin</th>
+          <th>Araç</th>
+          <th>Yük</th>
+          <th class="num">Mesafe</th>
+          <th class="num">Yakıt</th>
+        </tr>
+      </thead>
+      <tbody>${planRows}</tbody>
+    </table>
+    </div>
+
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile">
+        <div class="stat-label">Sevkiyat Sayısı</div>
+        <div class="stat-val" style="color: var(--blue); font-size: 18px;">${e.plan.length}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Toplam Yakıt</div>
+        <div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(e.totalFuelCost)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Kasandaki Para</div>
+        <div class="stat-val" style="color: ${state.cash >= e.totalFuelCost ? 'var(--green)' : 'var(--red)'}; font-size: 14px;">${fmt(state.cash)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Cevap Süresi</div>
+        <div class="stat-val" style="font-size: 14px;">${expIn <= 0 ? 'Bugün son!' : expIn + ' gün'}</div>
+      </div>
+    </div>
+
+    <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
+      <strong>📌 Bilgi:</strong> Onaylarsan tüm sevkiyatlar tek seferde başlar. Araçlar yola çıkar, yakıt kasadan düşer, stoktan yük çıkar.
+      ${state.cash < e.totalFuelCost ? '<br><span style="color: var(--red);">⚠️ Yakıt için kasanda yeterli para yok!</span>' : ''}
+    </div>
+
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px;" onclick="approveDispatchPlan(${e.id})" ${state.cash >= e.totalFuelCost ? '' : 'disabled'}>
+        ✓ SEVKİYATLARI BAŞLAT (${e.plan.length})
+      </button>
+      <button class="btn danger" style="padding: 14px;" onclick="rejectDispatchPlan(${e.id})">
+        ✕ REDDET
+      </button>
+    </div>`;
+}
+
+function approveDispatchPlan(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  const rep = (state.dispatchers || []).find(r => r.id === e.repId);
+
+  let successCount = 0;
+  let failed = [];
+
+  for (const p of e.plan) {
+    const result = dispatchVehicleDirect(p.ctId, p.vehicleId, p.items, { showIrsaliyeAfter: false });
+    if (result.success) {
+      successCount++;
+    } else {
+      failed.push(`${p.customerName}: ${result.error}`);
+    }
+  }
+
+  if (rep) {
+    rep.totalDispatches = (rep.totalDispatches || 0) + successCount;
+    rep.xp += 15 + successCount * 5;
+  }
+
+  // Mail arşivle
+  e.answered = true;
+  state.archive.push({ ...e, type: 'dispatch-plan', status: 'approved', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  if (successCount > 0) {
+    addXP(10, 'sevkiyat planı onayı');
+    toast(`✓ ${successCount} sevkiyat başladı!${failed.length > 0 ? ` (${failed.length} başarısız)` : ''}`, 'success');
+  } else {
+    toast(`Sevkiyat başlatılamadı: ${failed.join(', ')}`, 'error');
+  }
+
+  setView('fleet');
+  render();
+}
+
+function rejectDispatchPlan(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+
+  if (!confirm(`${e.repName}'in sevkiyat planını reddetmek istiyor musun?`)) return;
+
+  e.answered = true;
+  state.archive.push({ ...e, type: 'dispatch-plan', status: 'rejected', completedDay: state.day });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+
+  toast(`✕ Sevkiyat planı reddedildi.`, 'info');
+  render();
+}
+
 // Tek bir teklif değerlendirme mantığı (hem live preview hem nextDay aynısını kullanır)
 // returns: { status: 'good'|'risky'|'bad', willAccept: bool, reason: string }
 function evaluateOffer(userOffer, email) {
@@ -4673,6 +4977,12 @@ function renderEmailDetail() {
   // Satın alma önerileri için ayrı sayfa
   if (e.type === 'purchase-proposal') {
     renderPurchaseProposalDetail(e);
+    return;
+  }
+
+  // Sevkiyat planı için ayrı sayfa
+  if (e.type === 'dispatch-plan') {
+    renderDispatchPlanDetail(e);
     return;
   }
 
@@ -5984,14 +6294,9 @@ function updateDispatchSummary(ctId) {
 function executeDispatch(ctId) {
   const ct = state.contracts.find(c => c.id === ctId);
   if (!ct) return;
-  const cust = getCustomer(ct.customerId);
-  const dist = ILCELER[cust.ilce].km;
   const vid = $('dispatch-vehicle').value;
-  const v = state.vehicles.find(x => x.id === vid);
-  const t = VEHICLE_TYPES[v.type];
-  const driver = state.drivers.find(d => d.vehicleId === v.id);
 
-  // Read load
+  // Read load from form
   const remaining = ct.items.map(it => {
     const delivered = ct.deliveries.reduce((s, d) =>
       s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
@@ -5999,23 +6304,41 @@ function executeDispatch(ctId) {
   }).filter(r => r.qty > 0);
 
   const load = [];
-  let weight = 0;
   remaining.forEach((r, idx) => {
     const q = parseInt($(`disp-${idx}`).value) || 0;
-    if (q > 0) {
-      load.push({ productId: r.productId, qty: q });
-      weight += PRODUCTS[r.productId].weight * q / 1000;
-    }
+    if (q > 0) load.push({ productId: r.productId, qty: q });
   });
 
-  if (load.length === 0) { toast('En az bir kalem yükle.', 'error'); return; }
-  if (weight > t.tonaj) { toast(`Yük ${weight.toFixed(2)}t, kapasite ${t.tonaj}t aşılmış.`, 'error'); return; }
+  const result = dispatchVehicleDirect(ctId, vid, load, { showIrsaliyeAfter: true });
+  if (result.success) {
+    closeModal();
+    render();
+  } else {
+    toast(result.error, 'error');
+  }
+}
 
-  // Stock check
+// DOM'dan bağımsız sevkiyat helper'ı — sevkiyat sorumlusu ve manuel dispatch tarafından kullanılır
+function dispatchVehicleDirect(ctId, vehicleId, load, opts) {
+  opts = opts || {};
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) return { success: false, error: 'Sözleşme bulunamadı' };
+  const cust = getCustomer(ct.customerId);
+  const dist = ILCELER[cust.ilce].km;
+  const v = state.vehicles.find(x => x.id === vehicleId);
+  if (!v) return { success: false, error: 'Araç bulunamadı' };
+  if (v.busyUntil > state.day) return { success: false, error: 'Araç görevde' };
+  const t = VEHICLE_TYPES[v.type];
+  const driver = state.drivers.find(d => d.vehicleId === v.id);
+
+  if (!load || load.length === 0) return { success: false, error: 'Yük listesi boş' };
+
+  const weight = load.reduce((s, l) => s + (PRODUCTS[l.productId].weight * l.qty / 1000), 0);
+  if (weight > t.tonaj) return { success: false, error: `Yük ${weight.toFixed(2)}t kapasite ${t.tonaj}t'u aşıyor` };
+
   for (const l of load) {
-    if (state.inventory[l.productId] < l.qty) {
-      toast(`Yetersiz stok: ${PRODUCTS[l.productId].name}`, 'error');
-      return;
+    if ((state.inventory[l.productId] || 0) < l.qty) {
+      return { success: false, error: `Yetersiz stok: ${PRODUCTS[l.productId].name}` };
     }
   }
 
@@ -6024,7 +6347,7 @@ function executeDispatch(ctId) {
   const fuelCost = Math.round(t.fuelPerKm * dist * 2 * FUEL_PRICE);
   spend(fuelCost, 'yakit');
 
-  // Aracın KM'si gidiş-dönüş kadar artar
+  // KM artışı
   v.km = (v.km || 0) + dist * 2;
 
   // Driver speed bonus
@@ -6033,7 +6356,7 @@ function executeDispatch(ctId) {
   v.busyUntil = state.day + tripDays;
   v.deliveringContractId = ct.id;
 
-  // İrsaliye numarası
+  // İrsaliye
   const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase();
   ct.deliveries.push({
     no: irNo,
@@ -6046,7 +6369,7 @@ function executeDispatch(ctId) {
     fuelCost
   });
 
-  // Driver gets XP
+  // Driver XP
   if (driver) {
     driver.xp += 10 + Math.round(dist / 10);
     while (driver.xp >= 100 * driver.level) {
@@ -6056,7 +6379,7 @@ function executeDispatch(ctId) {
     }
   }
 
-  // Check if fully delivered
+  // Fully delivered?
   const allDelivered = ct.items.every(it => {
     const total = ct.deliveries.reduce((s, d) =>
       s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
@@ -6064,15 +6387,17 @@ function executeDispatch(ctId) {
   });
   if (allDelivered) {
     ct.delivered = true;
-    cust.balance += ct.total; // create receivable
+    cust.balance += ct.total;
     toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Müşteriye cari açıldı: ${fmt(ct.total)}`, 'success');
     addXP(15, 'tüm sevkiyatlar tamam');
   }
 
   toast(`🚛 Sevkiyat başladı (${irNo}). ${tripDays} gün sürecek. Yakıt: ${fmt(fuelCost)}`, 'info');
-  closeModal();
-  showIrsaliye(ct.id, ct.deliveries[ct.deliveries.length - 1]);
-  render();
+
+  if (opts.showIrsaliyeAfter) {
+    showIrsaliye(ct.id, ct.deliveries[ct.deliveries.length - 1]);
+  }
+  return { success: true, error: null, irNo, tripDays };
 }
 
 function showIrsaliye(ctId, delivery) {
@@ -6135,15 +6460,17 @@ function renderHR() {
   const c = $('center');
   const fieldSalesList = state.fieldSalesReps || [];
   const purchasersList = state.purchasers || [];
+  const dispatchersList = state.dispatchers || [];
   const totalMonthly = state.drivers.reduce((s,d) => s + d.salary, 0)
     + state.salesReps.reduce((s,r) => s + r.salary, 0)
     + fieldSalesList.reduce((s,r) => s + r.salary, 0)
-    + purchasersList.reduce((s,r) => s + r.salary, 0);
+    + purchasersList.reduce((s,r) => s + r.salary, 0)
+    + dispatchersList.reduce((s,r) => s + r.salary, 0);
   const nextPayDay = state.lastPayrollDay + 30;
   const daysToPay = nextPayDay - state.day;
 
   c.innerHTML = `<h2>PERSONEL YÖNETİMİ</h2>
-    <div class="subtitle">Şoför, pazarlamacı, saha satış ve satın alma sorumluları · Maaşlar 30 günde bir ödenir</div>
+    <div class="subtitle">Tüm personel kategorileri · Maaşlar 30 günde bir ödenir</div>
 
     ${totalMonthly > 0 ? `<div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel); border-left: 3px solid ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'}; font-size: 12px;">
       <strong style="color: ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'};">📅 SONRAKI MAAŞ ÖDEMESI:</strong>
@@ -6156,13 +6483,15 @@ function renderHR() {
       <div class="stat-tile"><div class="stat-label">Pazarlamacı</div><div class="stat-val" style="color: var(--purple)">${state.salesReps.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Saha Satış</div><div class="stat-val" style="color: var(--green)">${fieldSalesList.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Satın Alma</div><div class="stat-val" style="color: var(--accent)">${purchasersList.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Sevkiyat</div><div class="stat-val" style="color: var(--red)">${dispatchersList.length}</div></div>
     </div>
 
     <div class="tabs">
-      <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖRLER (${state.drivers.length})</div>
-      <div class="tab" onclick="switchHRTab('sales')">PAZARLAMACILAR (${state.salesReps.length})</div>
+      <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖR (${state.drivers.length})</div>
+      <div class="tab" onclick="switchHRTab('sales')">PAZARLAMACI (${state.salesReps.length})</div>
       <div class="tab" onclick="switchHRTab('fieldsales')">SAHA SATIŞ (${fieldSalesList.length})</div>
       <div class="tab" onclick="switchHRTab('purchasers')">SATIN ALMA (${purchasersList.length})</div>
+      <div class="tab" onclick="switchHRTab('dispatchers')">SEVKİYAT (${dispatchersList.length})</div>
     </div>
     <div id="hr-content"></div>`;
   switchHRTab('drivers');
@@ -6172,8 +6501,8 @@ function switchHRTab(tab) {
   document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
   if (event && event.target) event.target.classList.add('active');
   else {
-    const idx = tab === 'drivers' ? 0 : tab === 'sales' ? 1 : tab === 'fieldsales' ? 2 : 3;
-    document.querySelectorAll('.tabs .tab')[idx]?.classList.add('active');
+    const order = { drivers: 0, sales: 1, fieldsales: 2, purchasers: 3, dispatchers: 4 };
+    document.querySelectorAll('.tabs .tab')[order[tab] || 0]?.classList.add('active');
   }
 
   const c = $('hr-content');
@@ -6348,6 +6677,50 @@ function switchHRTab(tab) {
         </div>`;
       }).join('')}
     </div>`;
+  } else if (tab === 'dispatchers') {
+    const dpList = state.dispatchers || [];
+    c.innerHTML = `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--red); font-size: 11px; line-height: 1.5;">
+      <strong style="color: var(--red);">Sevkiyat Sorumlusu</strong> — Aktif sözleşmeleri <strong>termin tarihine göre sıralar</strong>, stok ve filo durumuna göre <strong>optimum sevkiyat planı</strong> çıkarır. Onayınla araçları yola çıkarır.
+    </div>
+    <div class="grid-2">
+      ${dpList.length === 0 ? '<div class="card"><div class="empty">Henüz sevkiyat sorumlusu yok. İlkini işe alarak teslimat operasyonunu otomatikleştir.</div></div>' : ''}
+      ${dpList.map(r => {
+        const xpReq = 100 * r.level;
+        return `<div class="emp-card sales" style="border-left: 3px solid var(--red);">
+          <div class="emp-avatar" style="background: var(--red);">🚛</div>
+          <div class="emp-info">
+            <div class="emp-name">${r.name}</div>
+            <div class="emp-role">Sevkiyat · Seviye ${r.level} · <span class="stars">${'★'.repeat(r.level)}${'☆'.repeat(Math.max(0, 5 - r.level))}</span></div>
+            <div class="emp-stats">Maaş: ${fmt(r.salary)}/ay · Plan kalitesi: <strong>${r.level === 1 ? 'Temel' : r.level === 2 ? 'İyi' : 'Mükemmel'}</strong></div>
+            <div class="emp-stats">Toplam sevkiyat: <strong>${r.totalDispatches || 0}</strong></div>
+            <div class="emp-stats">XP: ${r.xp}/${xpReq}</div>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${(r.xp / xpReq) * 100}%; background: var(--red);"></div></div>
+          </div>
+          <div>
+            <button class="btn small danger" onclick="fireEmployee('dispatcher', '${r.id}')">KOVA</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 20px;">YENİ SEVKİYAT SORUMLUSU İŞE AL</h3>
+    <div class="grid-3">
+      ${[1, 2, 3].map(lvl => {
+        const monthlySalary = 40000 + (lvl - 1) * 20000;
+        const hireFee = 13000 + (lvl - 1) * 22000;
+        const intervals = [6, 4, 3];
+        const titles = ['Sevkiyat Asistanı', 'Sevkiyat Uzmanı', 'Operasyon Müdürü'];
+        return `<div class="card">
+          <h3>${titles[lvl - 1]} (Sv ${lvl})</h3>
+          <div style="font-size: 11px; line-height: 1.7;">
+            <div>Plan sıklığı: her <strong>${intervals[lvl-1]} günde 1</strong></div>
+            <div>Plan kalitesi: <strong>${lvl === 1 ? 'Temel' : lvl === 2 ? 'İyi' : 'Mükemmel'}</strong></div>
+            <div>Aylık maaş: <strong>${fmt(monthlySalary)}</strong></div>
+            <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(hireFee)}</span></div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px;" onclick="hireDispatcher(${lvl})" ${state.cash >= hireFee ? '' : 'disabled'}>İŞE AL</button>
+        </div>`;
+      }).join('')}
+    </div>`;
   }
 }
 
@@ -6436,6 +6809,28 @@ function hirePurchaser(lvl) {
   render();
 }
 
+// Sevkiyat Sorumlusu işe alımı
+function hireDispatcher(lvl) {
+  // 2026 sevkiyat sorumlusu maaşları (operasyonel personel)
+  const monthlySalary = 40000 + (lvl - 1) * 20000;  // Sv1: 40k, Sv2: 60k, Sv3: 80k
+  const fee = 13000 + (lvl - 1) * 22000;
+  if (state.cash < fee) { toast('Yetersiz para.', 'error'); return; }
+  if (!state.dispatchers) state.dispatchers = [];
+  spend(fee, "ise-alim");
+  state.dispatchers.push({
+    id: 'dp' + uid(),
+    name: fullName(),
+    salary: monthlySalary,
+    level: lvl,
+    xp: 0,
+    hireDay: state.day,
+    busyUntil: 0,
+    totalDispatches: 0
+  });
+  toast(`✓ Yeni sevkiyat sorumlusu işe alındı: Sv${lvl}`, 'success');
+  render();
+}
+
 function fireEmployee(type, id) {
   if (type === 'driver') {
     state.drivers = state.drivers.filter(d => d.id !== id);
@@ -6445,6 +6840,8 @@ function fireEmployee(type, id) {
     state.fieldSalesReps = (state.fieldSalesReps || []).filter(r => r.id !== id);
   } else if (type === 'purchaser') {
     state.purchasers = (state.purchasers || []).filter(r => r.id !== id);
+  } else if (type === 'dispatcher') {
+    state.dispatchers = (state.dispatchers || []).filter(r => r.id !== id);
   }
   toast('Personel işten çıkarıldı.', 'info');
   render();
@@ -7599,6 +7996,17 @@ function nextDay() {
       continue;
     }
 
+    // Sevkiyat planları da ayrı
+    if (e.type === 'dispatch-plan') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-dispatch' });
+        state.agenda.push(`🚛 Sevkiyat planı süresi doldu: ${e.repName}`);
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
     if (e.answered) {
       const cust = getCustomer(e.customerId);
       // Aynı evaluateOffer mantığı kullanılır — canlı önizleme ile bire bir tutarlı
@@ -7762,7 +8170,7 @@ function nextDay() {
 
   // 5) Salaries - Maaşlar her 30 günde bir ödenir
   const nextPayrollDay = state.lastPayrollDay + 30;
-  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0) || (state.purchasers && state.purchasers.length > 0))) {
+  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0) || (state.purchasers && state.purchasers.length > 0) || (state.dispatchers && state.dispatchers.length > 0))) {
     let totalPayroll = 0;
     const breakdown = [];
 
@@ -7804,6 +8212,16 @@ function nextDay() {
       const pay = Math.round(r.salary * (daysWorked / 30));
       totalPayroll += pay;
       breakdown.push({ name: r.name, role: 'Satın Alma', pay, daysWorked });
+    });
+
+    // Sevkiyat Sorumluları
+    (state.dispatchers || []).forEach(r => {
+      const periodStart = state.lastPayrollDay;
+      const effectiveStart = Math.max(r.hireDay, periodStart);
+      const daysWorked = Math.min(30, state.day - effectiveStart);
+      const pay = Math.round(r.salary * (daysWorked / 30));
+      totalPayroll += pay;
+      breakdown.push({ name: r.name, role: 'Sevkiyat', pay, daysWorked });
     });
 
     if (totalPayroll > 0) {
@@ -7904,6 +8322,29 @@ function nextDay() {
     rep.lastAnalysisDay = state.day;
 
     const proposal = tryPurchaserProposal(rep);
+    if (proposal) {
+      state.inbox.push(proposal);
+      rep.xp += 10;
+      // Level up?
+      const xpReq = 100 * rep.level;
+      if (rep.xp >= xpReq && rep.level < 3) {
+        rep.level++;
+        rep.xp = 0;
+        toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
+      }
+    }
+  });
+
+  // 7d) Sevkiyat sorumluları plan üretir — her 3-6 günde bir
+  (state.dispatchers || []).forEach(rep => {
+    // Sıklık: Sv1 her 6 günde, Sv2 her 4 günde, Sv3 her 3 günde
+    const interval = rep.level >= 3 ? 3 : rep.level === 2 ? 4 : 6;
+    const lastPlan = rep.lastPlanDay || (rep.hireDay - interval);
+    if (state.day - lastPlan < interval) return;
+
+    rep.lastPlanDay = state.day;
+
+    const proposal = tryDispatcherProposal(rep);
     if (proposal) {
       state.inbox.push(proposal);
       rep.xp += 10;
@@ -8602,10 +9043,27 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.30';
+const CURRENT_VERSION = 'v1.31';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.31',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'SEVKİYAT SORUMLUSU',
+    items: [
+      { cat: 'major', text: 'Yeni personel: <strong>Sevkiyat Sorumlusu</strong> (3 seviye)' },
+      { cat: 'major', text: 'Aktif sözleşmeleri <strong>termin tarihine göre</strong> sıralar' },
+      { cat: 'major', text: 'Stok + araç filosu analizi ile <strong>optimum sevkiyat planı</strong> çıkarır' },
+      { cat: 'feature', text: 'Tek tıkla tüm sevkiyatları başlatır' },
+      { cat: 'feature', text: 'Sv3 — kapasiteyi aşan yükler için kısmi sevkiyat (split) yapabilir' },
+      { cat: 'feature', text: 'Acil teslimatlar (termin ≤2 gün) inbox\'ta vurgulanır' },
+      { cat: 'feature', text: 'Yakıt maliyeti onay öncesi gösterilir' },
+      { cat: 'fix', text: 'HR sayfasında 5. sekme: "Sevkiyat" eklendi' },
+      { cat: 'fix', text: 'Sevkiyat motoru DOM\'dan ayrıştı — daha temiz mimari' }
+    ]
+  },
   {
     version: 'v1.30',
     date: '11 Mayıs 2026',

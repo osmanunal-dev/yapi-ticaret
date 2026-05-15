@@ -2647,6 +2647,9 @@
       <div class="nav-item" data-view="bank" onclick="setView('bank')">
         <span>🏦 Banka</span><span class="badge warn" id="badge-bank" style="display:none">!</span>
       </div>
+      <div class="nav-item" data-view="lands" onclick="setView('lands')">
+        <span>🏞 Arsa & Gayrimenkul</span>
+      </div>
       <div class="nav-item" data-view="archive" onclick="setView('archive')">
         <span>📁 Arşiv</span>
       </div>
@@ -3085,29 +3088,30 @@ const BASE_PRICE = {
 
 // İstanbul ilçeleri ve mesafeleri (depodan ~ km olarak; merkez = Maltepe varsayım)
 const ILCELER = {
-  kadikoy:    { name: 'Kadıköy',        side: 'A', km: 8  },
-  uskudar:    { name: 'Üsküdar',        side: 'A', km: 12 },
-  atasehir:   { name: 'Ataşehir',       side: 'A', km: 6  },
-  pendik:     { name: 'Pendik',         side: 'A', km: 18 },
-  tuzla:      { name: 'Tuzla',          side: 'A', km: 28 },
-  maltepe:    { name: 'Maltepe',        side: 'A', km: 2  },
-  umraniye:   { name: 'Ümraniye',       side: 'A', km: 14 },
-  sancaktepe: { name: 'Sancaktepe',     side: 'A', km: 16 },
-  beykoz:     { name: 'Beykoz',         side: 'A', km: 32 },
-  gebze:      { name: 'Gebze',          side: 'A', km: 35 },
-  besiktas:   { name: 'Beşiktaş',       side: 'V', km: 22 },
-  sisli:      { name: 'Şişli',          side: 'V', km: 24 },
-  beyoglu:    { name: 'Beyoğlu',        side: 'V', km: 26 },
-  fatih:      { name: 'Fatih',          side: 'V', km: 28 },
-  bahcelv:    { name: 'Bahçelievler',   side: 'V', km: 36 },
-  bakirkoy:   { name: 'Bakırköy',       side: 'V', km: 32 },
-  beylikd:    { name: 'Beylikdüzü',     side: 'V', km: 52 },
-  esenyurt:   { name: 'Esenyurt',       side: 'V', km: 54 },
-  basaksehir: { name: 'Başakşehir',     side: 'V', km: 48 },
-  sariyer:    { name: 'Sarıyer',        side: 'V', km: 38 },
-  maslak:     { name: 'Maslak',         side: 'V', km: 30 },
-  zeytinburnu:{ name: 'Zeytinburnu',    side: 'V', km: 30 },
-  avcilar:    { name: 'Avcılar',        side: 'V', km: 46 }
+  // m2Price: 2026 İstanbul arsa metrekare fiyatı (TL, ortalama imarlı arsa)
+  kadikoy:    { name: 'Kadıköy',        side: 'A', km: 8 , m2Price: 95000  },
+  uskudar:    { name: 'Üsküdar',        side: 'A', km: 12, m2Price: 75000  },
+  atasehir:   { name: 'Ataşehir',       side: 'A', km: 6 , m2Price: 80000  },
+  pendik:     { name: 'Pendik',         side: 'A', km: 18, m2Price: 28000  },
+  tuzla:      { name: 'Tuzla',          side: 'A', km: 28, m2Price: 22000  },
+  maltepe:    { name: 'Maltepe',        side: 'A', km: 2 , m2Price: 45000  },
+  umraniye:   { name: 'Ümraniye',       side: 'A', km: 14, m2Price: 38000  },
+  sancaktepe: { name: 'Sancaktepe',     side: 'A', km: 16, m2Price: 18000  },
+  beykoz:     { name: 'Beykoz',         side: 'A', km: 32, m2Price: 55000  },
+  gebze:      { name: 'Gebze',          side: 'A', km: 35, m2Price: 14000  },
+  besiktas:   { name: 'Beşiktaş',       side: 'V', km: 22, m2Price: 180000 },
+  sisli:      { name: 'Şişli',          side: 'V', km: 24, m2Price: 120000 },
+  beyoglu:    { name: 'Beyoğlu',        side: 'V', km: 26, m2Price: 95000  },
+  fatih:      { name: 'Fatih',          side: 'V', km: 28, m2Price: 65000  },
+  bahcelv:    { name: 'Bahçelievler',   side: 'V', km: 36, m2Price: 42000  },
+  bakirkoy:   { name: 'Bakırköy',       side: 'V', km: 32, m2Price: 90000  },
+  beylikd:    { name: 'Beylikdüzü',     side: 'V', km: 52, m2Price: 25000  },
+  esenyurt:   { name: 'Esenyurt',       side: 'V', km: 54, m2Price: 18000  },
+  basaksehir: { name: 'Başakşehir',     side: 'V', km: 48, m2Price: 35000  },
+  sariyer:    { name: 'Sarıyer',        side: 'V', km: 38, m2Price: 110000 },
+  maslak:     { name: 'Maslak',         side: 'V', km: 30, m2Price: 220000 },
+  zeytinburnu:{ name: 'Zeytinburnu',    side: 'V', km: 30, m2Price: 70000  },
+  avcilar:    { name: 'Avcılar',        side: 'V', km: 46, m2Price: 30000  }
 };
 
 // 18 müşteri firması (ilçelere dağılmış)
@@ -3265,6 +3269,129 @@ function refreshUsedVehicleMarket() {
   state.usedMarketLastRefresh = state.day;
 }
 
+// ============================================================
+// ARSA PİYASASI
+// ============================================================
+
+const LAND_SELLERS = [
+  'Karadeniz Arsa',
+  'İstanbul Emlak Bankası',
+  'Marmara Gayrimenkul',
+  'Çelik Tapulama',
+  'Boğaz Land',
+  'Anatolia Yatırım',
+  'Üçgen Emlak',
+  'Halilbey Arsa Pazarı',
+  'Megapol Gayrimenkul',
+  'Ata İnşaat Arazi'
+];
+
+function generateLandListing() {
+  // İlçe seç (her ilçe eşit şansa sahip)
+  const ilceKeys = Object.keys(ILCELER);
+  const ilce = ilceKeys[Math.floor(Math.random() * ilceKeys.length)];
+  const ilceData = ILCELER[ilce];
+
+  // Arsa boyutu dağılımı: çoğunluk 300-1000 m², bazen küçük villa veya büyük site
+  let m2;
+  const r = Math.random();
+  if (r < 0.20) m2 = 150 + Math.floor(Math.random() * 200);       // %20 — küçük villa arsası 150-350
+  else if (r < 0.60) m2 = 400 + Math.floor(Math.random() * 600);  // %40 — apartman arsası 400-1000
+  else if (r < 0.85) m2 = 1000 + Math.floor(Math.random() * 1500);// %25 — rezidans arsası 1000-2500
+  else m2 = 2500 + Math.floor(Math.random() * 5000);              // %15 — site arsası 2500-7500
+
+  // Fiyat hesabı (m² × ilçe fiyatı × varyasyon)
+  const variance = 0.85 + Math.random() * 0.30; // ±%15
+  const price = Math.round(m2 * ilceData.m2Price * variance);
+
+  return {
+    id: 'land' + uid(),
+    ilce,
+    m2,
+    price,
+    listedDay: state.day,
+    expiresDay: state.day + 7 + Math.floor(Math.random() * 4), // 7-10 gün
+    sellerName: LAND_SELLERS[Math.floor(Math.random() * LAND_SELLERS.length)]
+  };
+}
+
+function refreshLandMarket() {
+  if (!state.landMarket) state.landMarket = [];
+
+  // Süresi dolanları sil
+  state.landMarket = state.landMarket.filter(l => l.expiresDay >= state.day);
+
+  // Hedef: piyasada 8-12 arsa olsun
+  const target = 8 + Math.floor(Math.random() * 5);
+  while (state.landMarket.length < target) {
+    state.landMarket.push(generateLandListing());
+  }
+
+  state.landMarketLastRefresh = state.day;
+}
+
+// Arsa alım — piyasadan
+function buyLand(listingId) {
+  if (!state.landMarket) state.landMarket = [];
+  const idx = state.landMarket.findIndex(l => l.id === listingId);
+  if (idx < 0) { toast('İlan artık mevcut değil.', 'error'); return; }
+  const l = state.landMarket[idx];
+  if (state.cash < l.price) { toast('Kasada yetmez.', 'error'); return; }
+
+  spend(l.price, 'arsa');
+  if (!state.lands) state.lands = [];
+  state.lands.push({
+    id: 'L' + uid(),
+    ilce: l.ilce,
+    m2: l.m2,
+    purchasePrice: l.price,
+    purchaseDay: state.day,
+    building: null
+  });
+  state.landMarket.splice(idx, 1);
+  toast(`✓ ${ILCELER[l.ilce].name}'da ${l.m2} m² arsa alındı: ${fmt(l.price)}`, 'success');
+  addXP(20, 'arsa alımı');
+  render();
+}
+
+// Sahip olunan arsanın güncel değeri (piyasa dalgalanması yok şimdilik, sabit hesap)
+function landCurrentValue(land) {
+  const ilceData = ILCELER[land.ilce];
+  return Math.round(land.m2 * ilceData.m2Price);
+}
+
+// Arsa sat
+function sellLand(landId) {
+  if (!state.lands) state.lands = [];
+  const idx = state.lands.findIndex(l => l.id === landId);
+  if (idx < 0) return;
+  const land = state.lands[idx];
+
+  // Üzerinde inşaat varsa satılamaz
+  if (land.building) {
+    toast('Üzerinde inşaat olan arsa satılamaz. Önce inşaatı tamamla veya yık.', 'error');
+    return;
+  }
+
+  // Hızlı satış fiyatı (alıcı bulma kolaylığı için %5-10 indirim)
+  const marketValue = landCurrentValue(land);
+  const sellPrice = Math.round(marketValue * 0.92); // %8 hızlı satış indirimi
+  const profit = sellPrice - land.purchasePrice;
+  const profitPct = ((profit / land.purchasePrice) * 100).toFixed(1);
+
+  const profitInfo = profit >= 0
+    ? `\nKâr: +${fmt(profit)} (+%${profitPct})`
+    : `\nZarar: ${fmt(profit)} (%${profitPct})`;
+
+  if (!confirm(`${ILCELER[land.ilce].name}'da ${land.m2} m² arsa satılacak\nGüncel piyasa: ${fmt(marketValue)}\nHızlı satış fiyatı: ${fmt(sellPrice)} (-%8)${profitInfo}\n\nDevam edilsin mi?`)) return;
+
+  earn(sellPrice, 'arsa-satis');
+  state.lands.splice(idx, 1);
+  toast(`✓ Arsa satıldı: +${fmt(sellPrice)} ${profit >= 0 ? '(kâr: ' + fmt(profit) + ')' : '(zarar: ' + fmt(profit) + ')'}`, profit >= 0 ? 'success' : 'info');
+  addXP(10, 'arsa satışı');
+  render();
+}
+
 // İsim havuzları
 const NAMES_M = ['Mehmet','Ahmet','Mustafa','Ali','Hasan','Hüseyin','İbrahim','Murat','Emre','Burak','Cem','Serkan','Tolga','Onur','Kemal','Selim','Yusuf','Kerem','Tarık','Bora','Volkan','Eren','Furkan'];
 const NAMES_F = ['Ayşe','Fatma','Zeynep','Elif','Merve','Sevgi','Pınar','Selin','Deniz','Esra','Burcu','Tuğba','Yasemin','Damla'];
@@ -3340,6 +3467,11 @@ const state = {
   // İkinci el araç piyasası
   usedVehicleMarket: [],      // {id, type, km, price, listedDay, expiresDay, sellerName}
   usedMarketLastRefresh: 0,   // son yenileme günü
+
+  // Arsa sistemi
+  lands: [],                  // sahip olduğum arsalar { id, ilce, m2, purchasePrice, purchaseDay, building: null }
+  landMarket: [],             // piyasadaki arsa ilanları { id, ilce, m2, price, listedDay, expiresDay, sellerName }
+  landMarketLastRefresh: 0,
 
   // Tedarikçi ilişki sistemi (Satın Alma Sorumlusu için)
   // Her tedarikçi için 0-100 arası bağ puanı (alış yapıldıkça artar)
@@ -4287,6 +4419,7 @@ function render() {
   else if (state.view === 'customers') renderCustomers();
   else if (state.view === 'visits') renderVisits();
   else if (state.view === 'bank') renderBank();
+  else if (state.view === 'lands') renderLands();
   else if (state.view === 'archive') renderArchive();
   else if (state.view === 'profile') renderProfile();
   else if (state.view === 'leaderboard') renderLeaderboard();
@@ -7122,6 +7255,136 @@ function payOffLoan(lid) {
 
 // ----- ARCHIVE -----
 
+// ============================================================
+// LANDS (Arsa & Gayrimenkul)
+// ============================================================
+
+let _landTab = 'mine';
+
+function renderLands() {
+  const c = $('center');
+  // İlk ziyarette piyasa boşsa hemen doldur
+  if (!state.landMarket || state.landMarket.length === 0) {
+    refreshLandMarket();
+  }
+
+  const lands = state.lands || [];
+  const market = state.landMarket || [];
+
+  // Genel özet
+  const totalLandValue = lands.reduce((s, l) => s + landCurrentValue(l), 0);
+  const totalInvested = lands.reduce((s, l) => s + l.purchasePrice, 0);
+  const totalProfit = totalLandValue - totalInvested;
+
+  c.innerHTML = `<h2>🏞 ARSA & GAYRİMENKUL</h2>
+    <div class="subtitle">İstanbul arsa piyasası · Yatırım ve inşaat için arsa alın · Sahip olunan: ${lands.length}</div>
+
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="stat-label">Arsa Sayısı</div><div class="stat-val" style="color: var(--blue)">${lands.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Yatırılan</div><div class="stat-val">${fmt(totalInvested)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Güncel Değer</div><div class="stat-val" style="color: var(--green)">${fmt(totalLandValue)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Net K/Z</div><div class="stat-val" style="color: ${totalProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${totalProfit >= 0 ? '+' : ''}${fmt(totalProfit)}</div></div>
+    </div>
+
+    <div class="filter-chips" style="margin-bottom: 18px;">
+      <div class="filter-chip ${_landTab === 'mine' ? 'active' : ''}" onclick="changeLandTab('mine')">📌 Arsalarım (${lands.length})</div>
+      <div class="filter-chip ${_landTab === 'market' ? 'active' : ''}" onclick="changeLandTab('market')">🏬 Piyasa (${market.length})</div>
+    </div>
+
+    <div id="land-content"></div>`;
+
+  renderLandContent();
+}
+
+function changeLandTab(tab) {
+  _landTab = tab;
+  renderLands();
+}
+
+function renderLandContent() {
+  const c = $('land-content');
+  if (!c) return;
+
+  if (_landTab === 'mine') {
+    c.innerHTML = renderMyLands();
+  } else if (_landTab === 'market') {
+    c.innerHTML = renderLandMarket();
+  }
+}
+
+function renderMyLands() {
+  const lands = state.lands || [];
+  if (lands.length === 0) {
+    return '<div class="empty">Henüz arsan yok. "Piyasa" sekmesinden İstanbul ilçelerinden arsa al — yatırım veya inşaat için.</div>';
+  }
+
+  return `<div class="grid-2">
+    ${lands.map(l => {
+      const ilceData = ILCELER[l.ilce];
+      const currentVal = landCurrentValue(l);
+      const profit = currentVal - l.purchasePrice;
+      const profitPct = ((profit / l.purchasePrice) * 100).toFixed(1);
+      const ageDay = state.day - l.purchaseDay;
+      return `<div class="card">
+        <h3>${ilceData.name} · ${l.m2} m²</h3>
+        <div class="loc">${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası · ${ilceData.km} km</div>
+        <div style="font-size: 11px; line-height: 1.7; margin-top: 8px;">
+          <div>m² fiyatı: <strong>${fmt(ilceData.m2Price)}</strong></div>
+          <div>Alış fiyatı: ${fmt(l.purchasePrice)} <span style="color: var(--ink-dim); font-size: 10px;">(G${l.purchaseDay})</span></div>
+          <div>Güncel değer: <strong style="color: var(--green);">${fmt(currentVal)}</strong></div>
+          <div>K/Z: <strong style="color: ${profit >= 0 ? 'var(--green)' : 'var(--red)'};">${profit >= 0 ? '+' : ''}${fmt(profit)} (${profit >= 0 ? '+' : ''}%${profitPct})</strong></div>
+          ${ageDay > 0 ? `<div style="font-size: 10px; color: var(--ink-dim);">${ageDay} gündür sahipsin</div>` : ''}
+          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
+            <strong>Durum:</strong> ${l.building ? '🏗 İnşaat var' : '🟢 Boş arsa'}
+          </div>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 10px;">
+          ${!l.building ? `<button class="btn small primary" disabled title="İnşaat sistemi sonraki sürümde gelecek">🏗 İNŞAAT (yakında)</button>` : ''}
+          ${!l.building ? `<button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderLandMarket() {
+  const market = state.landMarket || [];
+  if (market.length === 0) {
+    return '<div class="empty">Piyasada arsa yok. Bir gün geçince yeni ilanlar gelir.</div>';
+  }
+
+  // İlçeye göre sırala (alfabetik)
+  const sorted = market.slice().sort((a, b) => ILCELER[a.ilce].name.localeCompare(ILCELER[b.ilce].name, 'tr'));
+
+  return `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px;">
+    <strong style="color: var(--accent);">İstanbul Arsa Piyasası</strong> — Günlük yenilenen ilanlar. Fiyatlar ilçenin m² piyasasına göre <strong>±%15</strong> varyasyonla. İleride üzerine inşaat yapılabilecek.
+  </div>
+  <div class="grid-2">
+    ${sorted.map(l => {
+      const ilceData = ILCELER[l.ilce];
+      const pricePerM2 = l.price / l.m2;
+      const fairPrice = ilceData.m2Price;
+      const discount = ((fairPrice - pricePerM2) / fairPrice * 100);
+      const daysLeft = l.expiresDay - state.day;
+      return `<div class="card">
+        <h3>${ilceData.name} · ${l.m2} m²</h3>
+        <div class="loc">${l.sellerName} · ${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} · ${ilceData.km} km</div>
+        <div style="font-size: 11px; line-height: 1.7; margin-top: 8px;">
+          <div>İlçe m² ortalaması: <strong>${fmt(ilceData.m2Price)}</strong></div>
+          <div>Bu arsa m² fiyatı: <strong>${fmt(Math.round(pricePerM2))}</strong> <span style="color: ${discount > 5 ? 'var(--green)' : discount < -5 ? 'var(--red)' : 'var(--ink-dim)'}; font-size: 10px;">${discount > 0 ? '(-' + discount.toFixed(0) + '% indirimli)' : discount < 0 ? '(+' + Math.abs(discount).toFixed(0) + '% pahalı)' : '(piyasa)'}</span></div>
+          <div style="margin-top: 4px; color: var(--accent); font-size: 16px; font-weight: 700;">${fmt(l.price)}</div>
+          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 10px; color: var(--ink-dim);">
+            ⏰ ${daysLeft <= 1 ? 'Son gün!' : daysLeft + ' gün sonra ilan düşer'}
+          </div>
+        </div>
+        <button class="btn primary" style="margin-top: 10px; width: 100%;" onclick="buyLand('${l.id}')" ${state.cash >= l.price ? '' : 'disabled'}>
+          ${state.cash >= l.price ? 'SATIN AL' : 'KASADA YETMEZ'}
+        </button>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderArchive() {
   const c = $('center');
   if (state.archive.length === 0) {
@@ -7968,6 +8231,7 @@ function nextDay() {
   state.agenda = [];
   rollPrices();
   refreshUsedVehicleMarket();
+  refreshLandMarket();
 
   // 1) Process answered tenders → win/loss
   const stillInbox = [];
@@ -9043,10 +9307,27 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.31';
+const CURRENT_VERSION = 'v1.32';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.32',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'ARSA PİYASASI',
+    items: [
+      { cat: 'major', text: 'İstanbul\'da <strong>arsa alım/satım sistemi</strong> başladı' },
+      { cat: 'feature', text: '23 ilçe için <strong>gerçek 2026 m² fiyatları</strong>: Maslak ₺220k, Beşiktaş ₺180k, Esenyurt ₺18k...' },
+      { cat: 'feature', text: 'Sol menüde yeni sekme: <strong>🏞 Arsa & Gayrimenkul</strong>' },
+      { cat: 'feature', text: 'Piyasada her gün 8-12 arsa ilanı (±%15 fiyat varyasyonu, 7-10 gün ömür)' },
+      { cat: 'feature', text: 'Arsa boyutları: villa (150-350m²), apartman (400-1000m²), rezidans (1000-2500m²), site (2500-7500m²)' },
+      { cat: 'feature', text: 'Sahip olduğun arsanın güncel değeri + K/Z göstergesi' },
+      { cat: 'feature', text: 'Hızlı satış: -%8 piyasa indirimi' },
+      { cat: 'feature', text: '10 emlak şirketi: Karadeniz Arsa, Marmara Gayrimenkul, Boğaz Land...' },
+      { cat: 'fix', text: 'Sonraki sürümde: üzerine Villa/Apartman/Rezidans/Site inşaatı!' }
+    ]
+  },
   {
     version: 'v1.31',
     date: '11 Mayıs 2026',

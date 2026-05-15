@@ -3273,6 +3273,117 @@ function refreshUsedVehicleMarket() {
 // ARSA PİYASASI
 // ============================================================
 
+// İNŞAAT YAPILARI — 4 tip
+const BUILDING_TYPES = {
+  villa: {
+    name: 'Villa',
+    icon: '🏡',
+    minM2: 150,
+    maxM2: 600,
+    floorMultiplier: 1.0,    // toplam inşaat alanı = arsa × bu (bahçeli, tek katlı veya 2 katlı)
+    daysPerSqm: 0.08,         // m² başına gün (lüks olduğu için yavaş)
+    apartmentsCalc: (m2) => 1, // her zaman 1 büyük daire
+    avgApartmentSize: (m2, count) => Math.round(m2 * 1.0 / count),
+    pricePerSqm: 90000,       // satış: m² başına TL (lüks segment)
+    rentPerSqmPerMonth: 250,  // kira: m² başına aylık
+    segment: 'Lüks'
+  },
+  apartman: {
+    name: 'Apartman',
+    icon: '🏢',
+    minM2: 400,
+    maxM2: 1500,
+    floorMultiplier: 4.0,    // 4 kat ortalama → toplam alan arsa × 4
+    daysPerSqm: 0.04,
+    apartmentsCalc: (m2) => {
+      const floors = Math.floor(m2 / 150) + 2; // her ~150m² için 1 kat
+      const perFloor = Math.max(2, Math.floor(m2 / 100));
+      return Math.min(20, floors * perFloor);
+    },
+    avgApartmentSize: (m2, count) => Math.round((m2 * 4.0) / count),
+    pricePerSqm: 65000,
+    rentPerSqmPerMonth: 180,
+    segment: 'Orta-Üst'
+  },
+  rezidans: {
+    name: 'Rezidans',
+    icon: '🏬',
+    minM2: 1000,
+    maxM2: 4000,
+    floorMultiplier: 10.0,   // çok katlı (10-15 kat)
+    daysPerSqm: 0.025,
+    apartmentsCalc: (m2) => {
+      const floors = Math.floor(m2 / 250) + 8;
+      const perFloor = Math.max(3, Math.floor(m2 / 200));
+      return Math.min(80, floors * perFloor);
+    },
+    avgApartmentSize: (m2, count) => Math.round((m2 * 10.0) / count),
+    pricePerSqm: 110000,
+    rentPerSqmPerMonth: 320,
+    segment: 'Premium'
+  },
+  site: {
+    name: 'Site',
+    icon: '🏘',
+    minM2: 2500,
+    maxM2: 15000,
+    floorMultiplier: 5.0,    // çok bloklu ama orta katlı
+    daysPerSqm: 0.018,
+    apartmentsCalc: (m2) => {
+      const blocks = Math.max(3, Math.floor(m2 / 800));
+      const aptPerBlock = Math.max(12, Math.floor(m2 / 400));
+      return Math.min(200, blocks * aptPerBlock);
+    },
+    avgApartmentSize: (m2, count) => Math.round((m2 * 5.0) / count),
+    pricePerSqm: 75000,
+    rentPerSqmPerMonth: 220,
+    segment: 'Aile'
+  }
+};
+
+// Malzeme tüketimi (toplam inşaat alanına göre — yani arsa m² × floorMultiplier)
+// her m² için tahmini gerçekçi tüketim (Türkiye 2026)
+const CONSTRUCTION_MATERIALS = [
+  // { productId, perSqm, label }
+  { productId: 'cement', perSqm: 0.18, label: 'Çimento' },     // 0.18 ton/m² (kg cinsinden 180kg/m²)
+  { productId: 'rebar',  perSqm: 0.05, label: 'Demir İnşaat (rebar)' }, // 50kg/m²
+  { productId: 'sand',   perSqm: 0.40, label: 'Kum' },         // 400kg/m²
+  { productId: 'gravel', perSqm: 0.55, label: 'Çakıl' },       // 550kg/m²
+  { productId: 'brick',  perSqm: 70,   label: 'Tuğla' },       // adet/m²
+  { productId: 'tile',   perSqm: 0.7,  label: 'Seramik' },     // m²/m²
+  { productId: 'paint',  perSqm: 0.4,  label: 'Boya' },        // L/m²
+  { productId: 'insul',  perSqm: 0.9,  label: 'Yalıtım' },     // m²/m²
+  { productId: 'pipe',   perSqm: 1.5,  label: 'Tesisat Boru' },// m/m²
+  { productId: 'kablo',  perSqm: 4,    label: 'Elektrik Kablosu' } // m/m²
+];
+
+// Bir bina için toplam malzeme ihtiyacı (toplam inşaat alanı = arsa × floorMultiplier)
+function calculateConstructionMaterials(buildingType, landM2) {
+  const t = BUILDING_TYPES[buildingType];
+  if (!t) return [];
+  const totalArea = landM2 * t.floorMultiplier;
+  return CONSTRUCTION_MATERIALS.map(m => ({
+    productId: m.productId,
+    label: m.label,
+    qty: Math.ceil(m.perSqm * totalArea)
+  }));
+}
+
+// İnşaat süresi gün cinsinden
+function calculateConstructionDays(buildingType, landM2) {
+  const t = BUILDING_TYPES[buildingType];
+  if (!t) return 0;
+  const totalArea = landM2 * t.floorMultiplier;
+  return Math.max(10, Math.ceil(totalArea * t.daysPerSqm));
+}
+
+// Bina tipi seçilebilir mi? (arsa boyutu uygun mu)
+function canBuild(buildingType, landM2) {
+  const t = BUILDING_TYPES[buildingType];
+  if (!t) return false;
+  return landM2 >= t.minM2 && landM2 <= t.maxM2;
+}
+
 const LAND_SELLERS = [
   'Karadeniz Arsa',
   'İstanbul Emlak Bankası',
@@ -3358,9 +3469,7 @@ function buyLand(listingId) {
 function landCurrentValue(land) {
   const ilceData = ILCELER[land.ilce];
   return Math.round(land.m2 * ilceData.m2Price);
-}
-
-// Arsa sat
+}// Arsa sat
 function sellLand(landId) {
   if (!state.lands) state.lands = [];
   const idx = state.lands.findIndex(l => l.id === landId);
@@ -3390,6 +3499,426 @@ function sellLand(landId) {
   toast(`✓ Arsa satıldı: +${fmt(sellPrice)} ${profit >= 0 ? '(kâr: ' + fmt(profit) + ')' : '(zarar: ' + fmt(profit) + ')'}`, profit >= 0 ? 'success' : 'info');
   addXP(10, 'arsa satışı');
   render();
+}
+
+// ============================================================
+// İNŞAAT SİSTEMİ
+// ============================================================
+
+// Daire üretici — bina tipine göre dairelerin m²/segment dağılımı
+function generateApartmentsFor(buildingType, landM2) {
+  const t = BUILDING_TYPES[buildingType];
+  const count = t.apartmentsCalc(landM2);
+  const avgSize = t.avgApartmentSize(landM2, count);
+  const apartments = [];
+  for (let i = 1; i <= count; i++) {
+    // Boyut varyasyonu ±%20
+    const m2 = Math.max(40, Math.round(avgSize * (0.85 + Math.random() * 0.30)));
+    // Kat varyasyonu (rezidans/site için yüksek katlar)
+    const floor = (buildingType === 'villa') ? 1
+                : Math.min(i, Math.max(2, Math.floor(count / 4)));
+    // Kat çarpanı — yüksek kat daha pahalı (manzara)
+    const floorMult = 1 + (floor - 1) * 0.015;
+    const basePricePerSqm = t.pricePerSqm * floorMult;
+    const salePrice = Math.round(m2 * basePricePerSqm);
+    const rentMonthly = Math.round(m2 * t.rentPerSqmPerMonth);
+    apartments.push({
+      id: 'apt' + uid(),
+      number: i,
+      m2,
+      floor,
+      salePrice,
+      rentMonthly,
+      status: 'unsold',   // unsold | sold | rented
+      tenantName: null,
+      rentStartDay: null,
+      rentMonthlyDue: 0,  // hangi gün kira tahsil edilir
+      lastRentDay: 0
+    });
+  }
+  return apartments;
+}
+
+// İnşaata başla
+function startConstruction(landId, buildingType) {
+  if (!state.lands) state.lands = [];
+  const land = state.lands.find(l => l.id === landId);
+  if (!land) { toast('Arsa bulunamadı', 'error'); return; }
+  if (land.building) { toast('Bu arsada zaten inşaat var', 'error'); return; }
+  if (!canBuild(buildingType, land.m2)) {
+    toast(`Bu arsa ${BUILDING_TYPES[buildingType].name} için uygun değil`, 'error');
+    return;
+  }
+
+  // Malzeme ihtiyaçlarını hesapla
+  const materials = calculateConstructionMaterials(buildingType, land.m2);
+
+  // Stoktan eksik var mı?
+  const missing = [];
+  for (const m of materials) {
+    const have = state.inventory[m.productId] || 0;
+    if (have < m.qty) {
+      missing.push({ ...m, have, short: m.qty - have });
+    }
+  }
+
+  if (missing.length > 0) {
+    const lines = missing.map(m => `• ${m.label}: ${m.qty} ${PRODUCTS[m.productId].unit} lazım, ${m.have} var (${m.short} eksik)`).join('\n');
+    toast('Yetersiz malzeme. Detay onay popup\'ında.', 'error');
+    if (!confirm(`Bu inşaat için yetersiz malzeme var:\n\n${lines}\n\nYine de başlatmak istiyor musun? (Malzeme bulunmadığı için inşaat duracak)`)) return;
+  }
+
+  const days = calculateConstructionDays(buildingType, land.m2);
+  const t = BUILDING_TYPES[buildingType];
+  const totalArea = land.m2 * t.floorMultiplier;
+  const estimatedApartments = t.apartmentsCalc(land.m2);
+
+  if (!confirm(`${ILCELER[land.ilce].name}'da ${t.name} inşaatı başlatılacak\n\n• Arsa: ${land.m2} m²\n• Toplam inşaat alanı: ${totalArea.toFixed(0)} m²\n• Süre: ~${days} gün\n• Daire sayısı: ~${estimatedApartments}\n\nMalzemeler her gün stoktan otomatik tüketilecek. Devam edilsin mi?`)) return;
+
+  // İnşaat başlat — malzemeleri günlük tüketim için planla
+  land.building = {
+    id: state.buildingNextId++,
+    type: buildingType,
+    startDay: state.day,
+    totalDays: days,
+    daysPassed: 0,
+    status: 'building', // building | paused | completed
+    materialsNeeded: materials.map(m => ({ ...m, consumed: 0 })),
+    totalCost: 0  // birikecek (her gün malzeme + işçilik)
+  };
+
+  // Başlangıç maliyeti — temel atma, ruhsat, vs (toplam alanın küçük bir oranı)
+  const startCost = Math.round(totalArea * 200); // m² başına ₺200 başlangıç
+  spend(startCost, 'insaat');
+  land.building.totalCost += startCost;
+
+  toast(`🏗 ${t.name} inşaatı başladı! Süre: ${days} gün`, 'success');
+  addXP(50, 'inşaat başlatma');
+  render();
+}
+
+// Her gün inşaatı ilerlet — `nextDay`'de çağrılır
+function progressConstruction(land) {
+  const b = land.building;
+  if (!b || b.status !== 'building') return;
+
+  // Bugün için tüketilecek malzeme: her malzemenin günlük payı
+  let canProgress = true;
+  const totalDays = b.totalDays;
+  const consumptionToday = [];
+
+  for (const m of b.materialsNeeded) {
+    const remaining = m.qty - m.consumed;
+    const remainingDays = Math.max(1, totalDays - b.daysPassed);
+    const todayNeed = Math.ceil(remaining / remainingDays);
+    const have = state.inventory[m.productId] || 0;
+
+    if (have < todayNeed) {
+      canProgress = false;
+      break;
+    }
+    consumptionToday.push({ productId: m.productId, qty: todayNeed });
+  }
+
+  if (!canProgress) {
+    // Malzeme yetmiyor — inşaat durdu
+    if (b.status !== 'paused-warned') {
+      b.status = 'paused-warned';
+      state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaatı malzeme yetmediği için durdu`);
+      toast(`⚠️ ${BUILDING_TYPES[b.type].name} inşaatı malzeme yetmediği için duruyor!`, 'error');
+    }
+    return;
+  }
+
+  // Eğer önce duraklamışsa, devam et
+  if (b.status === 'paused-warned') {
+    b.status = 'building';
+  }
+
+  // Bugünkü malzemeyi tüket + işçilik bedeli
+  consumptionToday.forEach(c => {
+    state.inventory[c.productId] -= c.qty;
+    const m = b.materialsNeeded.find(x => x.productId === c.productId);
+    if (m) m.consumed += c.qty;
+  });
+
+  // İşçilik: günlük m²-bazlı işçilik bedeli
+  const t = BUILDING_TYPES[b.type];
+  const totalArea = land.m2 * t.floorMultiplier;
+  const dailyLabor = Math.round(totalArea * 80); // m² başına ₺80/gün işçilik
+  if (state.cash >= dailyLabor) {
+    spend(dailyLabor, 'insaat-iscilik');
+    b.totalCost += dailyLabor;
+  } else {
+    // İşçilik ödenemedi — inşaat duruyor
+    b.status = 'paused-warned';
+    state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaat işçiliği ödenemedi`);
+    toast(`⚠️ İşçilik ödenemedi, ${ILCELER[land.ilce].name} inşaatı durdu!`, 'error');
+    return;
+  }
+
+  b.daysPassed++;
+
+  // İnşaat bitti mi?
+  if (b.daysPassed >= b.totalDays) {
+    b.status = 'completed';
+    b.apartments = generateApartmentsFor(b.type, land.m2);
+    b.completedDay = state.day;
+    state.agenda.push(`✅ ${ILCELER[land.ilce].name} ${t.name} inşaatı tamamlandı! ${b.apartments.length} daire teslime hazır.`);
+    toast(`🎉 ${t.name} inşaatı tamamlandı! ${b.apartments.length} daire teslime hazır.`, 'success');
+    addXP(200 + b.apartments.length * 5, 'inşaat tamamlama');
+  }
+}
+
+// İnşaatı iptal et (yıkılır, hiçbir ödeme iadesi yok)
+function cancelConstruction(landId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  if (land.building.status === 'completed') {
+    toast('Tamamlanmış inşaat iptal edilemez', 'error');
+    return;
+  }
+  if (!confirm(`${ILCELER[land.ilce].name} inşaatı iptal edilecek\n\nBugüne kadar harcanan: ${fmt(land.building.totalCost)}\nGeri ödeme: YOK\n\nDevam edelim mi?`)) return;
+
+  land.building = null;
+  toast(`İnşaat iptal edildi.`, 'info');
+  render();
+}
+
+// İnşaat seçim modalı — bu arsada hangi yapı yapılabilir?
+function openBuildModal(landId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land) return;
+  const eligibleTypes = Object.keys(BUILDING_TYPES).filter(bt => canBuild(bt, land.m2));
+
+  if (eligibleTypes.length === 0) {
+    toast('Bu arsa hiçbir yapı için uygun değil', 'error');
+    return;
+  }
+
+  const cards = eligibleTypes.map(bt => {
+    const t = BUILDING_TYPES[bt];
+    const materials = calculateConstructionMaterials(bt, land.m2);
+    const days = calculateConstructionDays(bt, land.m2);
+    const aptCount = t.apartmentsCalc(land.m2);
+    const totalArea = land.m2 * t.floorMultiplier;
+    const avgSize = t.avgApartmentSize(land.m2, aptCount);
+
+    // Tahmini malzeme maliyeti (mevcut piyasa fiyatlarıyla)
+    let estMaterialCost = 0;
+    materials.forEach(m => {
+      const cheapest = cheapestSupplier(m.productId);
+      if (cheapest) estMaterialCost += cheapest.price * m.qty;
+    });
+    const dailyLabor = Math.round(totalArea * 80);
+    const totalLabor = dailyLabor * days;
+    const startCost = Math.round(totalArea * 200);
+    const estTotal = startCost + estMaterialCost + totalLabor;
+
+    // Tahmini gelir (tüm daireler satılırsa)
+    const estRevenue = aptCount * avgSize * t.pricePerSqm;
+    const estProfit = estRevenue - estTotal;
+
+    // Stoktan eksik var mı kontrol
+    const shortMaterials = materials.filter(m => (state.inventory[m.productId] || 0) < m.qty);
+
+    const materialsHTML = materials.map(m => {
+      const have = state.inventory[m.productId] || 0;
+      const ok = have >= m.qty;
+      const product = PRODUCTS[m.productId];
+      return `<div style="font-size: 10px; line-height: 1.6; display: flex; justify-content: space-between;">
+        <span>${m.label}</span>
+        <span style="color: ${ok ? 'var(--green)' : 'var(--red)'};">${m.qty} ${product.unit} ${ok ? '✓' : `(${have} var)`}</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="card" style="border-left: 3px solid ${shortMaterials.length === 0 ? 'var(--green)' : 'var(--accent)'};">
+      <h3>${t.icon} ${t.name} <span style="font-size: 10px; color: var(--ink-dim);">${t.segment}</span></h3>
+      <div style="font-size: 11px; line-height: 1.7;">
+        <div>Toplam inşaat alanı: <strong>${totalArea.toFixed(0)} m²</strong></div>
+        <div>Daire sayısı: <strong>${aptCount}</strong> · Ortalama: <strong>${avgSize} m²/daire</strong></div>
+        <div>Süre: <strong>${days} gün</strong></div>
+        <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
+          <div>Başlangıç (ruhsat): ${fmt(startCost)}</div>
+          <div>Tahmini malzeme: ${fmt(estMaterialCost)}</div>
+          <div>Toplam işçilik: ${fmt(totalLabor)}</div>
+          <div style="font-weight: 700;">≈ Toplam maliyet: ${fmt(estTotal)}</div>
+        </div>
+        <div style="margin-top: 4px; color: var(--green);">
+          Tüm satış gelir tahmini: <strong>${fmt(estRevenue)}</strong>
+        </div>
+        <div style="color: ${estProfit >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight: 700;">
+          Tahmini kâr: ${estProfit >= 0 ? '+' : ''}${fmt(estProfit)}
+        </div>
+      </div>
+      <div style="margin-top: 8px; padding: 6px; background: var(--panel-2); max-height: 180px; overflow-y: auto;">
+        <div style="font-size: 10px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px;">Malzeme İhtiyacı (stok)</div>
+        ${materialsHTML}
+      </div>
+      <button class="btn primary" style="margin-top: 10px; width: 100%;" onclick="closeModal(); startConstruction('${land.id}', '${bt}')">
+        ${shortMaterials.length === 0 ? `✓ ${t.name.toUpperCase()} BAŞLAT` : `BAŞLAT (${shortMaterials.length} malzeme eksik)`}
+      </button>
+    </div>`;
+  }).join('');
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 900px;">
+      <h2>🏗 İNŞAAT TÜRÜ SEÇ</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 16px;">
+        ${ILCELER[land.ilce].name}'da ${land.m2} m² arsa için uygun yapı tipleri:
+      </p>
+      <div class="grid-2">${cards}</div>
+      <div style="margin-top: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px;">
+        💡 <strong>Not:</strong> İnşaat her gün stoktan malzeme tüketir ve işçilik öder. Malzeme yetmezse inşaat duraklar; tedarikçilerden alım yapınca devam eder.
+      </div>
+      <div class="actions" style="margin-top: 14px;">
+        <button class="btn" onclick="closeModal()">İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+// Daireleri yönet modalı (sadece tamamlanmış binalar için)
+function openApartmentsModal(landId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building || land.building.status !== 'completed') return;
+  const b = land.building;
+  const t = BUILDING_TYPES[b.type];
+
+  const rows = b.apartments.map(a => {
+    const statusBadge = a.status === 'unsold' ? '<span style="color: var(--accent);">SATILIK</span>'
+      : a.status === 'sold' ? '<span style="color: var(--green);">SATILDI</span>'
+      : `<span style="color: var(--blue);">KİRADA (${a.tenantName || '?'})</span>`;
+
+    let action;
+    if (a.status === 'unsold') {
+      action = `
+        <button class="btn small primary" onclick="sellApartment('${land.id}', '${a.id}')">SAT</button>
+        <button class="btn small" onclick="rentApartment('${land.id}', '${a.id}')">KİRAYA VER</button>
+      `;
+    } else if (a.status === 'rented') {
+      action = `<button class="btn small danger" onclick="terminateRent('${land.id}', '${a.id}')">FESH ET</button>`;
+    } else {
+      action = '<span style="font-size: 10px; color: var(--ink-dim);">-</span>';
+    }
+
+    return `<tr>
+      <td>#${a.number}</td>
+      <td>${a.m2} m²</td>
+      <td>${a.floor}. kat</td>
+      <td class="num">${fmt(a.salePrice)}</td>
+      <td class="num">${fmt(a.rentMonthly)}/ay</td>
+      <td>${statusBadge}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+
+  // İstatistik
+  const totalApts = b.apartments.length;
+  const unsold = b.apartments.filter(a => a.status === 'unsold').length;
+  const sold = b.apartments.filter(a => a.status === 'sold').length;
+  const rented = b.apartments.filter(a => a.status === 'rented').length;
+  const monthlyRentIncome = b.apartments.filter(a => a.status === 'rented').reduce((s, a) => s + a.rentMonthly, 0);
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 1000px;">
+      <h2>${t.icon} ${t.name} — Daire Yönetimi</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 12px;">
+        ${ILCELER[land.ilce].name}'da ${land.m2} m² arsa üzerinde ${totalApts} daireli ${t.name}
+      </p>
+
+      <div class="stat-grid" style="margin-bottom: 12px;">
+        <div class="stat-tile"><div class="stat-label">Toplam Daire</div><div class="stat-val">${totalApts}</div></div>
+        <div class="stat-tile"><div class="stat-label">Satılık</div><div class="stat-val" style="color: var(--accent);">${unsold}</div></div>
+        <div class="stat-tile"><div class="stat-label">Satılan</div><div class="stat-val" style="color: var(--green);">${sold}</div></div>
+        <div class="stat-tile"><div class="stat-label">Kirada</div><div class="stat-val" style="color: var(--blue);">${rented}</div></div>
+      </div>
+
+      ${monthlyRentIncome > 0 ? `<div style="padding: 10px; background: var(--panel-2); border-left: 3px solid var(--blue); margin-bottom: 12px;">
+        <strong style="color: var(--blue);">📅 Aylık kira geliri:</strong> ${fmt(monthlyRentIncome)} (her 30 günde bir otomatik kasaya girer)
+      </div>` : ''}
+
+      <div class="table-scroll" style="max-height: 400px;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>m²</th>
+              <th>Kat</th>
+              <th class="num">Satış</th>
+              <th class="num">Kira</th>
+              <th>Durum</th>
+              <th>İşlem</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+
+      <div class="actions" style="margin-top: 14px;">
+        <button class="btn" onclick="closeModal()">KAPAT</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+// Daire sat
+function sellApartment(landId, aptId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  const apt = land.building.apartments.find(a => a.id === aptId);
+  if (!apt || apt.status !== 'unsold') return;
+
+  if (!confirm(`Daire #${apt.number} satılacak\n\n${apt.m2} m² · ${apt.floor}. kat\nSatış fiyatı: ${fmt(apt.salePrice)}\n\nDevam edelim mi?`)) return;
+
+  earn(apt.salePrice, 'daire-satis');
+  apt.status = 'sold';
+  apt.soldDay = state.day;
+  toast(`✓ Daire #${apt.number} satıldı: +${fmt(apt.salePrice)}`, 'success');
+  addXP(30 + Math.round(apt.salePrice / 100000), 'daire satışı');
+  closeModal();
+  openApartmentsModal(landId); // yenile
+}
+
+// Daire kiraya ver
+function rentApartment(landId, aptId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  const apt = land.building.apartments.find(a => a.id === aptId);
+  if (!apt || apt.status !== 'unsold') return;
+
+  const tenantName = fullName();
+  if (!confirm(`Daire #${apt.number} kiraya verilecek\n\nKiracı: ${tenantName}\nAylık kira: ${fmt(apt.rentMonthly)}\n\nKira her 30 günde bir otomatik kasaya girecek.\nDevam edelim mi?`)) return;
+
+  apt.status = 'rented';
+  apt.tenantName = tenantName;
+  apt.rentStartDay = state.day;
+  apt.lastRentDay = state.day; // ilk ay başlangıç ödemesi olarak kabul (depozito)
+  earn(apt.rentMonthly, 'kira-depozito'); // İlk ay (depozito) peşin
+  toast(`✓ Daire #${apt.number} ${tenantName} adına kiralandı: ${fmt(apt.rentMonthly)}/ay`, 'success');
+  addXP(15, 'kiralama');
+  closeModal();
+  openApartmentsModal(landId);
+}
+
+// Kira sözleşmesini feshet
+function terminateRent(landId, aptId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  const apt = land.building.apartments.find(a => a.id === aptId);
+  if (!apt || apt.status !== 'rented') return;
+
+  if (!confirm(`Daire #${apt.number} kira sözleşmesi feshedilecek\n\nKiracı: ${apt.tenantName}\n\nDevam edelim mi?`)) return;
+
+  apt.status = 'unsold';
+  apt.tenantName = null;
+  apt.rentStartDay = null;
+  apt.lastRentDay = 0;
+  toast(`Daire #${apt.number} kira sözleşmesi feshedildi`, 'info');
+  closeModal();
+  openApartmentsModal(landId);
 }
 
 // İsim havuzları
@@ -3472,6 +4001,7 @@ const state = {
   lands: [],                  // sahip olduğum arsalar { id, ilce, m2, purchasePrice, purchaseDay, building: null }
   landMarket: [],             // piyasadaki arsa ilanları { id, ilce, m2, price, listedDay, expiresDay, sellerName }
   landMarketLastRefresh: 0,
+  buildingNextId: 1,          // İnşaat sıralı id sayacı
 
   // Tedarikçi ilişki sistemi (Satın Alma Sorumlusu için)
   // Her tedarikçi için 0-100 arası bağ puanı (alış yapıldıkça artar)
@@ -7325,23 +7855,54 @@ function renderMyLands() {
       const profit = currentVal - l.purchasePrice;
       const profitPct = ((profit / l.purchasePrice) * 100).toFixed(1);
       const ageDay = state.day - l.purchaseDay;
+      const b = l.building;
+
+      // İnşaat detayları
+      let buildingInfo = '';
+      let actions = '';
+      if (!b) {
+        // Boş arsa — inşaat butonu (uygun tipleri öner)
+        const eligibleTypes = Object.keys(BUILDING_TYPES).filter(bt => canBuild(bt, l.m2));
+        actions = `
+          ${eligibleTypes.length > 0 ? `<button class="btn small primary" onclick="openBuildModal('${l.id}')">🏗 İNŞAAT BAŞLAT</button>` : `<button class="btn small" disabled title="Bu arsa boyutu uygun değil">🏗 İNŞAAT</button>`}
+          <button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>
+        `;
+      } else if (b.status === 'completed') {
+        // Tamamlanmış bina
+        const unsold = b.apartments.filter(a => a.status === 'unsold').length;
+        const sold = b.apartments.filter(a => a.status === 'sold').length;
+        const rented = b.apartments.filter(a => a.status === 'rented').length;
+        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--green);">
+          <strong style="color: var(--green);">✅ ${BUILDING_TYPES[b.type].name} tamamlandı</strong><br>
+          <span style="font-size: 10px; color: var(--ink-dim);">${b.apartments.length} daire · ${unsold} satılık · ${sold} satılmış · ${rented} kirada</span>
+        </div>`;
+        actions = `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
+      } else if (b.status === 'building' || b.status === 'paused-warned') {
+        // Devam eden veya duran inşaat
+        const pct = Math.round((b.daysPassed / b.totalDays) * 100);
+        const remaining = b.totalDays - b.daysPassed;
+        const paused = b.status === 'paused-warned';
+        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : 'var(--accent)'};">
+          <strong style="color: ${paused ? 'var(--red)' : 'var(--accent)'};">${paused ? '⚠️' : '🏗'} ${BUILDING_TYPES[b.type].name} ${paused ? '(DURDU)' : 'inşa ediliyor'}</strong>
+          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : 'var(--accent)'};"></div></div>
+          <span style="font-size: 10px; color: var(--ink-dim);">${b.daysPassed}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
+          ${paused ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
+        </div>`;
+        actions = `<button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>`;
+      }
+
       return `<div class="card">
         <h3>${ilceData.name} · ${l.m2} m²</h3>
         <div class="loc">${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası · ${ilceData.km} km</div>
         <div style="font-size: 11px; line-height: 1.7; margin-top: 8px;">
           <div>m² fiyatı: <strong>${fmt(ilceData.m2Price)}</strong></div>
           <div>Alış fiyatı: ${fmt(l.purchasePrice)} <span style="color: var(--ink-dim); font-size: 10px;">(G${l.purchaseDay})</span></div>
-          <div>Güncel değer: <strong style="color: var(--green);">${fmt(currentVal)}</strong></div>
-          <div>K/Z: <strong style="color: ${profit >= 0 ? 'var(--green)' : 'var(--red)'};">${profit >= 0 ? '+' : ''}${fmt(profit)} (${profit >= 0 ? '+' : ''}%${profitPct})</strong></div>
+          <div>Güncel arsa değeri: <strong style="color: var(--green);">${fmt(currentVal)}</strong></div>
+          <div>Arsa K/Z: <strong style="color: ${profit >= 0 ? 'var(--green)' : 'var(--red)'};">${profit >= 0 ? '+' : ''}${fmt(profit)} (${profit >= 0 ? '+' : ''}%${profitPct})</strong></div>
           ${ageDay > 0 ? `<div style="font-size: 10px; color: var(--ink-dim);">${ageDay} gündür sahipsin</div>` : ''}
-          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
-            <strong>Durum:</strong> ${l.building ? '🏗 İnşaat var' : '🟢 Boş arsa'}
-          </div>
         </div>
-        <div style="display: flex; gap: 6px; margin-top: 10px;">
-          ${!l.building ? `<button class="btn small primary" disabled title="İnşaat sistemi sonraki sürümde gelecek">🏗 İNŞAAT (yakında)</button>` : ''}
-          ${!l.building ? `<button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>` : ''}
-        </div>
+        ${buildingInfo}
+        <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">${actions}</div>
       </div>`;
     }).join('')}
   </div>`;
@@ -8232,6 +8793,34 @@ function nextDay() {
   rollPrices();
   refreshUsedVehicleMarket();
   refreshLandMarket();
+
+  // Aktif inşaatları ilerlet
+  (state.lands || []).forEach(land => {
+    if (land.building && land.building.status !== 'completed') {
+      progressConstruction(land);
+    }
+  });
+
+  // Aylık kira tahsilatı — kiracılı dairelerden
+  let monthlyRentTotal = 0;
+  let rentCount = 0;
+  (state.lands || []).forEach(land => {
+    if (!land.building || land.building.status !== 'completed') return;
+    land.building.apartments.forEach(apt => {
+      if (apt.status !== 'rented') return;
+      // Her 30 günde bir kira tahsil et
+      if (state.day - apt.lastRentDay >= 30) {
+        earn(apt.rentMonthly, 'kira-geliri');
+        apt.lastRentDay = state.day;
+        monthlyRentTotal += apt.rentMonthly;
+        rentCount++;
+      }
+    });
+  });
+  if (monthlyRentTotal > 0) {
+    state.agenda.push(`🏠 Aylık kira gelirleri: ${fmt(monthlyRentTotal)} (${rentCount} daire)`);
+    toast(`🏠 Kira gelirleri tahsil edildi: ${fmt(monthlyRentTotal)}`, 'success');
+  }
 
   // 1) Process answered tenders → win/loss
   const stillInbox = [];
@@ -9307,10 +9896,30 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.32';
+const CURRENT_VERSION = 'v1.33';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.33',
+    date: '11 Mayıs 2026',
+    major: true,
+    title: 'İNŞAAT SİSTEMİ — VILLA, APARTMAN, REZİDANS, SİTE',
+    items: [
+      { cat: 'major', text: '<strong>4 yapı tipi</strong>: Villa, Apartman, Rezidans, Site' },
+      { cat: 'major', text: 'Arsa üzerine inşaat — her arsa boyutu için uygun tipler önerilir' },
+      { cat: 'major', text: '<strong>Daire envanteri</strong>: her bina otomatik daire üretir (m², kat, fiyat dağılımıyla)' },
+      { cat: 'major', text: 'Daireleri <strong>SAT</strong> veya <strong>KİRAYA VER</strong> — kira her 30 günde otomatik kasaya' },
+      { cat: 'feature', text: 'İnşaat süresi yapı tipine göre: Villa ~50g, Apartman ~120g, Rezidans ~250g, Site ~500g+' },
+      { cat: 'feature', text: '<strong>Malzeme tüketimi</strong>: çimento, demir, tuğla, beton, boya, seramik, yalıtım, tesisat, kablo' },
+      { cat: 'feature', text: 'Her gün stoktan otomatik düşer — yetmezse inşaat duraklar' },
+      { cat: 'feature', text: 'Günlük işçilik bedeli (m² × ₺80/gün)' },
+      { cat: 'feature', text: 'Tahmini maliyet ve kâr önceden hesaplanır' },
+      { cat: 'feature', text: 'İlerleme barı, malzeme listesi, durma sebebi her şey görünür' },
+      { cat: 'feature', text: 'Daire satış fiyatı: kat × cephe × tip segmentine göre değişir' },
+      { cat: 'feature', text: 'Kira ilk ay depozito olarak peşin gelir' }
+    ]
+  },
   {
     version: 'v1.32',
     date: '11 Mayıs 2026',

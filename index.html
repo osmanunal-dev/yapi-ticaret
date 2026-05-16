@@ -6803,8 +6803,18 @@ function renderContractsView() {
       <div class="empty">Aktif sözleşme yok.</div>`;
     return;
   }
+  const dispatcherCount = (state.dispatchers || []).length;
+  const dispatcherInfo = dispatcherCount > 0
+    ? `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--red); font-size: 11px;">
+        🚛 <strong style="color: var(--red);">Sevkiyat Sorumlun:</strong> ${dispatcherCount} kişi · Her sözleşmenin yanındaki "Sevkiyatçıyla Gönder" butonuyla tek tıkla yola çıkar.
+      </div>`
+    : `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px;">
+        ⚠️ <strong style="color: var(--accent);">Sevkiyat Sorumlusu yok</strong> — Personel > Sevkiyat sekmesinden işe alırsan tek tıkla otomatik sevkiyat yapabilirsin.
+      </div>`;
+
   c.innerHTML = `<h2>AKTİF SÖZLEŞMELER</h2>
-    <div class="subtitle">${state.contracts.length} aktif${(state.dispatchers || []).length > 0 ? ' · 🚛 Sevkiyat sorumlun var: tek tıkla gönder' : ' · Sevkiyatları "Filo" üzerinden planla'}</div>
+    <div class="subtitle">${state.contracts.length} aktif sözleşme</div>
+    ${dispatcherInfo}
     <div class="email-list">
       ${state.contracts.map(ct => {
         const cust = getCustomer(ct.customerId);
@@ -6837,12 +6847,9 @@ function renderContractsView() {
             <strong style="color: var(--ink);">İrsaliyeler:</strong> ${ct.deliveries.map(d => `#${d.no} (Gün ${d.day})`).join(', ')}
           </div>` : ''}
           <div class="actions">
-            ${!ct.delivered ? `<button class="btn primary" onclick="openDispatchModal('${ct.id}')">SEVKİYAT PLANLA</button>` : ''}
-            ${!ct.delivered ? (
-              (state.dispatchers || []).length > 0
-                ? `<button class="btn" style="background: var(--red); color: #fff; border-color: var(--red);" onclick="autoDispatchContract('${ct.id}')" title="Sevkiyat sorumlusu en uygun aracı seçer ve hemen başlatır">🚛 SEVKİYATÇIYLA GÖNDER</button>`
-                : `<button class="btn" style="opacity: 0.5;" onclick="toast('Sevkiyat sorumlusu yok. Personel sayfasından işe al.', 'error')" title="Önce HR\\'dan sevkiyat sorumlusu işe almalısın">🚛 SEVKİYATÇIYLA GÖNDER (personel yok)</button>`
-            ) : ''}
+            ${!ct.delivered ? `<button class="btn primary" onclick="openDispatchModal('${ct.id}')">📦 SEVKİYAT PLANLA</button>` : ''}
+            ${!ct.delivered && dispatcherCount > 0 ? `<button class="btn" style="background: var(--red); color: #fff; border-color: var(--red);" onclick="autoDispatchContract('${ct.id}')" title="Sevkiyat sorumlusu en uygun aracı seçer ve hemen başlatır">🚛 SEVKİYATÇIYLA GÖNDER</button>` : ''}
+            ${!ct.delivered && dispatcherCount === 0 ? `<button class="btn" style="opacity: 0.55; background: var(--panel); color: var(--ink-dim);" onclick="setView('hr'); switchHRTab('dispatchers');" title="Sevkiyat sorumlusu işe almalısın">🚛 Sevkiyat Sorumlusu işe al →</button>` : ''}
             ${ct.delivered && !ct.paid ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
             ${ct.paid ? `<span style="color: var(--green); font-size: 12px;">✓ Ödeme alındı, sözleşme kapandı</span>` : ''}
           </div>

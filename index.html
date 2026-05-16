@@ -3281,11 +3281,11 @@ const BUILDING_TYPES = {
     minM2: 150,
     maxM2: 600,
     floorMultiplier: 1.0,    // toplam inşaat alanı = arsa × bu (bahçeli, tek katlı veya 2 katlı)
-    daysPerSqm: 0.08,         // m² başına gün (lüks olduğu için yavaş)
+    daysPerSqm: 0.05,        // 2026: villa ~30-50 gün
     apartmentsCalc: (m2) => 1, // her zaman 1 büyük daire
     avgApartmentSize: (m2, count) => Math.round(m2 * 1.0 / count),
-    pricePerSqm: 90000,       // satış: m² başına TL (lüks segment)
-    rentPerSqmPerMonth: 250,  // kira: m² başına aylık
+    pricePerSqm: 110000,     // 2026 İstanbul lüks villa m² fiyatı
+    rentPerSqmPerMonth: 320, // 2026 villa kira
     segment: 'Lüks'
   },
   apartman: {
@@ -3293,16 +3293,16 @@ const BUILDING_TYPES = {
     icon: '🏢',
     minM2: 400,
     maxM2: 1500,
-    floorMultiplier: 4.0,    // 4 kat ortalama → toplam alan arsa × 4
-    daysPerSqm: 0.04,
+    floorMultiplier: 4.0,
+    daysPerSqm: 0.025,       // 2026: apartman ~80-150 gün
     apartmentsCalc: (m2) => {
       const floors = Math.floor(m2 / 150) + 2; // her ~150m² için 1 kat
       const perFloor = Math.max(2, Math.floor(m2 / 100));
       return Math.min(20, floors * perFloor);
     },
     avgApartmentSize: (m2, count) => Math.round((m2 * 4.0) / count),
-    pricePerSqm: 65000,
-    rentPerSqmPerMonth: 180,
+    pricePerSqm: 80000,      // 2026 orta-üst segment
+    rentPerSqmPerMonth: 240,
     segment: 'Orta-Üst'
   },
   rezidans: {
@@ -3310,16 +3310,16 @@ const BUILDING_TYPES = {
     icon: '🏬',
     minM2: 1000,
     maxM2: 4000,
-    floorMultiplier: 10.0,   // çok katlı (10-15 kat)
-    daysPerSqm: 0.025,
+    floorMultiplier: 10.0,
+    daysPerSqm: 0.016,       // 2026: rezidans ~160-300 gün
     apartmentsCalc: (m2) => {
       const floors = Math.floor(m2 / 250) + 8;
       const perFloor = Math.max(3, Math.floor(m2 / 200));
       return Math.min(80, floors * perFloor);
     },
     avgApartmentSize: (m2, count) => Math.round((m2 * 10.0) / count),
-    pricePerSqm: 110000,
-    rentPerSqmPerMonth: 320,
+    pricePerSqm: 135000,     // 2026 premium rezidans
+    rentPerSqmPerMonth: 420,
     segment: 'Premium'
   },
   site: {
@@ -3327,16 +3327,16 @@ const BUILDING_TYPES = {
     icon: '🏘',
     minM2: 2500,
     maxM2: 15000,
-    floorMultiplier: 5.0,    // çok bloklu ama orta katlı
-    daysPerSqm: 0.018,
+    floorMultiplier: 5.0,
+    daysPerSqm: 0.012,       // 2026: site ~300-700 gün
     apartmentsCalc: (m2) => {
       const blocks = Math.max(3, Math.floor(m2 / 800));
       const aptPerBlock = Math.max(12, Math.floor(m2 / 400));
       return Math.min(200, blocks * aptPerBlock);
     },
     avgApartmentSize: (m2, count) => Math.round((m2 * 5.0) / count),
-    pricePerSqm: 75000,
-    rentPerSqmPerMonth: 220,
+    pricePerSqm: 90000,      // 2026 aile segment site
+    rentPerSqmPerMonth: 280,
     segment: 'Aile'
   }
 };
@@ -4010,12 +4010,12 @@ function generateUrbanRenewalProposal() {
   const theirShare = Math.max(oldApartmentCount, Math.floor(newAptCount * theirShareRatio));
   const ourShare = newAptCount - theirShare;
 
-  // Yıkım maliyeti tahmini (eski bina m²'si × ₺150/m²)
-  const demolitionCost = Math.round(oldM2 * 150);
+  // Yıkım maliyeti — 2026 İstanbul piyasası (m² × ₺300, asbestli/eski binalarda artar)
+  const demolitionCost = Math.round(oldM2 * 300);
 
   // İnşaat süresi
   const buildDays = calculateConstructionDays(newType, landM2);
-  const totalDays = buildDays + 20; // yıkım için +20 gün
+  const totalDays = buildDays + 10; // yıkım 10 gün (2026'da daha hızlı)
 
   // Tahmini inşaat maliyeti
   const materials = calculateConstructionMaterials(newType, landM2);
@@ -4077,7 +4077,7 @@ function approveUrbanRenewal(emailId) {
     return;
   }
 
-  if (!confirm(`${e.customerName} kentsel dönüşüm projesi onaylanacak\n\n• Yıkım maliyeti: ${fmt(e.demolitionCost)} (hemen ödenir)\n• Yıkım süresi: 20 gün\n• Sonra ${e.totalDays - 20} gün inşaat\n• Bize ${e.ourShare} daire kalacak\n\nDevam edelim mi?`)) return;
+  if (!confirm(`${e.customerName} kentsel dönüşüm projesi onaylanacak\n\n• Yıkım maliyeti: ${fmt(e.demolitionCost)} (hemen ödenir)\n• Yıkım süresi: 10 gün\n• Sonra ${e.totalDays - 10} gün inşaat\n• Bize ${e.ourShare} daire kalacak\n\nDevam edelim mi?`)) return;
 
   spend(e.demolitionCost, 'yikim');
 
@@ -4094,9 +4094,9 @@ function approveUrbanRenewal(emailId) {
     building: {
       id: state.buildingNextId++,
       type: e.newType,
-      startDay: state.day + 20, // yıkım sonrası
+      startDay: state.day + 10, // yıkım sonrası (10 gün)
       totalDays: e.buildDays,
-      daysPassed: -20, // negative = yıkım fazında
+      daysPassed: -10, // negative = yıkım fazında (10 gün)
       status: 'demolition', // demolition | building | paused-warned | completed
       materialsNeeded: calculateConstructionMaterials(e.newType, e.landM2).map(m => ({ ...m, consumed: 0 })),
       totalCost: e.demolitionCost,
@@ -5944,7 +5944,7 @@ function renderUrbanRenewalDetail(e) {
           <div>Arsa: <strong>${e.landM2} m²</strong></div>
           <div>Toplam alan: <strong>${(e.landM2 * newType.floorMultiplier).toFixed(0)} m²</strong></div>
           <div>Daire sayısı: <strong>${e.newAptCount}</strong> · Ortalama: <strong>${avgAptSize} m²</strong></div>
-          <div>Süre: <strong>${e.totalDays} gün</strong> (yıkım 20 + inşaat ${e.buildDays})</div>
+          <div>Süre: <strong>${e.totalDays} gün</strong> (yıkım 10 + inşaat ${e.buildDays})</div>
         </div>
       </div>
     </div>
@@ -6804,7 +6804,7 @@ function renderContractsView() {
     return;
   }
   c.innerHTML = `<h2>AKTİF SÖZLEŞMELER</h2>
-    <div class="subtitle">${state.contracts.length} aktif · Sevkiyatları "Filo" üzerinden planla</div>
+    <div class="subtitle">${state.contracts.length} aktif${(state.dispatchers || []).length > 0 ? ' · 🚛 Sevkiyat sorumlun var: tek tıkla gönder' : ' · Sevkiyatları "Filo" üzerinden planla'}</div>
     <div class="email-list">
       ${state.contracts.map(ct => {
         const cust = getCustomer(ct.customerId);
@@ -6838,6 +6838,11 @@ function renderContractsView() {
           </div>` : ''}
           <div class="actions">
             ${!ct.delivered ? `<button class="btn primary" onclick="openDispatchModal('${ct.id}')">SEVKİYAT PLANLA</button>` : ''}
+            ${!ct.delivered ? (
+              (state.dispatchers || []).length > 0
+                ? `<button class="btn" style="background: var(--red); color: #fff; border-color: var(--red);" onclick="autoDispatchContract('${ct.id}')" title="Sevkiyat sorumlusu en uygun aracı seçer ve hemen başlatır">🚛 SEVKİYATÇIYLA GÖNDER</button>`
+                : `<button class="btn" style="opacity: 0.5;" onclick="toast('Sevkiyat sorumlusu yok. Personel sayfasından işe al.', 'error')" title="Önce HR\\'dan sevkiyat sorumlusu işe almalısın">🚛 SEVKİYATÇIYLA GÖNDER (personel yok)</button>`
+            ) : ''}
             ${ct.delivered && !ct.paid ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
             ${ct.paid ? `<span style="color: var(--green); font-size: 12px;">✓ Ödeme alındı, sözleşme kapandı</span>` : ''}
           </div>
@@ -7486,6 +7491,144 @@ function dispatchVehicleDirect(ctId, vehicleId, load, opts) {
     showIrsaliye(ct.id, ct.deliveries[ct.deliveries.length - 1]);
   }
   return { success: true, error: null, irNo, tripDays };
+}
+
+// ============================================================
+// SEVKİYAT SORUMLUSU — Tek tıkla sözleşme sevkiyatı
+// ============================================================
+// Bir sözleşme için sevkiyat sorumlusu en uygun aracı + maksimum yükü seçer ve hemen başlatır
+function autoDispatchContract(ctId) {
+  console.log('[autoDispatchContract] çağrıldı:', ctId);
+
+  const dispatchers = state.dispatchers || [];
+  if (dispatchers.length === 0) {
+    toast('Sevkiyat sorumlusu yok. Personel > Sevkiyat sekmesinden işe al.', 'error');
+    return;
+  }
+
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) {
+    console.warn('[autoDispatchContract] sözleşme bulunamadı:', ctId);
+    toast('Sözleşme bulunamadı', 'error');
+    return;
+  }
+  if (ct.delivered) {
+    toast('Bu sözleşme zaten teslim edildi', 'info');
+    return;
+  }
+
+  // Kalan yük
+  const remaining = ct.items.map(it => {
+    const delivered = (ct.deliveries || []).reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, qty: Math.max(0, it.qty - delivered) };
+  }).filter(r => r.qty > 0);
+
+  if (remaining.length === 0) {
+    toast('Bu sözleşmenin tüm kalemleri yola çıkmış. Tüm sevkiyatların tamamlanmasını bekle.', 'info');
+    return;
+  }
+
+  // Boş + şoförü atanmış araçlar
+  const allVehicles = state.vehicles || [];
+  if (allVehicles.length === 0) {
+    toast('Hiç aracın yok. Filo > Yeni araç al.', 'error');
+    return;
+  }
+
+  const idleVehicles = allVehicles.filter(v => v.busyUntil <= state.day);
+  if (idleVehicles.length === 0) {
+    toast('Tüm araçlar görevde. Sevkiyatlar dönene kadar bekle.', 'error');
+    return;
+  }
+
+  const availableVehicles = idleVehicles.filter(v => state.drivers.some(d => d.vehicleId === v.id));
+  if (availableVehicles.length === 0) {
+    toast('Boş araç var ama şoförü atanmış değil. Personel > Şoför > araç ata.', 'error');
+    return;
+  }
+
+  // En kıdemli sevkiyat sorumlusunu kullan (Sv3 > Sv2 > Sv1)
+  const rep = dispatchers.slice().sort((a, b) => b.level - a.level)[0];
+
+  // Toplam ihtiyaç ağırlığı
+  const totalWeight = remaining.reduce((s, r) =>
+    s + (PRODUCTS[r.productId].weight * r.qty / 1000), 0);
+
+  // En uygun araç boyutunu bul (en küçük ama yeterli olan)
+  const sortedTypes = ['kamyonet', 'kucuk', 'orta', 'buyuk'];
+  let chosenVehicle = null;
+
+  // Önce yükü tek seferde alabilen en küçük aracı dene
+  for (const vt of sortedTypes) {
+    const tonaj = VEHICLE_TYPES[vt].tonaj;
+    if (tonaj < totalWeight) continue;
+    const v = availableVehicles.find(av => av.type === vt);
+    if (v) {
+      chosenVehicle = v;
+      break;
+    }
+  }
+
+  // Yetmiyorsa en büyük boş araçla kısmen yükle
+  if (!chosenVehicle) {
+    chosenVehicle = availableVehicles
+      .slice()
+      .sort((a, b) => VEHICLE_TYPES[b.type].tonaj - VEHICLE_TYPES[a.type].tonaj)[0];
+  }
+
+  if (!chosenVehicle) {
+    toast('Uygun araç bulunamadı (mantık hatası — bildirin)', 'error');
+    return;
+  }
+
+  // Yükü hazırla (stoktan al, kapasiteye sığacak şekilde)
+  const tonajLimit = VEHICLE_TYPES[chosenVehicle.type].tonaj;
+  const load = [];
+  let currentWeight = 0;
+
+  for (const r of remaining) {
+    const stockHave = state.inventory[r.productId] || 0;
+    if (stockHave <= 0) continue;
+    const maxByStock = Math.min(r.qty, stockHave);
+    const unitWeight = PRODUCTS[r.productId].weight / 1000;
+    const remainingCap = tonajLimit - currentWeight;
+    const maxByCapacity = unitWeight > 0 ? Math.floor(remainingCap / unitWeight) : maxByStock;
+    const qty = Math.min(maxByStock, maxByCapacity);
+    if (qty > 0) {
+      load.push({ productId: r.productId, qty });
+      currentWeight += unitWeight * qty;
+    }
+  }
+
+  if (load.length === 0) {
+    // Stokta hangi malzemeler eksik söyle
+    const missing = remaining.filter(r => (state.inventory[r.productId] || 0) <= 0);
+    const missingNames = missing.slice(0, 3).map(r => PRODUCTS[r.productId].name).join(', ');
+    toast(`Stokta hiçbir kalem yok. Eksik: ${missingNames}${missing.length > 3 ? '...' : ''} — Tedarikçilerden al.`, 'error');
+    return;
+  }
+
+  // Sevkiyatı başlat
+  console.log('[autoDispatchContract] sevkiyat başlatılıyor:', { rep: rep.name, vehicle: chosenVehicle.name || chosenVehicle.type, load, weight: currentWeight });
+  const result = dispatchVehicleDirect(ctId, chosenVehicle.id, load, { showIrsaliyeAfter: false });
+  if (result.success) {
+    // Personel istatistik + XP
+    rep.totalDispatches = (rep.totalDispatches || 0) + 1;
+    rep.xp += 12;
+    const xpReq = 100 * rep.level;
+    if (rep.xp >= xpReq && rep.level < 3) {
+      rep.level++;
+      rep.xp = 0;
+      toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
+    }
+    const cust = getCustomer(ct.customerId);
+    toast(`✓ ${rep.name}: ${cust.name} sevkiyatı başlattı (${VEHICLE_TYPES[chosenVehicle.type].name}, ${load.length} kalem, ${currentWeight.toFixed(1)}t)`, 'success');
+    render();
+  } else {
+    console.error('[autoDispatchContract] dispatchVehicleDirect başarısız:', result.error);
+    toast(`Sevkiyat başlatılamadı: ${result.error}`, 'error');
+  }
 }
 
 function showIrsaliye(ctId, delivery) {
@@ -8307,7 +8450,7 @@ function renderMyLands() {
       } else if (b.status === 'demolition') {
         // Yıkım fazı
         const demoDay = Math.abs(b.daysPassed);
-        const demoTotal = 20;
+        const demoTotal = 10;
         const pct = Math.round((demoDay / demoTotal) * 100);
         buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--red);">
           <strong style="color: var(--red);">🏚 YIKIM SÜRECİ</strong>
@@ -9653,28 +9796,8 @@ function nextDay() {
     }
   });
 
-  // 7d) Sevkiyat sorumluları plan üretir — her 3-6 günde bir
-  (state.dispatchers || []).forEach(rep => {
-    // Sıklık: Sv1 her 6 günde, Sv2 her 4 günde, Sv3 her 3 günde
-    const interval = rep.level >= 3 ? 3 : rep.level === 2 ? 4 : 6;
-    const lastPlan = rep.lastPlanDay || (rep.hireDay - interval);
-    if (state.day - lastPlan < interval) return;
-
-    rep.lastPlanDay = state.day;
-
-    const proposal = tryDispatcherProposal(rep);
-    if (proposal) {
-      state.inbox.push(proposal);
-      rep.xp += 10;
-      // Level up?
-      const xpReq = 100 * rep.level;
-      if (rep.xp >= xpReq && rep.level < 3) {
-        rep.level++;
-        rep.xp = 0;
-        toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
-      }
-    }
-  });
+  // 7d) Sevkiyat sorumlusu artık mail atmıyor — sözleşmeler ekranında tek tık ile çalışır
+  // (Eski blok v1.35'te kaldırıldı)
 
   // 8) Aylık rapor — her 30 günde bir
   const monthNumber = Math.floor(state.day / 30);
@@ -10361,10 +10484,40 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.34';
+const CURRENT_VERSION = 'v1.36';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.36',
+    date: '15 Mayıs 2026',
+    title: 'KENTSEL DÖNÜŞÜM DENGELEME + SEVKİYAT FIX',
+    items: [
+      { cat: 'major', text: 'Yıkım maliyeti güncel İstanbul piyasasına çekildi: <strong>₺150/m² → ₺300/m²</strong>' },
+      { cat: 'major', text: 'Yıkım süresi kısaltıldı: <strong>20 gün → 10 gün</strong>' },
+      { cat: 'feature', text: 'İnşaat hızı %35-40 artırıldı (Villa, Apartman, Rezidans, Site)' },
+      { cat: 'feature', text: 'Daire satış fiyatları 2026 piyasasına güncellendi:' },
+      { cat: 'feature', text: 'Villa ₺90k → ₺110k/m² · Apartman ₺65k → ₺80k/m²' },
+      { cat: 'feature', text: 'Rezidans ₺110k → ₺135k/m² · Site ₺75k → ₺90k/m²' },
+      { cat: 'feature', text: 'Kira fiyatları da güncel piyasaya çekildi (~%30 artış)' },
+      { cat: 'fix', text: '🚛 Sevkiyat butonu personel olmasa bile görünür (açıklayıcı uyarı verir)' },
+      { cat: 'fix', text: 'Sevkiyat çalışmama nedenleri daha açıklayıcı: araç yok / şoförsüz / stoksuz' },
+      { cat: 'fix', text: 'Hata olduğunda console\'a log atılıyor (geliştiriciye yardımcı)' }
+    ]
+  },
+  {
+    version: 'v1.35',
+    date: '11 Mayıs 2026',
+    title: 'SEVKİYATÇI TEK TIK SİSTEMİ',
+    items: [
+      { cat: 'major', text: 'Sevkiyat sorumlusu <strong>artık mail atmıyor</strong>' },
+      { cat: 'major', text: 'Sözleşmeler ekranında <strong>"🚛 SEVKİYATÇIYLA GÖNDER"</strong> butonu eklendi' },
+      { cat: 'feature', text: 'Tek tıkla: en uygun araç + maksimum yük + hemen yola çıkar' },
+      { cat: 'feature', text: 'Sevkiyat sorumlusu otomatik en kıdemli olanı seçer' },
+      { cat: 'feature', text: 'Stoktan eksik veya uygun araç yoksa açıklayıcı uyarı' },
+      { cat: 'fix', text: 'Daha hızlı operasyon — mail onayı beklemiyorsun' }
+    ]
+  },
   {
     version: 'v1.34',
     date: '11 Mayıs 2026',

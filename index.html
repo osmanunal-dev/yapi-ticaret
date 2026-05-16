@@ -5693,6 +5693,71 @@ function renderPurchaseProposalDetail(e) {
     </div>`;
 }
 
+// ============================================================
+// SATIN ALMA SORUMLUSU — Tek tıkla toplu alış
+// ============================================================
+// Aktif sözleşmelerin ihtiyaçlarını analiz et, en uygun tedarikçilerden toplu al
+function autoPurchaseAll() {
+  const purchasers = state.purchasers || [];
+  if (purchasers.length === 0) {
+    toast('Satın alma sorumlusu yok. Personel > Satın Alma sekmesinden işe al.', 'error');
+    return;
+  }
+
+  // En kıdemli satın alma sorumlusunu kullan
+  const rep = purchasers.slice().sort((a, b) => b.level - a.level)[0];
+
+  // Mevcut tryPurchaserProposal fonksiyonu ihtiyaçları + paketleri hazırlıyor
+  const proposal = tryPurchaserProposal(rep);
+  if (!proposal) {
+    toast('Şu an alınacak malzeme yok. Stokta her şey yeterli ya da aktif sözleşme yok.', 'info');
+    return;
+  }
+
+  // Önizleme: kullanıcıya özet ver, onay al
+  const supplierLines = proposal.purchases.map(p => {
+    const loyalty = (state.supplierLoyalty || {})[p.supplier.id] || 0;
+    return `• ${p.supplier.name}: ${p.items.length} kalem · ${fmt(p.total)}${loyalty > 10 ? ` (bağ %${loyalty.toFixed(0)})` : ''}`;
+  }).join('\n');
+
+  const totalItemCount = proposal.purchases.reduce((s, p) => s + p.items.length, 0);
+
+  const msg = `${rep.name} aşağıdaki alışı yapmak istiyor:\n\n${supplierLines}\n\nToplam: ${fmt(proposal.totalCost)}${proposal.totalSavings > 0 ? `\nİlişki indirimi: ${fmt(proposal.totalSavings)}` : ''}\nKasada: ${fmt(state.cash)}\n\n${totalItemCount} kalem ${proposal.purchases.length} tedarikçiden alınacak. Devam edelim mi?`;
+
+  if (!confirm(msg)) return;
+
+  if (state.cash < proposal.totalCost) {
+    toast(`Yetersiz bakiye. ${fmt(proposal.totalCost)} gerekli, kasada ${fmt(state.cash)} var.`, 'error');
+    return;
+  }
+
+  // Alımları yap
+  spend(proposal.totalCost, 'malzeme');
+  if (!state.supplierLoyalty) state.supplierLoyalty = {};
+
+  proposal.purchases.forEach(p => {
+    p.items.forEach(it => {
+      state.inventory[it.productId] = (state.inventory[it.productId] || 0) + it.qty;
+    });
+    state.supplierLoyalty[p.supplier.id] = Math.min(100, (state.supplierLoyalty[p.supplier.id] || 0) + Math.max(1, p.total / 80000));
+  });
+
+  // Personel istatistik
+  rep.totalPurchases = (rep.totalPurchases || 0) + proposal.purchases.length;
+  rep.totalSavings = (rep.totalSavings || 0) + proposal.totalSavings;
+  rep.xp += 20;
+  const xpReq = 100 * rep.level;
+  if (rep.xp >= xpReq && rep.level < 3) {
+    rep.level++;
+    rep.xp = 0;
+    toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
+  }
+
+  addXP(8, 'satın alma');
+  toast(`✓ ${rep.name}: ${fmt(proposal.totalCost)} alış tamamlandı (${proposal.purchases.length} tedarikçi${proposal.totalSavings > 0 ? `, ${fmt(proposal.totalSavings)} tasarruf` : ''})`, 'success');
+  render();
+}
+
 function approvePurchaseProposal(emailId) {
   const idx = state.inbox.findIndex(x => x.id === emailId);
   if (idx < 0) return;
@@ -6679,8 +6744,25 @@ function renderSuppliers() {
     }
   }
 
+  const purchaserCount = (state.purchasers || []).length;
+  const purchaserBanner = purchaserCount > 0
+    ? `<div style="margin-bottom: 14px; padding: 12px 16px; background: var(--panel); border-left: 3px solid var(--accent); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="font-size: 12px;">
+          🛒 <strong style="color: var(--accent);">Satın Alma Sorumlun: ${purchaserCount} kişi</strong> · Tek tıkla aktif sözleşmeler için en uygun tedarikçilerden toplu alış yapabilir.
+        </div>
+        <button class="btn primary" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="autoPurchaseAll()">
+          🛒 TEK TIKLA TOPLU ALIM
+        </button>
+      </div>`
+    : `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--ink-dim); font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>⚠️ <strong>Satın Alma Sorumlusu yok</strong> — Personel'den işe alırsan tek tıkla otomatik toplu alış yapabilirsin.</div>
+        <button class="btn small" onclick="setView('hr'); switchHRTab('purchasers');">Personele Git →</button>
+      </div>`;
+
   c.innerHTML = `<h2>TEDARİKÇİLER</h2>
     <div class="subtitle">${SUPPLIERS.length} tedarikçi · İstanbul genelinde · Anında depoya geçer</div>
+
+    ${purchaserBanner}
 
     <div class="search-row">
       <input type="text" class="search-input" id="supplier-search" placeholder="Tedarikçi, ilçe veya malzeme ara... (örn: Aksel, Kadıköy, çimento)" value="${state.supplierSearch}" oninput="updateSupplierSearch(this.value)">
@@ -9780,28 +9862,8 @@ function nextDay() {
     }
   });
 
-  // 7c) Satın alma sorumluları analiz yapar — her 4-7 günde bir
-  (state.purchasers || []).forEach(rep => {
-    // Sıklık: Sv1 her 7 günde, Sv2 her 5 günde, Sv3 her 4 günde
-    const interval = rep.level >= 3 ? 4 : rep.level === 2 ? 5 : 7;
-    const lastAnalysis = rep.lastAnalysisDay || (rep.hireDay - interval);
-    if (state.day - lastAnalysis < interval) return;
-
-    rep.lastAnalysisDay = state.day;
-
-    const proposal = tryPurchaserProposal(rep);
-    if (proposal) {
-      state.inbox.push(proposal);
-      rep.xp += 10;
-      // Level up?
-      const xpReq = 100 * rep.level;
-      if (rep.xp >= xpReq && rep.level < 3) {
-        rep.level++;
-        rep.xp = 0;
-        toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
-      }
-    }
-  });
+  // 7c) Satın alma sorumlusu artık mail atmıyor — Tedarikçiler ekranında tek tık ile çalışır
+  // (Eski blok v1.36'da kaldırıldı)
 
   // 7d) Sevkiyat sorumlusu artık mail atmıyor — sözleşmeler ekranında tek tık ile çalışır
   // (Eski blok v1.35'te kaldırıldı)
@@ -10498,18 +10560,17 @@ const CHANGELOG_DATA = [
   {
     version: 'v1.36',
     date: '15 Mayıs 2026',
-    title: 'KENTSEL DÖNÜŞÜM DENGELEME + SEVKİYAT FIX',
+    title: 'KENTSEL DÖNÜŞÜM + SEVKİYAT + SATIN ALMA: HEPSİ TEK TIK',
     items: [
+      { cat: 'major', text: '🛒 Satın Alma Sorumlusu <strong>artık mail atmıyor</strong> — Tedarikçiler sayfasında <strong>"TEK TIKLA TOPLU ALIM"</strong> butonu' },
+      { cat: 'major', text: 'Buton sözleşme ihtiyaçlarını tarar, en uygun tedarikçileri seçer, onay popup\'ı verir, tek tıkla hepsini alır' },
       { cat: 'major', text: 'Yıkım maliyeti güncel İstanbul piyasasına çekildi: <strong>₺150/m² → ₺300/m²</strong>' },
       { cat: 'major', text: 'Yıkım süresi kısaltıldı: <strong>20 gün → 10 gün</strong>' },
       { cat: 'feature', text: 'İnşaat hızı %35-40 artırıldı (Villa, Apartman, Rezidans, Site)' },
-      { cat: 'feature', text: 'Daire satış fiyatları 2026 piyasasına güncellendi:' },
-      { cat: 'feature', text: 'Villa ₺90k → ₺110k/m² · Apartman ₺65k → ₺80k/m²' },
-      { cat: 'feature', text: 'Rezidans ₺110k → ₺135k/m² · Site ₺75k → ₺90k/m²' },
-      { cat: 'feature', text: 'Kira fiyatları da güncel piyasaya çekildi (~%30 artış)' },
-      { cat: 'fix', text: '🚛 Sevkiyat butonu personel olmasa bile görünür (açıklayıcı uyarı verir)' },
-      { cat: 'fix', text: 'Sevkiyat çalışmama nedenleri daha açıklayıcı: araç yok / şoförsüz / stoksuz' },
-      { cat: 'fix', text: 'Hata olduğunda console\'a log atılıyor (geliştiriciye yardımcı)' }
+      { cat: 'feature', text: 'Daire satış fiyatları 2026 piyasasına: Villa ₺110k · Apartman ₺80k · Rezidans ₺135k · Site ₺90k/m²' },
+      { cat: 'feature', text: 'Kira fiyatları %30 arttı (Villa ₺320 · Apartman ₺240 · Rezidans ₺420 · Site ₺280/m²/ay)' },
+      { cat: 'fix', text: '🚛 Sözleşmeler sayfasının üstünde sevkiyatçı durumu net şekilde gösterilir' },
+      { cat: 'fix', text: 'Sevkiyat sorumlusu yoksa buton tıklandığında doğrudan personel ekranına gider' }
     ]
   },
   {

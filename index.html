@@ -2650,6 +2650,9 @@
       <div class="nav-item" data-view="investment" onclick="setView('investment')">
         <span>💎 Yatırım</span>
       </div>
+      <div class="nav-item" data-view="dealerships" onclick="setView('dealerships')">
+        <span>🏭 Bayilik</span>
+      </div>
       <div class="nav-item" data-view="accounting" onclick="setView('accounting')">
         <span>📊 Muhasebe</span>
       </div>
@@ -3146,6 +3149,386 @@ const CUSTOMERS_INIT = [
   { id: 'maltepe',    name: 'Maltepe Müteahhitlik',        ilce: 'maltepe'   }
 ];
 
+// ============================================================
+// MARKALAR & BAYİLİK SİSTEMİ
+// ============================================================
+// Her ürün için 2-3 marka — kalite/prestij farklı
+// tier: 'premium' (yüksek şart, büyük indirim) · 'standart' · 'ekonomik'
+// discount: fabrika fiyatı = en ucuz tedarikçinin fiyatından bu kadar indirim (0.20 = %20 indirim)
+// repGate: minimum itibar yüzdesi
+// teminat: bir kerelik teminat
+// monthlyFee: aylık aidat
+const BRANDS = {
+  // ÇİMENTO
+  akcansa:   { name: 'Akçansa',         tier: 'premium',  productId: 'cement',  discount: 0.22, repGate: 75, teminat: 3500000, desc: 'Sabancı + Heidelberg ortak girişimi, lider çimento markası' },
+  oyak:      { name: 'OYAK Çimento',    tier: 'standart', productId: 'cement',  discount: 0.18, repGate: 55, teminat: 1800000, desc: 'OYAK iştiraki, geniş yaygın çimento ağı' },
+  cimsa:     { name: 'Çimsa',           tier: 'standart', productId: 'cement',  discount: 0.16, repGate: 50, teminat: 1400000, desc: 'Sabancı, beyaz çimentoda lider' },
+
+  // DEMİR
+  icdas:     { name: 'İçdaş',           tier: 'premium',  productId: 'rebar',   discount: 0.20, repGate: 78, teminat: 5500000, desc: 'Türkiye\'nin en büyük inşaat demiri üreticisi' },
+  habas:     { name: 'Habaş',           tier: 'standart', productId: 'rebar',   discount: 0.17, repGate: 60, teminat: 3200000, desc: 'Köklü demir-çelik üreticisi' },
+  kardemir:  { name: 'Kardemir',        tier: 'standart', productId: 'rebar',   discount: 0.15, repGate: 55, teminat: 2400000, desc: 'Karabük Demir-Çelik, devlet işbirliğiyle' },
+
+  // HASIR ÇELİK
+  ekinciler: { name: 'Ekinciler Demir', tier: 'standart', productId: 'hasir',   discount: 0.18, repGate: 50, teminat: 1500000, desc: 'Hasır çelik ve profil uzmanı' },
+  mmk:       { name: 'MMK Atakaş',      tier: 'standart', productId: 'hasir',   discount: 0.16, repGate: 55, teminat: 1800000, desc: 'Rus-Türk ortaklık, modern tesisler' },
+
+  // PROFİL DEMİR
+  erdemir:   { name: 'Erdemir',         tier: 'premium',  productId: 'profil',  discount: 0.20, repGate: 75, teminat: 3000000, desc: 'Ereğli Demir-Çelik, kalite standardı' },
+  borusan:   { name: 'Borusan Mannesmann', tier: 'standart', productId: 'profil', discount: 0.16, repGate: 55, teminat: 1700000, desc: 'Profil ve boru sektöründe köklü marka' },
+
+  // TUĞLA
+  wienerberger: { name: 'Wienerberger',  tier: 'premium',  productId: 'brick',   discount: 0.22, repGate: 70, teminat: 1400000, desc: 'Avusturya menşeli, dünya devi tuğla üreticisi' },
+  kale:      { name: 'Kale Tuğla',      tier: 'standart', productId: 'brick',   discount: 0.18, repGate: 50, teminat: 850000,  desc: 'Yerli üretim, geniş ürün yelpazesi' },
+  turktugla: { name: 'Türk Tuğla',      tier: 'ekonomik', productId: 'brick',   discount: 0.14, repGate: 35, teminat: 500000,  desc: 'Uygun fiyatlı standart tuğla' },
+
+  // BRİKET
+  besler:    { name: 'Besler Briket',   tier: 'standart', productId: 'briket',  discount: 0.16, repGate: 45, teminat: 700000,  desc: 'Kaliteli briket üreticisi' },
+
+  // SERAMİK
+  kalebodur: { name: 'Kalebodur',       tier: 'premium',  productId: 'tile',    discount: 0.20, repGate: 70, teminat: 1800000, desc: 'Türkiye\'nin lider seramik markası' },
+  vitra:     { name: 'VitrA',           tier: 'premium',  productId: 'tile',    discount: 0.20, repGate: 75, teminat: 2100000, desc: 'Eczacıbaşı, premium seramik' },
+  graniser:  { name: 'Graniser',        tier: 'standart', productId: 'tile',    discount: 0.16, repGate: 50, teminat: 1000000, desc: 'Uygun fiyatlı kaliteli seramik' },
+
+  // GRANİT
+  yurtbay:   { name: 'Yurtbay Seramik', tier: 'standart', productId: 'granit',  discount: 0.17, repGate: 55, teminat: 1200000, desc: 'Granit ve seramik uzmanı' },
+  ege:       { name: 'Ege Seramik',     tier: 'standart', productId: 'granit',  discount: 0.16, repGate: 52, teminat: 1100000, desc: 'Granit serisinde geniş seçenek' },
+
+  // PARKE
+  camsan:    { name: 'Çamsan Parke',    tier: 'standart', productId: 'parke',   discount: 0.18, repGate: 50, teminat: 850000,  desc: 'Türkiye\'nin en büyük parke üreticisi' },
+  agt:       { name: 'AGT',             tier: 'premium',  productId: 'parke',   discount: 0.21, repGate: 70, teminat: 1500000, desc: 'Premium laminat ve panel ürünleri' },
+
+  // İÇ CEPHE BOYA
+  marshall:  { name: 'Marshall',        tier: 'premium',  productId: 'paint',   discount: 0.20, repGate: 65, teminat: 1000000, desc: 'AkzoNobel grubu, premium boya' },
+  filli:     { name: 'Filli Boya',      tier: 'standart', productId: 'paint',   discount: 0.17, repGate: 50, teminat: 700000,  desc: 'Köklü Türk boya markası' },
+  dyo:       { name: 'DYO',             tier: 'standart', productId: 'paint',   discount: 0.16, repGate: 52, teminat: 800000,  desc: 'Yaşar Holding, geniş boya yelpazesi' },
+
+  // DIŞ CEPHE BOYA
+  jotun:     { name: 'Jotun',           tier: 'premium',  productId: 'discephe', discount: 0.22, repGate: 75, teminat: 1800000, desc: 'Norveç menşeli, dayanıklı dış cephe' },
+  kaleboya:  { name: 'Kale Boya',       tier: 'standart', productId: 'discephe', discount: 0.18, repGate: 55, teminat: 950000,  desc: 'Yerli üretim dış cephe boyası' },
+
+  // VERNİK
+  hemel:     { name: 'Hemel',           tier: 'standart', productId: 'vernik',  discount: 0.17, repGate: 45, teminat: 450000,  desc: 'Su bazlı ve solvent bazlı vernik' },
+
+  // XPS YALITIM
+  austrotherm: { name: 'Austrotherm',   tier: 'premium',  productId: 'insul',   discount: 0.21, repGate: 70, teminat: 1300000, desc: 'Avusturya menşeli yalıtım markası' },
+  dow:       { name: 'Dow Styrofoam',   tier: 'premium',  productId: 'insul',   discount: 0.22, repGate: 75, teminat: 1600000, desc: 'XPS yalıtım dünya devi' },
+  bauer:     { name: 'Bauer',           tier: 'standart', productId: 'insul',   discount: 0.17, repGate: 50, teminat: 700000,  desc: 'Uygun fiyat XPS' },
+
+  // TAŞ YÜNÜ
+  izocam:    { name: 'İzocam',          tier: 'premium',  productId: 'taşyunu', discount: 0.20, repGate: 65, teminat: 1000000, desc: 'Yalıtım sektörünün öncüsü' },
+  rockwool:  { name: 'Rockwool',        tier: 'premium',  productId: 'taşyunu', discount: 0.22, repGate: 75, teminat: 1500000, desc: 'Danimarka menşeli, dünya lideri' },
+
+  // SU YALITIM
+  basf:      { name: 'BASF Master',     tier: 'premium',  productId: 'membran', discount: 0.21, repGate: 70, teminat: 1200000, desc: 'Alman kimya devi, kaliteli membran' },
+  fix:       { name: 'Fix Kimya',       tier: 'standart', productId: 'membran', discount: 0.17, repGate: 50, teminat: 600000,  desc: 'Türk üretimi su yalıtım' },
+
+  // ALÇI
+  knauf:     { name: 'Knauf',           tier: 'premium',  productId: 'plaster', discount: 0.20, repGate: 65, teminat: 900000,  desc: 'Alman alçı devi' },
+  abs:       { name: 'ABS Yapı',        tier: 'standart', productId: 'plaster', discount: 0.16, repGate: 48, teminat: 500000,  desc: 'Yerli alçı üreticisi' },
+
+  // ALÇIPAN
+  knaufalcipan: { name: 'Knauf Plaka',  tier: 'premium',  productId: 'alcipan', discount: 0.21, repGate: 70, teminat: 1100000, desc: 'Knauf alçıpan, kalite standardı' },
+  rigips:    { name: 'Rigips',          tier: 'standart', productId: 'alcipan', discount: 0.17, repGate: 52, teminat: 700000,  desc: 'Saint-Gobain, geniş ürün' },
+
+  // PVC BORU
+  pimas:     { name: 'Pimaş',           tier: 'premium',  productId: 'pipe',    discount: 0.20, repGate: 65, teminat: 850000,  desc: 'PVC boru sektörünün lideri' },
+  firat:     { name: 'Fırat Plastik',   tier: 'standart', productId: 'pipe',    discount: 0.17, repGate: 50, teminat: 550000,  desc: 'Geniş plastik ürün yelpazesi' },
+
+  // PPRC BORU
+  hakan:     { name: 'Hakan Plastik',   tier: 'standart', productId: 'pprc',    discount: 0.18, repGate: 50, teminat: 620000,  desc: 'PPRC boru uzmanı' },
+  kratis:    { name: 'Kratis',          tier: 'premium',  productId: 'pprc',    discount: 0.21, repGate: 70, teminat: 1050000, desc: 'Premium PPRC sistemleri' },
+
+  // ELEKTRİK KABLOSU
+  hes:       { name: 'HES Kablo',       tier: 'premium',  productId: 'kablo',   discount: 0.20, repGate: 70, teminat: 1200000, desc: 'Türkiye\'nin önde gelen kablo üreticisi' },
+  prysmian:  { name: 'Prysmian',        tier: 'premium',  productId: 'kablo',   discount: 0.22, repGate: 78, teminat: 1800000, desc: 'İtalyan menşeli, küresel kablo devi' },
+  turkpirelli: { name: 'Türk Pirelli',  tier: 'standart', productId: 'kablo',   discount: 0.17, repGate: 55, teminat: 800000,  desc: 'Köklü kablo markası' },
+
+  // SİGORTA PANOSU
+  schneider: { name: 'Schneider Electric', tier: 'premium', productId: 'pano',  discount: 0.21, repGate: 75, teminat: 1400000, desc: 'Fransız elektrik devi' },
+  abb:       { name: 'ABB',             tier: 'premium',  productId: 'pano',    discount: 0.22, repGate: 78, teminat: 1600000, desc: 'İsveç-İsviçre teknoloji şirketi' },
+  legrand:   { name: 'Legrand',         tier: 'standart', productId: 'pano',    discount: 0.18, repGate: 58, teminat: 1000000, desc: 'Fransız elektrik tesisat ürünleri' },
+
+  // CAM
+  sisecam:   { name: 'Şişecam',         tier: 'premium',  productId: 'cam',     discount: 0.21, repGate: 75, teminat: 1900000, desc: 'Türkiye\'nin cam devi' },
+  trakyacam: { name: 'Trakya Cam',      tier: 'standart', productId: 'cam',     discount: 0.17, repGate: 55, teminat: 1100000, desc: 'Düz cam ve kaplama uzmanı' },
+
+  // KUM
+  kumcu:     { name: 'BSK Beton',       tier: 'standart', productId: 'sand',    discount: 0.15, repGate: 45, teminat: 550000,  desc: 'Kum, çakıl ve agrega tedariği' },
+
+  // ÇAKIL
+  agrega:    { name: 'Akdağlar Agrega', tier: 'standart', productId: 'gravel',  discount: 0.16, repGate: 47, teminat: 650000,  desc: 'İnşaat agregaları' }
+};
+
+// Bir ürün için mevcut markaları döndür
+function brandsForProduct(productId) {
+  return Object.entries(BRANDS)
+    .filter(([_, b]) => b.productId === productId)
+    .map(([id, b]) => ({ id, ...b }));
+}
+
+// Bayilik aldığımız ürünün fabrika fiyatı (en ucuz tedarikçi × (1 - indirim))
+function brandFactoryPrice(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) return 0;
+  // En ucuz tedarikçi fiyatını referans al
+  const cheapest = cheapestSupplier(b.productId);
+  if (!cheapest) return BASE_PRICE[b.productId] || 0;
+  return Math.round(cheapest.price * (1 - b.discount));
+}
+
+// Bayilik başvurusu — modal göster
+function openDealershipModal(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) return;
+  const p = PRODUCTS[b.productId];
+  const cheapest = cheapestSupplier(b.productId);
+  const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[b.productId] || 0);
+  const factoryPrice = brandFactoryPrice(brandId);
+  const savePerUnit = marketPrice - factoryPrice;
+  const tierColors = { premium: '#a855f7', standart: '#3b82f6', ekonomik: '#10b981' };
+  const tierLabels = { premium: '💎 Premium', standart: '🔷 Standart', ekonomik: '💰 Ekonomik' };
+
+  const hasIt = (state.dealerships || []).some(d => d.brandId === brandId);
+  const canAfford = state.cash >= b.teminat;
+  const canRep = state.reputation >= b.repGate;
+  const canApply = !hasIt && canAfford && canRep;
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 620px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="font-family: 'Bebas Neue'; font-size: 26px; letter-spacing: 2px; color: ${tierColors[b.tier]};">🏭 ${b.name} BAYİLİĞİ</div>
+      </div>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid ${tierColors[b.tier]}; margin-bottom: 16px; font-size: 12px; line-height: 1.7;">
+        <strong style="color: ${tierColors[b.tier]};">${tierLabels[b.tier]}</strong> · <strong>${p.name}</strong> markası<br>
+        ${b.desc}
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📋 BAYİLİK ŞARTLARI</h3>
+      <table class="data-table" style="margin-bottom: 16px;">
+        <tbody>
+          <tr>
+            <td>Minimum İtibar</td>
+            <td class="num"><strong style="color: ${canRep ? 'var(--green)' : 'var(--red)'};">%${b.repGate}</strong> (Senin: %${Math.round(state.reputation)})</td>
+          </tr>
+          <tr>
+            <td>Açılış Teminatı (tek seferlik)</td>
+            <td class="num"><strong style="color: ${canAfford ? 'var(--ink)' : 'var(--red)'};">${fmt(b.teminat)}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">💰 FİYAT AVANTAJI</h3>
+      <table class="data-table" style="margin-bottom: 16px;">
+        <tbody>
+          <tr>
+            <td>Piyasa fiyatı (en ucuz tedarikçi)</td>
+            <td class="num">${fmt(marketPrice)} / ${p.unit}</td>
+          </tr>
+          <tr>
+            <td>Bayilik fabrika fiyatı</td>
+            <td class="num" style="color: var(--green);">${fmt(factoryPrice)} / ${p.unit}</td>
+          </tr>
+          <tr style="background: var(--panel-2);">
+            <td><strong>İndirim oranı</strong></td>
+            <td class="num"><strong style="color: var(--green);">-${fmt(savePerUnit)} / ${p.unit} (%${(b.discount * 100).toFixed(0)})</strong></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 11px; line-height: 1.7;">
+        💡 <strong>Bayilik Avantajları:</strong>
+        <ul style="margin: 6px 0 0 18px; padding: 0;">
+          <li>Fabrika fiyatından sınırsız <strong>${p.name}</strong> alabilirsin</li>
+          <li>Stoka uğramadan sözleşme müşterisine <strong>direkt fabrikadan sevkiyat</strong></li>
+          <li><strong>Aylık aidat yok</strong> — bir kerelik teminat ödersin, bayilik süresiz aktif</li>
+          <li>Bayiliği iptal edersen teminat iade edilmez</li>
+        </ul>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1; padding: 12px; background: ${tierColors[b.tier]}; color: #fff; border-color: ${tierColors[b.tier]}; font-weight: 700;" onclick="confirmDealership('${brandId}')" ${canApply ? '' : 'disabled'}>
+          ${hasIt ? 'BU MARKADAN BAYİLİĞİN VAR' : !canRep ? `İTİBAR YETERSİZ (%${b.repGate} GEREK)` : !canAfford ? 'TEMİNAT YETMİYOR' : `✓ BAYİLİĞİ AL (${fmt(b.teminat)})`}
+        </button>
+        <button class="btn" style="padding: 12px;" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmDealership(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) return;
+  if (state.cash < b.teminat) { toast('Teminat yetmiyor', 'error'); return; }
+  if (state.reputation < b.repGate) { toast('İtibar yetersiz', 'error'); return; }
+  if ((state.dealerships || []).some(d => d.brandId === brandId)) { toast('Zaten bayisin', 'error'); return; }
+
+  spend(b.teminat, 'bayilik-teminat');
+  if (!state.dealerships) state.dealerships = [];
+  state.dealerships.push({
+    id: 'BY' + uid(),
+    brandId,
+    productId: b.productId,
+    teminat: b.teminat,
+    discount: b.discount,
+    openedDay: state.day,
+    totalPurchased: 0,
+    totalSavings: 0
+  });
+  closeModal();
+  toast(`✓ ${b.name} bayiliği alındı! Fabrika fiyatından sınırsız ${PRODUCTS[b.productId].name} alabilirsin.`, 'success');
+  addXP(50, 'bayilik');
+  render();
+}
+
+// Fabrika alım modalı — bayilik aldığımız markadan satın al
+function openFactoryBuyModal(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) return;
+  const dealership = (state.dealerships || []).find(d => d.brandId === brandId);
+  if (!dealership) { toast('Bu markadan bayiliğin yok', 'error'); return; }
+  const p = PRODUCTS[b.productId];
+  const factoryPrice = brandFactoryPrice(brandId);
+  const cheapest = cheapestSupplier(b.productId);
+  const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[b.productId] || 0);
+
+  // Sözleşmelerden bu ürünü kullanan açık olanlar — direkt sevkiyat seçeneği için
+  const pendingContracts = state.contracts.filter(c => !c.delivered && c.items.some(it => {
+    if (it.productId !== b.productId) return false;
+    const delivered = (c.deliveries || []).reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return delivered < it.qty;
+  }));
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 560px; max-height: 90vh; overflow-y: auto;">
+      <h2 style="color: #a855f7;">🏭 ${b.name} Fabrika Alımı</h2>
+
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid #a855f7; margin: 12px 0; font-size: 12px; line-height: 1.7;">
+        <strong>${p.name}</strong> · Fabrika fiyatı: <strong style="color: var(--green);">${fmt(factoryPrice)}</strong> / ${p.unit}<br>
+        Piyasa fiyatı: ${fmt(marketPrice)} (Tasarruf: ${fmt(marketPrice - factoryPrice)} / ${p.unit})
+      </div>
+
+      <label style="font-size: 11px; color: var(--ink-dim); display: block; margin-bottom: 4px;">Alınacak Miktar (${p.unit})</label>
+      <input type="number" id="factory-qty" class="text-input" style="width: 100%; margin-bottom: 8px;" value="100" min="1" step="10" oninput="updateFactoryBuyEstimate('${brandId}')">
+
+      <div id="factory-buy-estimate" style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 11px;">
+        Toplam: <strong id="factory-total">—</strong>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px; font-size: 14px;">📦 SEVKİYAT</h3>
+
+      <label style="font-size: 11px; color: var(--ink-dim); display: block; margin-bottom: 4px;">Nereye?</label>
+      <select id="factory-dest" class="text-input" style="width: 100%; margin-bottom: 14px;">
+        <option value="depo">🏪 Depoma (stoka ekle)</option>
+        ${pendingContracts.map(c => {
+          const cust = getCustomer(c.customerId);
+          const it = c.items.find(x => x.productId === b.productId);
+          const delivered = (c.deliveries || []).reduce((s, d) =>
+            s + (d.items.find(x => x.productId === b.productId)?.qty || 0), 0);
+          const remaining = it.qty - delivered;
+          return `<option value="ct:${c.id}">🚚 ${cust.name} sözleşmesine direkt fabrika sevkiyatı (kalan: ${remaining} ${p.unit})</option>`;
+        }).join('')}
+      </select>
+
+      ${pendingContracts.length > 0 ? `<div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 11px; line-height: 1.5;">
+        💡 Direkt fabrika sevkiyatı seçersen ürün <strong>depoya uğramadan</strong> müşterinin adresine gönderilir (1-3 gün). Nakliye <strong>marka tarafından üstlenilir</strong>, ekstra ücret yok.
+      </div>` : ''}
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1;" onclick="confirmFactoryBuy('${brandId}')">🛒 SATIN AL</button>
+        <button class="btn" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  updateFactoryBuyEstimate(brandId);
+}
+
+function updateFactoryBuyEstimate(brandId) {
+  const qty = parseFloat(document.getElementById('factory-qty').value) || 0;
+  const factoryPrice = brandFactoryPrice(brandId);
+  const total = qty * factoryPrice;
+  document.getElementById('factory-total').textContent = fmt(Math.round(total));
+}
+
+function confirmFactoryBuy(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) return;
+  const dealership = (state.dealerships || []).find(d => d.brandId === brandId);
+  if (!dealership) return;
+  const qty = parseInt(document.getElementById('factory-qty').value);
+  if (isNaN(qty) || qty <= 0) { toast('Geçersiz miktar', 'error'); return; }
+  const factoryPrice = brandFactoryPrice(brandId);
+  const total = qty * factoryPrice;
+  if (state.cash < total) { toast(`Yetersiz bakiye. ${fmt(total)} gerekli`, 'error'); return; }
+
+  const dest = document.getElementById('factory-dest').value;
+  spend(total, 'fabrika-alim');
+  dealership.totalPurchased += qty;
+  const cheapest = cheapestSupplier(b.productId);
+  const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[b.productId] || 0);
+  dealership.totalSavings += qty * (marketPrice - factoryPrice);
+
+  if (dest === 'depo') {
+    state.inventory[b.productId] = (state.inventory[b.productId] || 0) + qty;
+    closeModal();
+    toast(`✓ ${qty} ${PRODUCTS[b.productId].unit} ${b.name} alındı, depoya eklendi (${fmt(total)})`, 'success');
+  } else if (dest.startsWith('ct:')) {
+    const ctId = dest.slice(3);
+    const ct = state.contracts.find(c => c.id === ctId);
+    if (!ct) { toast('Sözleşme bulunamadı', 'error'); return; }
+    const cust = getCustomer(ct.customerId);
+
+    // Direkt fabrika sevkiyatı — 1-3 gün, marka tarafından nakliye
+    const tripDays = 1 + Math.floor(Math.random() * 3);
+    const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase() + '-FAB';
+    ct.deliveries.push({
+      no: irNo,
+      day: state.day,
+      arrivalDay: state.day + tripDays,
+      vehicleId: null,
+      driverId: null,
+      factoryBrand: b.name,
+      factoryBrandId: brandId,
+      items: [{ productId: b.productId, qty }],
+      weight: PRODUCTS[b.productId].weight * qty / 1000,
+      fuelCost: 0,
+      externalCost: 0
+    });
+
+    // Tüm teslim oldu mu?
+    const allDelivered = ct.items.every(it => {
+      const tot = ct.deliveries.reduce((s, d) =>
+        s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+      return tot >= it.qty;
+    });
+    if (allDelivered) {
+      ct.delivered = true;
+      cust.balance += ct.total;
+      toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Cari: ${fmt(ct.total)}`, 'success');
+      addXP(15, 'tüm sevkiyatlar tamam');
+    }
+
+    closeModal();
+    toast(`✓ ${qty} ${PRODUCTS[b.productId].unit} ${b.name} fabrikadan ${cust.name}'a direkt gönderildi (${tripDays} gün)`, 'success');
+  }
+  addXP(5, 'fabrika alımı');
+  render();
+}
+
+function cancelDealership(dealershipId) {
+  const idx = (state.dealerships || []).findIndex(d => d.id === dealershipId);
+  if (idx < 0) return;
+  const d = state.dealerships[idx];
+  const b = BRANDS[d.brandId];
+  state.dealerships.splice(idx, 1);
+  toast(`${b.name} bayiliği iptal edildi (teminat iade edilmez)`, 'info');
+  render();
+}
+
 // 14 tedarikçi (aynı malzemeyi farklı fiyatlarla satabilen)
 const SUPPLIERS = [
   { id: 'aksel',     name: 'AKSEL Yapı Malzemeleri',  ilce: 'tuzla',    priceMod: 1.00,
@@ -3305,6 +3688,348 @@ const CREDIT_CARD_TIERS = {
     desc: 'Yüksek limit, düşük faiz · Üst düzey'
   }
 };
+
+// ============================================================
+// BAŞARIMLAR (ACHIEVEMENTS)
+// ============================================================
+// Her başarım: {id, cat, name, desc, tiers: [{name, target, xp}], icon}
+// tiers sıralı (kolay → zor); kullanıcı kademeli ilerler
+// check(state): mevcut sayıyı/değeri döndürür
+const ACHIEVEMENTS = [
+  // İNŞAAT
+  {
+    id: 'firstBuilding', cat: 'insaat', icon: '🏗', name: 'İlk İnşaat',
+    desc: 'Bina inşa et',
+    tiers: [
+      { name: 'Bronz', target: 1,  xp: 50 },
+      { name: 'Gümüş', target: 5,  xp: 150 },
+      { name: 'Altın', target: 15, xp: 400 },
+      { name: 'Elmas', target: 50, xp: 1200 }
+    ],
+    check: () => (state.lands || []).filter(l => l.building?.status === 'completed').length
+  },
+  {
+    id: 'villaBuilder', cat: 'insaat', icon: '🏡', name: 'Villa Ustası',
+    desc: 'Villa tipi bina tamamla',
+    tiers: [
+      { name: 'Bronz', target: 1, xp: 80 },
+      { name: 'Gümüş', target: 5, xp: 250 },
+      { name: 'Altın', target: 15, xp: 600 }
+    ],
+    check: () => (state.lands || []).filter(l => l.building?.status === 'completed' && l.building?.type === 'villa').length
+  },
+  {
+    id: 'residenceBuilder', cat: 'insaat', icon: '🏬', name: 'Rezidans Devi',
+    desc: 'Rezidans tamamla',
+    tiers: [
+      { name: 'Bronz', target: 1, xp: 200 },
+      { name: 'Gümüş', target: 3, xp: 600 },
+      { name: 'Altın', target: 10, xp: 1500 }
+    ],
+    check: () => (state.lands || []).filter(l => l.building?.status === 'completed' && l.building?.type === 'rezidans').length
+  },
+  {
+    id: 'siteBuilder', cat: 'insaat', icon: '🏘', name: 'Site Patronu',
+    desc: 'Site projesi tamamla',
+    tiers: [
+      { name: 'Bronz', target: 1, xp: 300 },
+      { name: 'Gümüş', target: 3, xp: 900 },
+      { name: 'Altın', target: 10, xp: 2500 }
+    ],
+    check: () => (state.lands || []).filter(l => l.building?.status === 'completed' && l.building?.type === 'site').length
+  },
+
+  // TİCARET
+  {
+    id: 'firstContract', cat: 'ticaret', icon: '📜', name: 'İlk Sözleşme',
+    desc: 'Sözleşme tamamla (tahsilat dahil)',
+    tiers: [
+      { name: 'Bronz', target: 1,   xp: 30 },
+      { name: 'Gümüş', target: 25,  xp: 150 },
+      { name: 'Altın', target: 100, xp: 500 },
+      { name: 'Elmas', target: 500, xp: 2000 }
+    ],
+    check: () => state.contractsCompleted || 0
+  },
+  {
+    id: 'profit1M', cat: 'ticaret', icon: '💰', name: 'Milyoner',
+    desc: 'Toplam kâr seviyesi',
+    tiers: [
+      { name: 'Bronz', target: 1000000,    xp: 100 },
+      { name: 'Gümüş', target: 10000000,   xp: 400 },
+      { name: 'Altın', target: 100000000,  xp: 1500 },
+      { name: 'Elmas', target: 1000000000, xp: 5000 }
+    ],
+    check: () => state.totalProfit || 0
+  },
+  {
+    id: 'reputation', cat: 'ticaret', icon: '⭐', name: 'İtibar',
+    desc: 'Sektör itibarı',
+    tiers: [
+      { name: 'Bronz', target: 25, xp: 100 },
+      { name: 'Gümüş', target: 50, xp: 300 },
+      { name: 'Altın', target: 75, xp: 800 },
+      { name: 'Elmas', target: 95, xp: 2000 }
+    ],
+    check: () => Math.round(state.reputation || 0)
+  },
+
+  // GAYRİMENKUL
+  {
+    id: 'apartmentSold', cat: 'gayrimenkul', icon: '🏠', name: 'Daire Satıcısı',
+    desc: 'Daire sat',
+    tiers: [
+      { name: 'Bronz', target: 1,   xp: 50 },
+      { name: 'Gümüş', target: 20,  xp: 250 },
+      { name: 'Altın', target: 100, xp: 1000 }
+    ],
+    check: () => (state.lands || []).reduce((s, l) => s + ((l.building?.apartments || []).filter(a => a.status === 'sold').length), 0)
+  },
+  {
+    id: 'rentalLord', cat: 'gayrimenkul', icon: '🏘', name: 'Kira Baronu',
+    desc: 'Aktif kiracı sayısı',
+    tiers: [
+      { name: 'Bronz', target: 1,  xp: 50 },
+      { name: 'Gümüş', target: 10, xp: 250 },
+      { name: 'Altın', target: 50, xp: 1000 }
+    ],
+    check: () => (state.lands || []).reduce((s, l) => s + ((l.building?.apartments || []).filter(a => a.status === 'rented').length), 0)
+  },
+  {
+    id: 'landOwner', cat: 'gayrimenkul', icon: '🏞', name: 'Arsa Sahibi',
+    desc: 'Sahip olduğun arsa sayısı',
+    tiers: [
+      { name: 'Bronz', target: 1,  xp: 30 },
+      { name: 'Gümüş', target: 5,  xp: 150 },
+      { name: 'Altın', target: 15, xp: 500 }
+    ],
+    check: () => (state.lands || []).filter(l => !l.isUrbanRenewal).length
+  },
+
+  // FİNANS
+  {
+    id: 'cashBaron', cat: 'finans', icon: '💵', name: 'Kasa Zengini',
+    desc: 'Kasandaki para',
+    tiers: [
+      { name: 'Bronz', target: 1000000,   xp: 80 },
+      { name: 'Gümüş', target: 10000000,  xp: 300 },
+      { name: 'Altın', target: 100000000, xp: 1200 }
+    ],
+    check: () => Math.max(0, state.cash || 0)
+  },
+  {
+    id: 'wealthMaster', cat: 'finans', icon: '💎', name: 'Servet',
+    desc: 'Toplam servet (kasa + portföy + vadeli + gayrimenkul)',
+    tiers: [
+      { name: 'Bronz', target: 50000000,   xp: 200 },
+      { name: 'Gümüş', target: 250000000,  xp: 800 },
+      { name: 'Altın', target: 1000000000, xp: 3000 }
+    ],
+    check: () => calculateTotalWealth()
+  },
+
+  // PERSONEL
+  {
+    id: 'employer', cat: 'personel', icon: '👥', name: 'İşveren',
+    desc: 'Toplam çalışan sayısı',
+    tiers: [
+      { name: 'Bronz', target: 3,  xp: 50 },
+      { name: 'Gümüş', target: 10, xp: 200 },
+      { name: 'Altın', target: 25, xp: 700 }
+    ],
+    check: () => (state.drivers?.length || 0) + (state.salesReps?.length || 0) + (state.fieldSalesReps?.length || 0) + (state.purchasers?.length || 0) + (state.dispatchers?.length || 0) + (state.accountants?.length || 0)
+  },
+
+  // FİLO
+  {
+    id: 'fleetOwner', cat: 'filo', icon: '🚛', name: 'Filo Sahibi',
+    desc: 'Araç sayısı',
+    tiers: [
+      { name: 'Bronz', target: 1,  xp: 30 },
+      { name: 'Gümüş', target: 5,  xp: 150 },
+      { name: 'Altın', target: 15, xp: 500 }
+    ],
+    check: () => (state.vehicles || []).length
+  },
+  {
+    id: 'truckMaster', cat: 'filo', icon: '🚚', name: 'Yol Kralı',
+    desc: 'Toplam filo kilometresi',
+    tiers: [
+      { name: 'Bronz', target: 10000,   xp: 80 },
+      { name: 'Gümüş', target: 100000,  xp: 300 },
+      { name: 'Altın', target: 1000000, xp: 1500 }
+    ],
+    check: () => (state.vehicles || []).reduce((s, v) => s + (v.km || 0), 0)
+  },
+
+  // KENTSEL DÖNÜŞÜM
+  {
+    id: 'urbanRenewal', cat: 'kentsel', icon: '🏚', name: 'Kentsel Dönüşüm Müteahhidi',
+    desc: 'Tamamlanan kentsel dönüşüm projesi',
+    tiers: [
+      { name: 'Bronz', target: 1,  xp: 200 },
+      { name: 'Gümüş', target: 5,  xp: 800 },
+      { name: 'Altın', target: 20, xp: 3000 }
+    ],
+    check: () => (state.urbanProjects || []).filter(p => p.deliveredToCustomer).length
+  },
+
+  // BAYİLİK
+  {
+    id: 'dealershipNetwork', cat: 'bayilik', icon: '🏭', name: 'Bayilik Ağı',
+    desc: 'Aktif bayilik sayısı',
+    tiers: [
+      { name: 'Bronz', target: 1,  xp: 100 },
+      { name: 'Gümüş', target: 5,  xp: 500 },
+      { name: 'Altın', target: 15, xp: 2000 }
+    ],
+    check: () => (state.dealerships || []).length
+  },
+  {
+    id: 'premiumDealer', cat: 'bayilik', icon: '💎', name: 'Premium Bayi',
+    desc: 'Premium tier bayilik',
+    tiers: [
+      { name: 'Bronz', target: 1,  xp: 250 },
+      { name: 'Gümüş', target: 3,  xp: 800 },
+      { name: 'Altın', target: 10, xp: 3000 }
+    ],
+    check: () => (state.dealerships || []).filter(d => BRANDS[d.brandId]?.tier === 'premium').length
+  },
+
+  // YATIRIM
+  {
+    id: 'investor', cat: 'yatirim', icon: '📈', name: 'Yatırımcı',
+    desc: 'Yatırım portföyü çeşitliliği (farklı varlık)',
+    tiers: [
+      { name: 'Bronz', target: 1, xp: 50 },
+      { name: 'Gümüş', target: 5, xp: 200 },
+      { name: 'Altın', target: 10, xp: 600 }
+    ],
+    check: () => Object.keys(state.portfolio || {}).filter(k => (state.portfolio[k] || 0) > 0).length
+  },
+  {
+    id: 'cryptoWhale', cat: 'yatirim', icon: '₿', name: 'Kripto Balina',
+    desc: 'Toplam kripto portföy değeri (TL)',
+    tiers: [
+      { name: 'Bronz', target: 1000000,  xp: 150 },
+      { name: 'Gümüş', target: 10000000, xp: 600 },
+      { name: 'Altın', target: 50000000, xp: 2000 }
+    ],
+    check: () => {
+      const port = state.portfolio || {};
+      return Object.keys(port).reduce((s, id) => {
+        if (BRANDS[id]) return s; // skip
+        const a = INVESTMENT_ASSETS[id];
+        if (a && a.category === 'kripto') return s + (port[id] * getAssetSellPrice(id));
+        return s;
+      }, 0);
+    }
+  },
+  {
+    id: 'depositHolder', cat: 'yatirim', icon: '🏦', name: 'Vadeli Hesap Sahibi',
+    desc: 'Vadeli hesaptaki toplam tutar',
+    tiers: [
+      { name: 'Bronz', target: 1000000,   xp: 80 },
+      { name: 'Gümüş', target: 10000000,  xp: 400 },
+      { name: 'Altın', target: 100000000, xp: 1500 }
+    ],
+    check: () => (state.deposits || []).reduce((s, d) => s + d.amount + (d.accruedInterest || 0), 0)
+  },
+
+  // ÖZEL
+  {
+    id: 'longRunner', cat: 'ozel', icon: '📅', name: 'Köklü Şirket',
+    desc: 'Şirket yaşı (gün)',
+    tiers: [
+      { name: 'Bronz', target: 100,  xp: 50 },
+      { name: 'Gümüş', target: 365,  xp: 200 },
+      { name: 'Altın', target: 1095, xp: 800 },
+      { name: 'Elmas', target: 1825, xp: 2500 }
+    ],
+    check: () => state.day || 0
+  },
+  {
+    id: 'levelUp', cat: 'ozel', icon: '🎖', name: 'Seviye Atla',
+    desc: 'Oyuncu seviyesi',
+    tiers: [
+      { name: 'Bronz', target: 5,  xp: 100 },
+      { name: 'Gümüş', target: 15, xp: 400 },
+      { name: 'Altın', target: 30, xp: 1200 },
+      { name: 'Elmas', target: 50, xp: 3000 }
+    ],
+    check: () => state.level || 1
+  }
+];
+
+// Toplam servet hesabı (cash + portfolio + deposits + gayrimenkul tahminleri)
+function calculateTotalWealth() {
+  let w = state.cash || 0;
+  // Vadeli
+  (state.deposits || []).forEach(d => w += d.amount + (d.accruedInterest || 0));
+  // Portfolio
+  Object.keys(state.portfolio || {}).forEach(id => {
+    if (INVESTMENT_ASSETS[id]) w += state.portfolio[id] * getAssetSellPrice(id);
+  });
+  // Arsa + bina tahmini
+  (state.lands || []).forEach(l => {
+    if (!l.isUrbanRenewal) w += l.purchasePrice || 0;
+    if (l.building?.apartments) {
+      l.building.apartments.forEach(a => {
+        if (a.status === 'unsold') w += a.salePrice || 0;
+      });
+    }
+  });
+  return Math.round(w);
+}
+
+// Bir başarımın mevcut tier'ini ve ilerlemesini hesapla
+function achievementProgress(ach) {
+  const current = ach.check();
+  let tierIdx = -1;
+  let totalXP = 0;
+  for (let i = 0; i < ach.tiers.length; i++) {
+    if (current >= ach.tiers[i].target) {
+      tierIdx = i;
+      totalXP += ach.tiers[i].xp;
+    } else break;
+  }
+  const nextTier = ach.tiers[tierIdx + 1];
+  const nextTarget = nextTier ? nextTier.target : null;
+  const prevTarget = tierIdx >= 0 ? ach.tiers[tierIdx].target : 0;
+  const pct = nextTier
+    ? Math.min(100, ((current - prevTarget) / (nextTier.target - prevTarget)) * 100)
+    : 100;
+  return {
+    current,
+    tierIdx,
+    tierName: tierIdx >= 0 ? ach.tiers[tierIdx].name : null,
+    nextTier,
+    nextTarget,
+    pct,
+    completed: tierIdx === ach.tiers.length - 1,
+    totalXP
+  };
+}
+
+// Başarım durumunu kontrol et — yeni kazanılanlar varsa XP ver ve bildirim göster
+function checkAchievements() {
+  if (!state.achievements) state.achievements = {};  // {achId: tierIdx (kazanılan en yüksek)}
+
+  ACHIEVEMENTS.forEach(ach => {
+    const progress = achievementProgress(ach);
+    const lastEarnedTier = state.achievements[ach.id] !== undefined ? state.achievements[ach.id] : -1;
+    if (progress.tierIdx > lastEarnedTier) {
+      // Yeni tier(ler) kazanıldı
+      for (let i = lastEarnedTier + 1; i <= progress.tierIdx; i++) {
+        const tier = ach.tiers[i];
+        addXP(tier.xp, `başarım: ${ach.name} ${tier.name}`);
+        state.agenda.push(`🏆 BAŞARIM: ${ach.icon} ${ach.name} (${tier.name}) +${tier.xp} XP`);
+        toast(`🏆 BAŞARIM: ${ach.icon} ${ach.name} (${tier.name}) +${tier.xp} XP`, 'success');
+      }
+      state.achievements[ach.id] = progress.tierIdx;
+    }
+  });
+}
 
 // Yeni kredi kartı başvurusu
 function applyCreditCard(tier) {
@@ -5593,6 +6318,13 @@ const state = {
   // { id, tier: 'klasik'|'gold'|'platinum', limit, balance, lastStatementDay, dueDay, lastInterestDay, totalSpent }
   creditCards: [],
 
+  // BAYİLİKLER — marka bazlı fabrika alım hakkı
+  // { id, brandId, productId, teminat, monthlyFee, discount, openedDay, nextFeeDay, missedPayments, totalPurchased, totalSavings }
+  dealerships: [],
+
+  // BAŞARIMLAR — { achId: tierIdx (kazanılan en yüksek tier) }
+  achievements: {},
+
   // YATIRIM SİSTEMİ — Vadeli hesap, döviz, kıymetli maden, kripto
   // Vadeli hesaplar
   deposits: [],       // { id, type: 'daily'|'monthly', amount, openedDay, dueDay (sadece monthly), annualRate, accruedInterest }
@@ -6622,6 +7354,7 @@ function render() {
   else if (state.view === 'lands') renderLands();
   else if (state.view === 'accounting') renderAccounting();
   else if (state.view === 'investment') renderInvestment();
+  else if (state.view === 'dealerships') renderDealerships();
   else if (state.view === 'archive') renderArchive();
   else if (state.view === 'profile') renderProfile();
   else if (state.view === 'leaderboard') renderLeaderboard();
@@ -11046,6 +11779,158 @@ function confirmSellAsset(assetId) {
 }
 
 // ============================================================
+// BAYİLİK SAYFASI
+// ============================================================
+
+let _dealershipCategoryFilter = 'all';
+let _dealershipSearch = '';
+
+function renderDealerships() {
+  const c = $('center');
+  const dealerships = state.dealerships || [];
+
+  // Sahip olduklarım: total stat
+  const totalSavings = dealerships.reduce((s, d) => s + (d.totalSavings || 0), 0);
+  const totalPurchased = dealerships.reduce((s, d) => s + (d.totalPurchased || 0), 0);
+  const totalTeminat = dealerships.reduce((s, d) => s + d.teminat, 0);
+
+  // Tüm ürünleri ve kategorileri çıkar (marka olan ürünler için)
+  const productsWithBrands = new Set();
+  Object.values(BRANDS).forEach(b => productsWithBrands.add(b.productId));
+  const categories = new Set();
+  productsWithBrands.forEach(pid => categories.add(PRODUCTS[pid].cat));
+
+  // Aktif filtre
+  const filterCategory = _dealershipCategoryFilter;
+  const searchTerm = (_dealershipSearch || '').toLowerCase().trim();
+
+  // Markaları filtrele
+  const allBrands = Object.entries(BRANDS).map(([id, b]) => ({ id, ...b }));
+  let filteredBrands = allBrands;
+  if (filterCategory !== 'all') {
+    filteredBrands = filteredBrands.filter(b => PRODUCTS[b.productId].cat === filterCategory);
+  }
+  if (searchTerm) {
+    filteredBrands = filteredBrands.filter(b =>
+      b.name.toLowerCase().includes(searchTerm) ||
+      PRODUCTS[b.productId].name.toLowerCase().includes(searchTerm)
+    );
+  }
+
+  // Marka kartlarını ürüne göre grupla
+  const groupedByProduct = {};
+  filteredBrands.forEach(b => {
+    if (!groupedByProduct[b.productId]) groupedByProduct[b.productId] = [];
+    groupedByProduct[b.productId].push(b);
+  });
+
+  const tierColors = { premium: '#a855f7', standart: '#3b82f6', ekonomik: '#10b981' };
+  const tierLabels = { premium: '💎 Premium', standart: '🔷 Standart', ekonomik: '💰 Ekonomik' };
+
+  c.innerHTML = `<h2>🏭 BAYİLİK SİSTEMİ</h2>
+    <div class="subtitle">Marka bayiliği al · Fabrika fiyatından alış · Direkt fabrika sevkiyatı</div>
+
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile"><div class="stat-label">Aktif Bayilik</div><div class="stat-val" style="color: #a855f7;">${dealerships.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Yatırılan Teminat</div><div class="stat-val" style="color: var(--blue); font-size: 14px;">${fmt(totalTeminat)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Alım</div><div class="stat-val" style="font-size: 14px;">${fmt(totalPurchased)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Tasarruf</div><div class="stat-val" style="color: var(--green); font-size: 14px;">${fmt(Math.round(totalSavings))}</div></div>
+    </div>
+
+    ${dealerships.length > 0 ? `
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📜 AKTİF BAYİLİKLERİM (${dealerships.length})</h3>
+      <div class="grid-2" style="margin-bottom: 20px;">
+        ${dealerships.map(d => {
+          const b = BRANDS[d.brandId];
+          if (!b) return '';
+          const p = PRODUCTS[b.productId];
+          const cheapest = cheapestSupplier(b.productId);
+          const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[b.productId] || 0);
+          const factoryPrice = brandFactoryPrice(d.brandId);
+          return `<div class="card" style="border-left: 3px solid ${tierColors[b.tier]};">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div>
+                <h3 style="margin: 0; color: ${tierColors[b.tier]};">🏭 ${b.name}</h3>
+                <div style="font-size: 10px; color: var(--ink-dim);">${p.name} · ${tierLabels[b.tier]}</div>
+              </div>
+              <div style="text-align: right; font-size: 10px; color: var(--ink-dim);">
+                <div>Teminat: ${fmt(d.teminat)}</div>
+                <div>Aktif</div>
+              </div>
+            </div>
+            <div style="margin-top: 8px; padding: 8px 10px; background: var(--panel-2); font-size: 11px; line-height: 1.6;">
+              <div>Fabrika: <strong style="color: var(--green);">${fmt(factoryPrice)}</strong> / ${p.unit}</div>
+              <div style="font-size: 10px; color: var(--ink-dim);">Piyasa: ${fmt(marketPrice)} (Tasarruf: ${fmt(marketPrice - factoryPrice)})</div>
+              <div style="margin-top: 4px;">Toplam alım: <strong>${d.totalPurchased} ${p.unit}</strong> · Tasarruf: <strong style="color: var(--green);">${fmt(Math.round(d.totalSavings))}</strong></div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 10px;">
+              <button class="btn small primary" style="flex: 1; background: ${tierColors[b.tier]}; border-color: ${tierColors[b.tier]}; color: #fff;" onclick="openFactoryBuyModal('${d.brandId}')">🛒 FABRİKADAN AL</button>
+              <button class="btn small danger" onclick="cancelDealership('${d.id}')" title="Teminat iade edilmez">İPTAL</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    ` : ''}
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">🛒 MEVCUT MARKALAR</h3>
+
+    <div class="search-row" style="margin-bottom: 12px;">
+      <input type="text" class="text-input" placeholder="Marka veya ürün ara..." value="${searchTerm}" oninput="_dealershipSearch=this.value; renderDealerships()">
+    </div>
+
+    <div class="filter-chips" style="margin-bottom: 16px;">
+      <div class="filter-chip ${filterCategory === 'all' ? 'active' : ''}" onclick="_dealershipCategoryFilter='all'; renderDealerships()">Tümü (${allBrands.length})</div>
+      ${[...categories].sort().map(cat => {
+        const count = allBrands.filter(b => PRODUCTS[b.productId].cat === cat).length;
+        const catLabels = { temel: 'Temel', demir: 'Demir', kaplama: 'Kaplama', boya: 'Boya', yalitim: 'Yalıtım', sıva: 'Sıva', tesisat: 'Tesisat', elektrik: 'Elektrik' };
+        return `<div class="filter-chip ${filterCategory === cat ? 'active' : ''}" onclick="_dealershipCategoryFilter='${cat}'; renderDealerships()">${catLabels[cat] || cat} (${count})</div>`;
+      }).join('')}
+    </div>
+
+    ${Object.keys(groupedByProduct).length === 0 ? '<div class="empty">Filtreye uygun marka yok.</div>' : Object.entries(groupedByProduct).map(([pid, brands]) => {
+      const p = PRODUCTS[pid];
+      return `<div style="margin-bottom: 18px;">
+        <h4 style="font-family: 'Bebas Neue'; letter-spacing: 1.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border);">${p.name.toUpperCase()} <span style="font-size: 11px; color: var(--ink-dim); font-weight: 400;">(${brands.length} marka)</span></h4>
+        <div class="grid-3">
+          ${brands.sort((a, b) => {
+            const order = { premium: 0, standart: 1, ekonomik: 2 };
+            return order[a.tier] - order[b.tier];
+          }).map(b => {
+            const hasIt = dealerships.some(d => d.brandId === b.id);
+            const cheapest = cheapestSupplier(b.productId);
+            const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[b.productId] || 0);
+            const factoryPrice = brandFactoryPrice(b.id);
+            const canRep = state.reputation >= b.repGate;
+            const canCash = state.cash >= b.teminat;
+
+            return `<div class="card" style="border-left: 3px solid ${tierColors[b.tier]}; ${hasIt ? 'background: linear-gradient(135deg, var(--panel) 0%, rgba(168, 85, 247, 0.05) 100%);' : ''}">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; margin-bottom: 6px;">
+                <div>
+                  <h3 style="margin: 0; color: ${tierColors[b.tier]}; font-size: 16px;">${b.name}</h3>
+                  <div style="font-size: 10px; color: var(--ink-dim);">${tierLabels[b.tier]}</div>
+                </div>
+                ${hasIt ? '<span style="font-size: 10px; padding: 2px 6px; background: var(--green); color: #fff; border-radius: 2px;">✓ BAYİLİĞİN</span>' : ''}
+              </div>
+              <div style="font-size: 11px; line-height: 1.6;">
+                <div>Fabrika: <strong style="color: var(--green);">${fmt(factoryPrice)}</strong> (${(b.discount * 100).toFixed(0)}% indirim)</div>
+                <div style="font-size: 10px; color: var(--ink-dim);">Piyasa: ${fmt(marketPrice)}</div>
+                <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--border);">
+                  <div>İtibar: <strong style="color: ${canRep ? 'var(--green)' : 'var(--red)'};">%${b.repGate}+</strong></div>
+                  <div>Teminat: <strong style="color: ${canCash ? 'var(--ink)' : 'var(--red)'};">${fmt(b.teminat)}</strong></div>
+                  <div style="font-size: 10px; color: var(--ink-dim);">Aylık aidat yok · Süresiz</div>
+                </div>
+              </div>
+              <button class="btn small primary" style="margin-top: 8px; width: 100%; background: ${tierColors[b.tier]}; border-color: ${tierColors[b.tier]}; color: #fff;" onclick="openDealershipModal('${b.id}')" ${hasIt ? 'disabled' : ''}>
+                ${hasIt ? '✓ BAYİSİN' : 'DETAY & BAŞVUR'}
+              </button>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+// ============================================================
 // MUHASEBE SAYFASI
 // ============================================================
 
@@ -11134,6 +12019,9 @@ function renderAccounting() {
     'kart-aidat': '💳 Kredi kartı aidatı',
     'kart-nakit': '💳 Kredi kartı nakit avans',
     'kart-odeme': '💳 Kredi kartı borç ödeme',
+    'bayilik-teminat': '🏭 Bayilik teminatı',
+    'bayilik-aidat': '🏭 Bayilik aylık aidat',
+    'fabrika-alim': '🏭 Fabrika alımı',
     'vadeli-acilis': '🏦 Vadeli hesap açılış',
     'vadeli-kapanis': '🏦 Vadeli hesap kapanış',
     'vadeli-faiz': '💰 Vadeli faiz geliri',
@@ -11444,7 +12332,106 @@ function renderProfile() {
           return `<div class="${cls}" onclick="selectAvatar('${opt.id}')" title="${opt.label}">${content}</div>`;
         }).join('')}
       </div>
-    </div>`;
+    </div>
+
+    ${renderAchievementsBlock()}
+    `;
+}
+
+// Başarımlar bölümü
+function renderAchievementsBlock() {
+  if (!state.achievements) state.achievements = {};
+
+  // Tüm başarımları progress'le sırala
+  const allAch = ACHIEVEMENTS.map(ach => ({ ach, progress: achievementProgress(ach) }));
+  const totalEarnedTiers = allAch.reduce((s, a) => s + (a.progress.tierIdx + 1), 0);
+  const totalTiers = allAch.reduce((s, a) => s + a.ach.tiers.length, 0);
+  const totalXPFromAch = allAch.reduce((s, a) => s + a.progress.totalXP, 0);
+  const completedAchs = allAch.filter(a => a.progress.completed).length;
+
+  // Kategori bazında grupla
+  const grouped = {};
+  allAch.forEach(item => {
+    if (!grouped[item.ach.cat]) grouped[item.ach.cat] = [];
+    grouped[item.ach.cat].push(item);
+  });
+
+  const catLabels = {
+    'insaat':      { name: '🏗 İnşaat',        color: '#3b82f6' },
+    'ticaret':     { name: '💼 Ticaret',       color: '#10b981' },
+    'gayrimenkul': { name: '🏞 Gayrimenkul',   color: '#a855f7' },
+    'finans':      { name: '💰 Finans',        color: '#f59e0b' },
+    'personel':    { name: '👥 Personel',      color: '#ef4444' },
+    'filo':        { name: '🚛 Filo',          color: '#06b6d4' },
+    'kentsel':     { name: '🏚 Kentsel Dönüşüm', color: '#ec4899' },
+    'bayilik':     { name: '🏭 Bayilik',       color: '#8b5cf6' },
+    'yatirim':     { name: '💎 Yatırım',       color: '#14b8a6' },
+    'ozel':        { name: '🎯 Özel',          color: '#f97316' }
+  };
+
+  // Tier renkleri
+  const tierColors = ['#cd7f32', '#c0c0c0', '#ffd700', '#b9f2ff'];
+
+  return `<div class="profile-card" style="margin-top: 20px;">
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px;">🏆 BAŞARIMLAR</h3>
+
+    <div class="stat-grid" style="margin-bottom: 14px;">
+      <div class="stat-tile"><div class="stat-label">Tamamlanan</div><div class="stat-val" style="color: var(--green);">${completedAchs}/${ACHIEVEMENTS.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Kazanılan Kademe</div><div class="stat-val" style="color: var(--accent);">${totalEarnedTiers}/${totalTiers}</div></div>
+      <div class="stat-tile"><div class="stat-label">Başarım XP</div><div class="stat-val" style="font-size: 15px;">+${totalXPFromAch}</div></div>
+    </div>
+
+    ${Object.entries(grouped).map(([cat, items]) => {
+      const catInfo = catLabels[cat] || { name: cat, color: '#999' };
+      const earned = items.filter(i => i.progress.tierIdx >= 0).length;
+      return `<div style="margin-bottom: 18px;">
+        <h4 style="font-family: 'Bebas Neue'; letter-spacing: 1.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); color: ${catInfo.color};">
+          ${catInfo.name} <span style="font-size: 11px; color: var(--ink-dim); font-weight: 400;">(${earned}/${items.length})</span>
+        </h4>
+        <div class="grid-2">
+          ${items.map(({ ach, progress }) => {
+            const tierIdx = progress.tierIdx;
+            const earnedTier = tierIdx >= 0;
+            const completedAll = progress.completed;
+            const tierColor = earnedTier ? tierColors[tierIdx] : '#555';
+            const progressText = progress.nextTier
+              ? `${formatAchValue(progress.current, ach.id)} / ${formatAchValue(progress.nextTarget, ach.id)}`
+              : `${formatAchValue(progress.current, ach.id)} (TAMAMLANDI)`;
+
+            return `<div class="card" style="border-left: 3px solid ${tierColor}; opacity: ${earnedTier ? 1 : 0.7};">
+              <div style="display: flex; gap: 10px; align-items: flex-start;">
+                <div style="font-size: 26px; line-height: 1; filter: ${earnedTier ? 'none' : 'grayscale(60%)'};">${ach.icon}</div>
+                <div style="flex: 1;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+                    <strong style="font-size: 13px;">${ach.name}</strong>
+                    ${earnedTier ? `<span style="font-size: 9px; padding: 2px 6px; background: ${tierColor}; color: #000; border-radius: 2px; font-weight: 700;">${progress.tierName}</span>` : ''}
+                  </div>
+                  <div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">${ach.desc}</div>
+                  <div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">${progressText}</div>
+                  ${!completedAll ? `<div class="progress-bar" style="height: 4px; margin-top: 5px;"><div class="progress-fill" style="width: ${progress.pct}%; background: ${tierColor};"></div></div>` : ''}
+                  <div style="display: flex; gap: 4px; margin-top: 6px;">
+                    ${ach.tiers.map((t, i) => `<div title="${t.name}: ${formatAchValue(t.target, ach.id)} (+${t.xp} XP)" style="flex: 1; height: 6px; background: ${i <= tierIdx ? tierColors[i] : 'var(--panel-2)'}; border-radius: 1px; border: 1px solid ${i <= tierIdx ? tierColors[i] : 'var(--border)'};"></div>`).join('')}
+                  </div>
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// Başarım değerini formatla (büyük tutarlar → kısa)
+function formatAchValue(val, achId) {
+  if (achId === 'truckMaster') return val.toLocaleString('tr-TR') + ' km';
+  if (achId === 'reputation' || achId === 'levelUp') return val + (achId === 'reputation' ? '%' : '');
+  if (achId === 'longRunner') return val + ' gün';
+  if (val >= 1e9) return '₺' + (val / 1e9).toFixed(1) + 'B';
+  if (val >= 1e6) return '₺' + (val / 1e6).toFixed(1) + 'M';
+  if (val >= 1e3 && (achId.includes('profit') || achId.includes('cash') || achId.includes('wealth') || achId.includes('crypto') || achId.includes('deposit'))) return '₺' + (val / 1e3).toFixed(0) + 'k';
+  // küçük tutarlar (sayı)
+  return val.toLocaleString('tr-TR');
 }
 
 async function selectAvatar(avatarId) {
@@ -12599,6 +13586,9 @@ function nextDay() {
     });
   }
 
+  // 7e2) Bayilik kontrolü — aylık aidat sistemi kaldırıldı (v1.41)
+  // Bayilik alındıktan sonra teminat ile süresiz aktiftir
+
   // 7e) Muhasebeciler otomatik tahsilat yapar — teslim edilmiş ama ödenmemiş tüm sözleşmeleri toplar
   const accountants = state.accountants || [];
   if (accountants.length > 0) {
@@ -12677,6 +13667,9 @@ function nextDay() {
       toast(`📊 Muhasebe: ${collected} sözleşme tahsil edildi (${fmt(totalAmount)})`, 'success');
     }
   }
+
+  // 7z) Başarım kontrolü — günlük olarak yeni kazanılan başarımları tara
+  checkAchievements();
 
   // 8) Aylık rapor — her 30 günde bir
   const monthNumber = Math.floor(state.day / 30);
@@ -13363,10 +14356,54 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.39';
+const CURRENT_VERSION = 'v1.42';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.42',
+    date: '17 Mayıs 2026',
+    title: 'BAŞARIM SİSTEMİ',
+    items: [
+      { cat: 'major', text: '🏆 <strong>Başarım sistemi eklendi</strong> — Profil sayfasında görüntülenir' },
+      { cat: 'major', text: '22 başarım, 10 kategoride: İnşaat, Ticaret, Gayrimenkul, Finans, Personel, Filo, Kentsel Dönüşüm, Bayilik, Yatırım, Özel' },
+      { cat: 'feature', text: 'Her başarımın 3-4 kademesi: 🥉 Bronz · 🥈 Gümüş · 🥇 Altın · 💎 Elmas' },
+      { cat: 'feature', text: 'Kademe atladıkça otomatik XP ödülü (30-5000 XP arası)' },
+      { cat: 'feature', text: 'İlerleme bar\'ları ve tier göstergeleri' },
+      { cat: 'feature', text: 'Her başarım kazanımında toast bildirimi + agenda kaydı' },
+      { cat: 'feature', text: 'Toplam servet hesabı (kasa + portföy + vadeli + gayrimenkul)' }
+    ]
+  },
+  {
+    version: 'v1.41',
+    date: '16 Mayıs 2026',
+    title: 'BAYİLİK: AİDAT KALDIRILDI, TEMİNAT YÜKSELDİ',
+    items: [
+      { cat: 'major', text: '🏭 <strong>Aylık aidat sistemi kaldırıldı</strong> — Bayilik tek seferlik teminatla süresiz aktif' },
+      { cat: 'major', text: 'Teminatlar yaklaşık <strong>2-2.5 kat artırıldı</strong> — bayilik artık ciddi tek seferlik yatırım' },
+      { cat: 'feature', text: 'Premium markalar: İçdaş ₺5.5M · Akçansa ₺3.5M · Erdemir ₺3M · Prysmian ₺1.8M' },
+      { cat: 'feature', text: 'Standart markalar: ₺550k - ₺1.8M arası teminat' },
+      { cat: 'feature', text: 'Ekonomik: Türk Tuğla ₺500k (en düşük seçenek)' },
+      { cat: 'feature', text: 'Bayilik iptali: teminat iade edilmez (kararı dikkatli al)' },
+      { cat: 'feature', text: 'Bayilik sayfasında istatistikler güncellendi: "Aylık Aidat" → "Yatırılan Teminat"' }
+    ]
+  },
+  {
+    version: 'v1.40',
+    date: '16 Mayıs 2026',
+    title: 'BAYİLİK SİSTEMİ',
+    items: [
+      { cat: 'major', text: '🏭 <strong>Bayilik sistemi eklendi</strong> — 60+ gerçek Türkiye markası' },
+      { cat: 'major', text: 'Sol menüde yeni <strong>🏭 Bayilik</strong> sayfası — kategoriye göre filtre + arama' },
+      { cat: 'major', text: '3 segment: 💎 <strong>Premium</strong> (Akçansa, İçdaş, Wienerberger, Schneider...) · 🔷 <strong>Standart</strong> · 💰 <strong>Ekonomik</strong>' },
+      { cat: 'feature', text: 'Fabrika fiyatı: piyasanın %14-22 altında (markaya göre)' },
+      { cat: 'feature', text: 'Bayilik şartları: minimum itibar (%15-55) + teminat (₺25k-350k) + aylık aidat (₺1.5k-12k)' },
+      { cat: 'major', text: '🚚 <strong>Direkt fabrika sevkiyatı</strong>: bayilik aldığın ürünü stoğa uğramadan müşteriye gönder' },
+      { cat: 'feature', text: 'Sınırsız stok: her aldığında fabrika anında temin eder' },
+      { cat: 'feature', text: 'Aidat 2 ay üst üste ödenmezse bayilik iptal olur (teminat iade edilmez)' },
+      { cat: 'feature', text: 'Markalar 24 ürün kategorisinde: çimento, demir, tuğla, seramik, parke, boya, yalıtım, kablo, pano, cam...' }
+    ]
+  },
   {
     version: 'v1.39',
     date: '16 Mayıs 2026',

@@ -3750,10 +3750,99 @@ function cancelConstruction(landId) {
     toast('Tamamlanmış inşaat iptal edilemez', 'error');
     return;
   }
-  if (!confirm(`${ILCELER[land.ilce].name} inşaatı iptal edilecek\n\nBugüne kadar harcanan: ${fmt(land.building.totalCost)}\nGeri ödeme: YOK\n\nDevam edelim mi?`)) return;
 
-  land.building = null;
-  toast(`İnşaat iptal edildi.`, 'info');
+  const b = land.building;
+  const t = BUILDING_TYPES[b.type];
+  const isUrban = !!land.isUrbanRenewal;
+  const cust = isUrban && land.urbanProjectId
+    ? state.urbanProjects.find(p => p.id === land.urbanProjectId)
+    : null;
+
+  // Geçici sakla (modal onaylanınca kullanılır)
+  state._pendingCancelLand = landId;
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 540px;">
+      <h2 style="color: var(--red);">${isUrban ? '🏚 KENTSEL DÖNÜŞÜM İPTALİ' : '🏗 İNŞAAT İPTALİ'}</h2>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin: 14px 0; font-size: 12px; line-height: 1.7;">
+        <strong>${ILCELER[land.ilce].name}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
+        İlerleme: <strong>${Math.max(0, b.daysPassed)}/${b.totalDays} gün</strong><br>
+        Bugüne kadar harcanan: <strong style="color: var(--red);">${fmt(b.totalCost)}</strong> (geri ödeme YOK)
+      </div>
+
+      ${isUrban ? `
+        <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 14px; font-size: 12px; line-height: 1.7;">
+          <strong style="color: var(--purple);">⚠️ KENTSEL DÖNÜŞÜM PROJESİ</strong><br>
+          Arsa <strong>müşteriye</strong> aitti — bizde değildi. İptal sonrası:
+          <ul style="margin: 8px 0 0 18px; padding: 0;">
+            <li>Proje <strong style="color: var(--red);">tamamen silinir</strong></li>
+            <li>Arsa müşteriye iade olur (kasamızdan çıkar)</li>
+            <li>${cust ? `<strong>${cust.customerName}</strong> ile ilişki ciddi zedelenir (güven -10)` : 'Müşteri güveni düşer'}</li>
+            <li>İtibar -3</li>
+          </ul>
+        </div>
+      ` : `
+        <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 12px; line-height: 1.7;">
+          <strong>NORMAL İNŞAAT:</strong> Arsa sende kalır, üzerine yeni inşaat başlatabilir veya satabilirsin. Sadece inşaat siliniyor.
+        </div>
+      `}
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn danger" style="flex: 1; padding: 12px;" onclick="confirmCancelConstruction()">
+          ${isUrban ? '✕ PROJEYİ SİL' : '✕ İNŞAATI İPTAL ET'}
+        </button>
+        <button class="btn" style="padding: 12px;" onclick="state._pendingCancelLand=null; closeModal();">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function confirmCancelConstruction() {
+  const landId = state._pendingCancelLand;
+  if (!landId) { closeModal(); return; }
+  state._pendingCancelLand = null;
+
+  const idx = state.lands.findIndex(l => l.id === landId);
+  if (idx < 0) { closeModal(); return; }
+  const land = state.lands[idx];
+  if (!land.building) { closeModal(); return; }
+
+  const isUrban = !!land.isUrbanRenewal;
+  const ilceName = ILCELER[land.ilce].name;
+
+  if (isUrban) {
+    // Kentsel dönüşüm: proje + arsa tamamen silinir
+    const project = land.urbanProjectId
+      ? state.urbanProjects.find(p => p.id === land.urbanProjectId)
+      : null;
+
+    if (project) {
+      // Müşteri güveni ciddi düşer
+      const cust = getCustomer(project.customerId);
+      if (cust) cust.trust = Math.max(0, cust.trust - 10);
+      // Projeyi state'ten sil
+      state.urbanProjects = state.urbanProjects.filter(p => p.id !== project.id);
+    }
+
+    // İtibar düşer
+    state.reputation = Math.max(0, state.reputation - 3);
+
+    // Arsayı da sil (müşterinindi, bizde değildi)
+    state.lands.splice(idx, 1);
+
+    closeModal();
+    toast(`✕ Kentsel dönüşüm projesi iptal edildi. ${ilceName} müşterisi ile ilişki zedelendi (güven -10, itibar -3).`, 'error');
+    addXP(-20, 'kentsel dönüşüm iptali');
+  } else {
+    // Normal inşaat: sadece bina silinir, arsa sahibimizde kalır
+    land.building = null;
+    closeModal();
+    toast(`✕ ${ilceName} inşaatı iptal edildi. Arsa sende kaldı.`, 'info');
+  }
+
   render();
 }
 
@@ -9267,7 +9356,7 @@ function renderMyLands() {
         const eligibleTypes = Object.keys(BUILDING_TYPES).filter(bt => canBuild(bt, l.m2));
         actions = `
           ${eligibleTypes.length > 0 ? `<button class="btn small primary" onclick="openBuildModal('${l.id}')">🏗 İNŞAAT BAŞLAT</button>` : `<button class="btn small" disabled title="Bu arsa boyutu uygun değil">🏗 İNŞAAT</button>`}
-          <button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>
+          ${!l.isUrbanRenewal ? `<button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>` : ''}
         `;
       } else if (b.status === 'completed') {
         // Tamamlanmış bina

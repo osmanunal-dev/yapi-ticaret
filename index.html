@@ -7189,7 +7189,14 @@ function renderContractsView() {
     <div class="subtitle">${state.contracts.length} aktif sözleşme</div>
     ${dispatcherInfo}
     <div class="email-list">
-      ${state.contracts.map(ct => {
+      ${state.contracts.slice().sort((a, b) => {
+        // 1) Ödenmiş olanlar en altta
+        if (a.paid !== b.paid) return a.paid ? 1 : -1;
+        // 2) Teslim edilmiş ama ödenmemiş olanlar (tahsilat bekleyenler) ortada
+        if (a.delivered !== b.delivered) return a.delivered ? 1 : -1;
+        // 3) Aktif olanlar termine göre (yakın → uzak, gecikmiş olanlar en üstte)
+        return (a.deadline - state.day) - (b.deadline - state.day);
+      }).map(ct => {
         const cust = getCustomer(ct.customerId);
         const daysLeft = ct.deadline - state.day;
         return `<div class="email" style="cursor: default; border-left-color: ${daysLeft <= 1 ? 'var(--red)' : ct.delivered ? 'var(--green)' : 'var(--blue)'}">
@@ -7217,11 +7224,12 @@ function renderContractsView() {
           </table>
           </div>
           ${ct.deliveries.length ? `<div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 8px;">
-            <strong style="color: var(--ink);">İrsaliyeler:</strong> ${ct.deliveries.map(d => `#${d.no} (Gün ${d.day})`).join(', ')}
+            <strong style="color: var(--ink);">İrsaliyeler:</strong> ${ct.deliveries.map(d => `#${d.no} (Gün ${d.day}${d.externalCarrier ? ' · 🚚' : ''})`).join(', ')}
           </div>` : ''}
           <div class="actions">
             ${!ct.delivered ? `<button class="btn primary" onclick="openDispatchModal('${ct.id}')">📦 SEVKİYAT PLANLA</button>` : ''}
             ${!ct.delivered && dispatcherCount > 0 ? `<button class="btn" style="background: var(--red); color: #fff; border-color: var(--red);" onclick="autoDispatchContract('${ct.id}')" title="Sevkiyat sorumlusu en uygun aracı seçer ve hemen başlatır">🚛 SEVKİYATÇIYLA GÖNDER</button>` : ''}
+            ${!ct.delivered ? `<button class="btn" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="openExternalCarrierModal('${ct.id}')" title="Dış nakliye firması — kendi aracın yoksa veya acil teslimat için (~2-2.5 kat pahalı)">🚚 DIŞ NAKLİYE</button>` : ''}
             ${!ct.delivered && dispatcherCount === 0 ? `<button class="btn" style="opacity: 0.55; background: var(--panel); color: var(--ink-dim);" onclick="setView('hr'); switchHRTab('dispatchers');" title="Sevkiyat sorumlusu işe almalısın">🚛 Sevkiyat Sorumlusu işe al →</button>` : ''}
             ${ct.delivered && !ct.paid ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
             ${ct.paid ? `<span style="color: var(--green); font-size: 12px;">✓ Ödeme alındı, sözleşme kapandı</span>` : ''}
@@ -7874,6 +7882,240 @@ function dispatchVehicleDirect(ctId, vehicleId, load, opts) {
 }
 
 // ============================================================
+// DIŞ NAKLİYE FİRMALARI
+// ============================================================
+const EXTERNAL_CARRIERS = [
+  { id: 'aras',     name: 'Aras Lojistik',         priceMult: 2.3, speedBonus: 1.0 },
+  { id: 'mng',      name: 'MNG Kargo İnşaat',      priceMult: 2.1, speedBonus: 1.1 }, // biraz hızlı
+  { id: 'horoz',    name: 'Horoz Lojistik',        priceMult: 2.5, speedBonus: 0.95 },
+  { id: 'netlog',   name: 'Netlog Nakliyat',       priceMult: 2.0, speedBonus: 1.0 }, // ucuz
+  { id: 'omsan',    name: 'Omsan İnşaat Taşıma',   priceMult: 2.4, speedBonus: 1.05 },
+  { id: 'borusan',  name: 'Borusan Lojistik',      priceMult: 2.6, speedBonus: 1.15 } // pahalı ama hızlı
+];
+
+// Bir yük + müşteri için en uygun dış nakliye fiyatı hesabı
+// Maliyet: (kendi araçla gidip gelmenin yakıt + araç yıpranma karşılığı) × priceMult
+// Mantık: en küçük yeterli araç tipini referans al
+function calculateExternalCarrierCost(load, customerIlce, carrier) {
+  const dist = ILCELER[customerIlce].km;
+  const totalWeight = load.reduce((s, l) => s + (PRODUCTS[l.productId].weight * l.qty / 1000), 0);
+
+  // En küçük yeterli araç tipini bul
+  let refType = 'kamyonet';
+  if (totalWeight > 2) refType = 'kucuk';
+  if (totalWeight > 5) refType = 'orta';
+  if (totalWeight > 10) refType = 'buyuk';
+
+  const t = VEHICLE_TYPES[refType];
+  const ownFuelCost = Math.round(t.fuelPerKm * dist * 2 * FUEL_PRICE);
+  const ownWearCost = Math.round(dist * 2 * 8); // km başına ~8₺ amortisman + bakım
+  const baseCost = ownFuelCost + ownWearCost;
+  const externalCost = Math.round(baseCost * carrier.priceMult);
+
+  // Süre: kendi aracın temposunun bonus'lu hâli
+  const tripDays = Math.max(1, Math.ceil((dist * 2) / (200 * t.speed * carrier.speedBonus)));
+
+  return {
+    refType,
+    refTypeName: t.name,
+    totalWeight,
+    distance: dist,
+    cost: externalCost,
+    tripDays,
+    baseCost
+  };
+}
+
+// Dış nakliye ile sevkiyat — kendi aracın gerekmiyor
+function dispatchExternalDirect(ctId, load, carrierId, opts) {
+  opts = opts || {};
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) return { success: false, error: 'Sözleşme bulunamadı' };
+  const cust = getCustomer(ct.customerId);
+  const carrier = EXTERNAL_CARRIERS.find(c => c.id === carrierId);
+  if (!carrier) return { success: false, error: 'Nakliye firması bulunamadı' };
+
+  if (!load || load.length === 0) return { success: false, error: 'Yük listesi boş' };
+
+  // Stok kontrol
+  for (const l of load) {
+    if ((state.inventory[l.productId] || 0) < l.qty) {
+      return { success: false, error: `Yetersiz stok: ${PRODUCTS[l.productId].name}` };
+    }
+  }
+
+  const calc = calculateExternalCarrierCost(load, cust.ilce, carrier);
+
+  // Bütçe kontrol
+  if (state.cash < calc.cost) {
+    return { success: false, error: `Yetersiz bakiye. ${fmt(calc.cost)} gerekli, ${fmt(state.cash)} var.` };
+  }
+
+  // Stoktan düş + nakliye ücretini öde
+  load.forEach(l => state.inventory[l.productId] -= l.qty);
+  spend(calc.cost, 'dis-nakliye');
+
+  // İrsaliye
+  const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase() + '-EXT';
+  ct.deliveries.push({
+    no: irNo,
+    day: state.day,
+    arrivalDay: state.day + calc.tripDays,
+    vehicleId: null,
+    driverId: null,
+    externalCarrier: carrier.name,
+    externalCarrierId: carrier.id,
+    items: load,
+    weight: calc.totalWeight,
+    fuelCost: 0,
+    externalCost: calc.cost
+  });
+
+  // Fully delivered?
+  const allDelivered = ct.items.every(it => {
+    const total = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return total >= it.qty;
+  });
+  if (allDelivered) {
+    ct.delivered = true;
+    cust.balance += ct.total;
+    toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Müşteriye cari açıldı: ${fmt(ct.total)}`, 'success');
+    addXP(15, 'tüm sevkiyatlar tamam');
+  }
+
+  toast(`🚚 ${carrier.name} ile sevkiyat (${irNo}). ${calc.tripDays} gün. Ücret: ${fmt(calc.cost)}`, 'info');
+  return { success: true, error: null, irNo, tripDays: calc.tripDays, cost: calc.cost };
+}
+
+// Sözleşme için dış nakliye seçim modalı
+function openExternalCarrierModal(ctId) {
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) return;
+  const cust = getCustomer(ct.customerId);
+
+  // Kalan yük
+  const remaining = ct.items.map(it => {
+    const delivered = (ct.deliveries || []).reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, qty: Math.max(0, it.qty - delivered) };
+  }).filter(r => r.qty > 0);
+
+  if (remaining.length === 0) {
+    toast('Bu sözleşmenin tüm kalemleri yola çıkmış', 'info');
+    return;
+  }
+
+  // Stokta neler var? Dış nakliye için stoktan ne kadar yüklenebileceğini hesapla
+  const loadable = remaining.map(r => {
+    const stockHave = state.inventory[r.productId] || 0;
+    return { productId: r.productId, qty: Math.min(r.qty, stockHave) };
+  }).filter(r => r.qty > 0);
+
+  if (loadable.length === 0) {
+    const missing = remaining.map(r => PRODUCTS[r.productId].name).slice(0, 3).join(', ');
+    toast(`Stokta yüklenecek malzeme yok. Eksik: ${missing}${remaining.length > 3 ? '...' : ''}`, 'error');
+    return;
+  }
+
+  // Kalem detay tablosu
+  const itemRows = loadable.map(l => {
+    const p = PRODUCTS[l.productId];
+    return `<tr>
+      <td>${p.name}</td>
+      <td class="num">${l.qty} ${p.unit}</td>
+      <td class="num">${(p.weight * l.qty / 1000).toFixed(2)} t</td>
+    </tr>`;
+  }).join('');
+
+  const totalWeight = loadable.reduce((s, l) => s + (PRODUCTS[l.productId].weight * l.qty / 1000), 0);
+
+  // Her nakliye firması için fiyat hesapla, kartlara dök
+  const carrierCards = EXTERNAL_CARRIERS.map(carrier => {
+    const calc = calculateExternalCarrierCost(loadable, cust.ilce, carrier);
+    const enough = state.cash >= calc.cost;
+    const speedLabel = carrier.speedBonus > 1.05 ? '⚡ Hızlı' : carrier.speedBonus < 0.98 ? '🐢 Yavaş' : 'Normal';
+    const priceLabel = carrier.priceMult <= 2.1 ? '💰 Ucuz' : carrier.priceMult >= 2.5 ? '💸 Pahalı' : 'Orta';
+
+    return `<div class="card" style="border-left: 3px solid ${enough ? 'var(--accent)' : 'var(--red)'}; opacity: ${enough ? 1 : 0.6};">
+      <h3>${carrier.name}</h3>
+      <div style="font-size: 11px; line-height: 1.7;">
+        <div>Hız: <strong>${speedLabel}</strong> · Fiyat: <strong>${priceLabel}</strong></div>
+        <div>Süre: <strong>${calc.tripDays} gün</strong></div>
+        <div style="margin-top: 6px; font-family: 'Bebas Neue'; font-size: 20px; color: ${enough ? 'var(--accent)' : 'var(--red)'};">${fmt(calc.cost)}</div>
+        <div style="font-size: 10px; color: var(--ink-dim);">(Kendi araçla ${fmt(calc.baseCost)} olurdu)</div>
+      </div>
+      <button class="btn primary" style="margin-top: 10px; width: 100%;" onclick="confirmExternalCarrier('${ctId}', '${carrier.id}')" ${enough ? '' : 'disabled'}>
+        ${enough ? 'SEÇ VE GÖNDER' : 'YETERSİZ BAKİYE'}
+      </button>
+    </div>`;
+  }).join('');
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="font-family: 'Bebas Neue'; font-size: 26px; letter-spacing: 2px; color: var(--accent);">🚚 DIŞ NAKLİYE FİRMASI SEÇ</div>
+      </div>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
+        <strong style="color: var(--accent);">${cust.name}</strong> · ${ILCELER[cust.ilce].name} (${ILCELER[cust.ilce].km} km)<br>
+        Kendi aracın yoksa veya acil teslimat için, dış nakliye firmaları yaklaşık <strong>2-2.5 kat pahalıdır</strong> ama anında çıkar. Şoför XP / araç KM kazanılmaz.
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">SEVK EDİLECEK YÜK</h3>
+      <div class="table-scroll">
+      <table class="data-table" style="margin-bottom: 16px;">
+        <thead><tr><th>Malzeme</th><th class="num">Miktar</th><th class="num">Ağırlık</th></tr></thead>
+        <tbody>${itemRows}</tbody>
+        <tfoot>
+          <tr style="background: var(--panel-2); border-top: 2px solid var(--border);">
+            <td><strong>TOPLAM</strong></td>
+            <td class="num"><strong>${loadable.length} kalem</strong></td>
+            <td class="num"><strong>${totalWeight.toFixed(2)} t</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">NAKLİYE FİRMALARI (${EXTERNAL_CARRIERS.length})</h3>
+      <div class="grid-3">${carrierCards}</div>
+
+      <div style="margin-top: 14px;">
+        <button class="btn" onclick="closeModal()">İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+// Modal'dan seçilen nakliye firmasını onayla ve sevkiyatı başlat
+function confirmExternalCarrier(ctId, carrierId) {
+  const ct = state.contracts.find(c => c.id === ctId);
+  if (!ct) { closeModal(); return; }
+
+  // Kalan yük (stoktan yüklenebilen)
+  const remaining = ct.items.map(it => {
+    const delivered = (ct.deliveries || []).reduce((s, d) =>
+      s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, qty: Math.max(0, it.qty - delivered) };
+  }).filter(r => r.qty > 0);
+
+  const loadable = remaining.map(r => {
+    const stockHave = state.inventory[r.productId] || 0;
+    return { productId: r.productId, qty: Math.min(r.qty, stockHave) };
+  }).filter(r => r.qty > 0);
+
+  const result = dispatchExternalDirect(ctId, loadable, carrierId, {});
+  if (result.success) {
+    closeModal();
+    render();
+  } else {
+    toast(result.error, 'error');
+  }
+}
+
+// ============================================================
 // SEVKİYAT SORUMLUSU — Tek tıkla sözleşme sevkiyatı
 // ============================================================
 // Bir sözleşme için sevkiyat sorumlusu en uygun aracı + maksimum yükü seçer ve hemen başlatır
@@ -7912,13 +8154,15 @@ function autoDispatchContract(ctId) {
   // Boş + şoförü atanmış araçlar
   const allVehicles = state.vehicles || [];
   if (allVehicles.length === 0) {
-    toast('Hiç aracın yok. Filo > Yeni araç al.', 'error');
+    toast('Hiç aracın yok. Dış nakliye penceresi açılıyor...', 'info');
+    setTimeout(() => openExternalCarrierModal(ctId), 300);
     return;
   }
 
   const idleVehicles = allVehicles.filter(v => v.busyUntil <= state.day);
   if (idleVehicles.length === 0) {
-    toast('Tüm araçlar görevde. Sevkiyatlar dönene kadar bekle.', 'error');
+    toast('Tüm araçlar görevde. Dış nakliye penceresi açılıyor...', 'info');
+    setTimeout(() => openExternalCarrierModal(ctId), 300);
     return;
   }
 
@@ -8036,8 +8280,11 @@ function showIrsaliye(ctId, delivery) {
         <div style="font-size: 11px; margin-bottom: 12px;">
           <div><strong>Alıcı:</strong> ${cust.name}</div>
           <div><strong>Adres:</strong> ${ILCELER[cust.ilce].name}, İstanbul</div>
-          <div><strong>Araç:</strong> ${v ? (v.name || VEHICLE_TYPES[v.type].name) : '—'}</div>
-          <div><strong>Şoför:</strong> ${driver ? driver.name : '—'}</div>
+          ${delivery.externalCarrier
+            ? `<div><strong>Nakliye:</strong> 🚚 ${delivery.externalCarrier} (dış nakliye)</div>
+               <div><strong>Nakliye Ücreti:</strong> ${fmt(delivery.externalCost)}</div>`
+            : `<div><strong>Araç:</strong> ${v ? (v.name || VEHICLE_TYPES[v.type].name) : '—'}</div>
+               <div><strong>Şoför:</strong> ${driver ? driver.name : '—'}</div>`}
           <div><strong>Sözleşme:</strong> #${ct.id.slice(-6).toUpperCase()}</div>
         </div>
         <table>
@@ -10853,15 +11100,19 @@ const CHANGELOG_DATA = [
     date: '15 Mayıs 2026',
     title: 'KENTSEL DÖNÜŞÜM + SEVKİYAT + SATIN ALMA: HEPSİ TEK TIK',
     items: [
-      { cat: 'major', text: '🛒 Satın Alma Sorumlusu <strong>artık mail atmıyor</strong> — Tedarikçiler sayfasında <strong>"TEK TIKLA TOPLU ALIM"</strong> butonu' },
-      { cat: 'major', text: 'Buton sözleşme ihtiyaçlarını tarar, en uygun tedarikçileri seçer, onay popup\'ı verir, tek tıkla hepsini alır' },
-      { cat: 'major', text: 'Yıkım maliyeti güncel İstanbul piyasasına çekildi: <strong>₺150/m² → ₺300/m²</strong>' },
-      { cat: 'major', text: 'Yıkım süresi kısaltıldı: <strong>20 gün → 10 gün</strong>' },
-      { cat: 'feature', text: 'İnşaat hızı %35-40 artırıldı (Villa, Apartman, Rezidans, Site)' },
-      { cat: 'feature', text: 'Daire satış fiyatları 2026 piyasasına: Villa ₺110k · Apartman ₺80k · Rezidans ₺135k · Site ₺90k/m²' },
-      { cat: 'feature', text: 'Kira fiyatları %30 arttı (Villa ₺320 · Apartman ₺240 · Rezidans ₺420 · Site ₺280/m²/ay)' },
-      { cat: 'fix', text: '🚛 Sözleşmeler sayfasının üstünde sevkiyatçı durumu net şekilde gösterilir' },
-      { cat: 'fix', text: 'Sevkiyat sorumlusu yoksa buton tıklandığında doğrudan personel ekranına gider' }
+      { cat: 'major', text: '🚚 <strong>Dış Nakliye Firmaları</strong> eklendi — kendi aracın yetmediğinde kullan' },
+      { cat: 'major', text: '6 nakliye firması: Aras, MNG, Horoz, Netlog, Omsan, Borusan' },
+      { cat: 'feature', text: 'Her firmanın farklı fiyat/hız profili (Netlog ucuz, Borusan pahalı ama hızlı)' },
+      { cat: 'feature', text: 'Sözleşmeler ekranında turuncu "🚚 DIŞ NAKLİYE" butonu' },
+      { cat: 'feature', text: 'Sevkiyatçı boş araç bulamayınca otomatik dış nakliye penceresi açar' },
+      { cat: 'feature', text: 'Ücret kendi araç maliyetinin 2-2.5 katı — acil teslimat için kurtarıcı' },
+      { cat: 'feature', text: 'İrsaliyede 🚚 işareti ile dış nakliye sevkiyatları belirgin' },
+      { cat: 'major', text: '🛒 Satın Alma Sorumlusu artık mail atmıyor — Tedarikçiler sayfasında <strong>"TEK TIKLA TOPLU ALIM"</strong>' },
+      { cat: 'major', text: '🏚 Kentsel dönüşüm onayı için <strong>detaylı modal</strong> (tablolar, kâr analizi)' },
+      { cat: 'fix', text: 'Sözleşmeler termin tarihine göre sıralanıyor (gecikmiş > yakın > uzak > teslim edilmiş > ödenmiş)' },
+      { cat: 'fix', text: 'Onay & Yıkıma Başla butonu artık güvenli (parametre inline gömüldü)' },
+      { cat: 'major', text: 'Yıkım maliyeti güncel İstanbul piyasasına: <strong>₺150 → ₺300/m²</strong>, süre 20 → <strong>10 gün</strong>' },
+      { cat: 'feature', text: 'İnşaat hızı %35-40 artırıldı, daire satış fiyatları 2026 piyasasına çekildi' }
     ]
   },
   {

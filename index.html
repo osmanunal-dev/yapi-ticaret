@@ -3698,12 +3698,27 @@ function handleBuildingCompleted(land) {
   state.agenda.push(`✅ ${ILCELER[land.ilce].name} ${t.name} inşaatı tamamlandı!`);
   addXP(200 + b.apartments.length * 5, 'inşaat tamamlama');
 
+  // Taşeron daire payı (daireyle ödeme yapılmışsa)
+  // Önce taşeron payı ayrılır — en küçük dairelerden
+  let availableApartments = b.apartments.slice();
+  if (b.isSubcontracted && b.subcontractPaymentType === 'apartments' && b.subcontractApartmentCount > 0) {
+    const sortedBySize = availableApartments.slice().sort((a, b) => a.m2 - b.m2);
+    const taseronApts = sortedBySize.slice(0, b.subcontractApartmentCount);
+    taseronApts.forEach(a => {
+      a.status = 'delivered-to-subcontractor';
+      a.deliveredToSubcontractorDay = state.day;
+    });
+    availableApartments = availableApartments.filter(a => !taseronApts.includes(a));
+    state.agenda.push(`🤝 Taşeron payı: ${taseronApts.length} daire (en küçükten)`);
+    toast(`🤝 ${b.subcontractApartmentCount} daire taşerona devredildi (daireyle ödeme)`, 'info');
+  }
+
   if (land.isUrbanRenewal && land.urbanProjectId) {
     // Kentsel dönüşüm: müşteriye payını ver
     const project = state.urbanProjects.find(p => p.id === land.urbanProjectId);
     if (project && !project.deliveredToCustomer) {
-      // İlk N daireyi müşteriye ver (en küçükler)
-      const sorted = b.apartments.slice().sort((a, b) => a.m2 - b.m2);
+      // Taşeron payı çıkarıldıktan sonra kalan dairelerden müşteriye en küçük N tanesi
+      const sorted = availableApartments.slice().sort((a, b) => a.m2 - b.m2);
       const theirApts = sorted.slice(0, project.theirShare);
       theirApts.forEach(a => {
         a.status = 'delivered-to-customer';
@@ -3719,10 +3734,11 @@ function handleBuildingCompleted(land) {
       }
       state.reputation = Math.min(100, state.reputation + 5);
 
-      toast(`🎉 ${project.customerName}: ${project.theirShare} daire teslim edildi. ${project.ourShare} daire bizde kaldı.`, 'success');
+      toast(`🎉 ${project.customerName}: ${project.theirShare} daire teslim edildi. ${availableApartments.length - theirApts.length} daire bizde kaldı.`, 'success');
     }
   } else {
-    toast(`🎉 ${t.name} inşaatı tamamlandı! ${b.apartments.length} daire teslime hazır.`, 'success');
+    const remaining = availableApartments.length;
+    toast(`🎉 ${t.name} inşaatı tamamlandı! ${remaining} daire teslime hazır.`, 'success');
   }
 }
 
@@ -3846,6 +3862,7 @@ function openApartmentsModal(landId) {
     const statusBadge = a.status === 'unsold' ? '<span style="color: var(--accent);">SATILIK</span>'
       : a.status === 'sold' ? '<span style="color: var(--green);">SATILDI</span>'
       : a.status === 'delivered-to-customer' ? '<span style="color: var(--purple);">MÜŞTERİDE</span>'
+      : a.status === 'delivered-to-subcontractor' ? '<span style="color: var(--red);">TAŞERONDA</span>'
       : `<span style="color: var(--blue);">KİRADA (${a.tenantName || '?'})</span>`;
 
     let action;
@@ -3876,6 +3893,8 @@ function openApartmentsModal(landId) {
   const unsold = b.apartments.filter(a => a.status === 'unsold').length;
   const sold = b.apartments.filter(a => a.status === 'sold').length;
   const rented = b.apartments.filter(a => a.status === 'rented').length;
+  const toSubcontractor = b.apartments.filter(a => a.status === 'delivered-to-subcontractor').length;
+  const toCustomer = b.apartments.filter(a => a.status === 'delivered-to-customer').length;
   const monthlyRentIncome = b.apartments.filter(a => a.status === 'rented').reduce((s, a) => s + a.rentMonthly, 0);
 
   const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
@@ -3886,10 +3905,12 @@ function openApartmentsModal(landId) {
       </p>
 
       <div class="stat-grid" style="margin-bottom: 12px;">
-        <div class="stat-tile"><div class="stat-label">Toplam Daire</div><div class="stat-val">${totalApts}</div></div>
+        <div class="stat-tile"><div class="stat-label">Toplam</div><div class="stat-val">${totalApts}</div></div>
         <div class="stat-tile"><div class="stat-label">Satılık</div><div class="stat-val" style="color: var(--accent);">${unsold}</div></div>
         <div class="stat-tile"><div class="stat-label">Satılan</div><div class="stat-val" style="color: var(--green);">${sold}</div></div>
         <div class="stat-tile"><div class="stat-label">Kirada</div><div class="stat-val" style="color: var(--blue);">${rented}</div></div>
+        ${toCustomer > 0 ? `<div class="stat-tile"><div class="stat-label">Müşteride</div><div class="stat-val" style="color: var(--purple);">${toCustomer}</div></div>` : ''}
+        ${toSubcontractor > 0 ? `<div class="stat-tile"><div class="stat-label">Taşeronda</div><div class="stat-val" style="color: var(--red);">${toSubcontractor}</div></div>` : ''}
       </div>
 
       ${monthlyRentIncome > 0 ? `<div style="padding: 10px; background: var(--panel-2); border-left: 3px solid var(--blue); margin-bottom: 12px;">
@@ -4360,38 +4381,160 @@ function subcontractBuilding(landId) {
   const remainingDays = b.totalDays - b.daysPassed;
   if (remainingDays <= 0) return;
 
-  // Taşeron ücreti: kalan günlerin maliyeti + %15 kar marjı (taşeron kazancı)
+  // Taşeron ücreti: kalan günlerin maliyeti + %18 kar marjı (taşeron kazancı)
   const totalArea = land.m2 * t.floorMultiplier;
   const labourRemaining = Math.round(totalArea * 80 * remainingDays);
-  // Kalan malzeme maliyetini de hesapla
   let remainingMaterialCost = 0;
   b.materialsNeeded.forEach(m => {
     const remaining = m.qty - m.consumed;
     const cheapest = cheapestSupplier(m.productId);
     if (cheapest && remaining > 0) remainingMaterialCost += cheapest.price * remaining;
   });
-  const subcontractFee = Math.round((labourRemaining + remainingMaterialCost) * 1.18); // %18 marj
-  const speedupFactor = 0.6; // taşeron %40 daha hızlı
+  const subcontractFee = Math.round((labourRemaining + remainingMaterialCost) * 1.18);
+  const speedupFactor = 0.6;
   const newRemainingDays = Math.ceil(remainingDays * speedupFactor);
 
+  // Daireyle ödeme hesabı
+  const estApartmentCount = t.apartmentsCalc(land.m2);
+  const avgAptSize = t.avgApartmentSize(land.m2, estApartmentCount);
+  const avgAptValue = avgAptSize * t.pricePerSqm;
+  // Taşeron daireyle ödemede %10 daha pahalı (daire alma riski)
+  const apartmentFeeMult = 1.10;
+  const apartmentEquivalentValue = Math.round(subcontractFee * apartmentFeeMult);
+  const apartmentsNeeded = Math.max(1, Math.ceil(apartmentEquivalentValue / avgAptValue));
+  // Eldeki daire sayısının %50'sini aşmasın (sıkıntı yaratmasın)
+  const maxApartmentsAllowed = Math.floor(estApartmentCount * 0.5);
+  const apartmentPaymentAllowed = apartmentsNeeded <= maxApartmentsAllowed && apartmentsNeeded < estApartmentCount;
+
+  const canCash = state.cash >= subcontractFee;
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 720px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="font-family: 'Bebas Neue'; font-size: 26px; letter-spacing: 2px; color: var(--purple);">🤝 TAŞERONA DEVRET</div>
+      </div>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
+        <strong>${ILCELER[land.ilce].name}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
+        Kalan süre: <strong>${remainingDays} gün</strong> → Taşeronda: <strong style="color: var(--green);">${newRemainingDays} gün</strong> (%${Math.round((1 - speedupFactor) * 100)} daha hızlı)<br>
+        Taşeron, malzeme + işçiliği üstlenir — bundan sonra hiçbir ek ödeme yapmazsın.
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">ÖDEME SEÇENEKLERİ</h3>
+
+      <div class="grid-2" style="margin-bottom: 16px;">
+
+        <!-- NAKİT ÖDEME KARTI -->
+        <div class="card" style="border-left: 3px solid ${canCash ? 'var(--green)' : 'var(--red)'}; opacity: ${canCash ? 1 : 0.6};">
+          <h3>💰 Nakit Öde</h3>
+          <div style="font-size: 12px; line-height: 1.8;">
+            <div>Tutar: <strong style="font-family: 'Bebas Neue'; font-size: 20px; color: ${canCash ? 'var(--red)' : 'var(--red)'};">${fmt(subcontractFee)}</strong></div>
+            <div style="font-size: 10px; color: var(--ink-dim);">Kalan malzeme + işçilik × %18 marj</div>
+            <div style="margin-top: 6px;">Kasandaki para: <strong style="color: ${canCash ? 'var(--green)' : 'var(--red)'};">${fmt(state.cash)}</strong></div>
+            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
+              <strong style="color: var(--green);">✓ Avantaj:</strong> Tüm daireler sende kalır
+            </div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px; width: 100%; background: var(--green); color: #fff; border-color: var(--green); font-weight: 700;" onclick="confirmSubcontractCash('${landId}')" ${canCash ? '' : 'disabled'}>
+            ${canCash ? 'NAKİT ÖDE & DEVRET' : 'YETERSİZ BAKİYE'}
+          </button>
+        </div>
+
+        <!-- DAİREYLE ÖDEME KARTI -->
+        <div class="card" style="border-left: 3px solid ${apartmentPaymentAllowed ? 'var(--blue)' : 'var(--ink-dim)'}; opacity: ${apartmentPaymentAllowed ? 1 : 0.6};">
+          <h3>🏠 Daireyle Öde</h3>
+          <div style="font-size: 12px; line-height: 1.8;">
+            <div>Daire sayısı: <strong style="font-family: 'Bebas Neue'; font-size: 22px; color: var(--blue);">${apartmentsNeeded}</strong> / ${estApartmentCount}</div>
+            <div style="font-size: 10px; color: var(--ink-dim);">Ortalama ${avgAptSize} m² × ${fmt(t.pricePerSqm)}/m²</div>
+            <div style="margin-top: 6px;">Eşdeğer tutar: <strong>${fmt(apartmentEquivalentValue)}</strong> <span style="font-size: 10px; color: var(--ink-dim);">(+%10 risk primi)</span></div>
+            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
+              <strong style="color: var(--green);">✓ Avantaj:</strong> Kasandan para çıkmaz<br>
+              <strong style="color: var(--red);">✗ Dezavantaj:</strong> ${apartmentsNeeded} daire satılamaz/kiralanamaz
+            </div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px; width: 100%; background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 700;" onclick="confirmSubcontractApartments('${landId}', ${apartmentsNeeded})" ${apartmentPaymentAllowed ? '' : 'disabled'}>
+            ${apartmentPaymentAllowed ? `${apartmentsNeeded} DAİRE VE DEVRET` : (apartmentsNeeded >= estApartmentCount ? 'BİNADA YETERLİ DAİRE YOK' : 'TUTAR ÇOK YÜKSEK')}
+          </button>
+        </div>
+
+      </div>
+
+      ${!apartmentPaymentAllowed && apartmentsNeeded >= estApartmentCount ? `<div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 14px; font-size: 11px;">
+        ⚠️ Taşeron için <strong>${apartmentsNeeded} daire</strong> gerekecek ama binada toplam <strong>${estApartmentCount} daire</strong> var. Daireyle ödeme uygun değil — nakit ödemen lazım.
+      </div>` : ''}
+      ${!apartmentPaymentAllowed && apartmentsNeeded < estApartmentCount && apartmentsNeeded > maxApartmentsAllowed ? `<div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 11px;">
+        ⚠️ Daireyle ödeme bina daire sayısının yarısından fazlasını gerektiriyor (${apartmentsNeeded}/${estApartmentCount}). Bu seçenek kapalı.
+      </div>` : ''}
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn" style="flex: 1; padding: 12px;" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+// Nakit ödemeyle taşeron devri
+function confirmSubcontractCash(landId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) { closeModal(); return; }
+  const b = land.building;
+  if (b.isSubcontracted) { toast('Zaten taşeronda', 'info'); closeModal(); return; }
+
+  const t = BUILDING_TYPES[b.type];
+  const remainingDays = b.totalDays - b.daysPassed;
+  const totalArea = land.m2 * t.floorMultiplier;
+  const labourRemaining = Math.round(totalArea * 80 * remainingDays);
+  let remainingMaterialCost = 0;
+  b.materialsNeeded.forEach(m => {
+    const remaining = m.qty - m.consumed;
+    const cheapest = cheapestSupplier(m.productId);
+    if (cheapest && remaining > 0) remainingMaterialCost += cheapest.price * remaining;
+  });
+  const subcontractFee = Math.round((labourRemaining + remainingMaterialCost) * 1.18);
+  const newRemainingDays = Math.ceil(remainingDays * 0.6);
+
   if (state.cash < subcontractFee) {
-    toast(`Taşerona vermek için kasada ${fmt(subcontractFee)} olması lazım`, 'error');
+    toast(`Yetersiz bakiye. ${fmt(subcontractFee)} gerekli.`, 'error');
     return;
   }
-
-  if (!confirm(`İnşaatı taşerona devret\n\n• Kalan süre: ${remainingDays} → ${newRemainingDays} gün (%${Math.round((1 - speedupFactor) * 100)} daha hızlı)\n• Sabit fiyat: ${fmt(subcontractFee)} (hemen ödenir)\n• Malzeme + işçilik dahil — sen artık ödeme yapmayacaksın\n\nDevam edelim mi?`)) return;
 
   spend(subcontractFee, 'taseron');
   b.isSubcontracted = true;
   b.subcontractFee = subcontractFee;
+  b.subcontractPaymentType = 'cash';
   b.subcontractedDay = state.day;
-  // Süreyi yeniden ayarla
   b.totalDays = b.daysPassed + newRemainingDays;
   b.totalCost += subcontractFee;
-  b.status = 'building'; // emin olalım
+  b.status = 'building';
 
-  toast(`✓ İnşaat taşerona devredildi. ${newRemainingDays} gün sonra teslim.`, 'success');
+  closeModal();
+  toast(`✓ İnşaat taşerona devredildi (nakit). ${newRemainingDays} gün sonra teslim.`, 'success');
   addXP(40, 'taşeron anlaşması');
+  render();
+}
+
+// Daireyle ödeme — taşeron bina tamamlanınca daire alacak
+function confirmSubcontractApartments(landId, apartmentCount) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) { closeModal(); return; }
+  const b = land.building;
+  if (b.isSubcontracted) { toast('Zaten taşeronda', 'info'); closeModal(); return; }
+
+  const remainingDays = b.totalDays - b.daysPassed;
+  const newRemainingDays = Math.ceil(remainingDays * 0.6);
+
+  b.isSubcontracted = true;
+  b.subcontractPaymentType = 'apartments';
+  b.subcontractApartmentCount = apartmentCount;
+  b.subcontractedDay = state.day;
+  b.totalDays = b.daysPassed + newRemainingDays;
+  b.status = 'building';
+
+  closeModal();
+  toast(`✓ İnşaat taşerona devredildi (${apartmentCount} daire karşılığı). ${newRemainingDays} gün sonra teslim, sonra ${apartmentCount} daire taşerona aktarılacak.`, 'success');
+  addXP(40, 'taşeron anlaşması (daireli)');
   render();
 }
 

@@ -2647,6 +2647,12 @@
       <div class="nav-item" data-view="bank" onclick="setView('bank')">
         <span>🏦 Banka</span><span class="badge warn" id="badge-bank" style="display:none">!</span>
       </div>
+      <div class="nav-item" data-view="investment" onclick="setView('investment')">
+        <span>💎 Yatırım</span>
+      </div>
+      <div class="nav-item" data-view="accounting" onclick="setView('accounting')">
+        <span>📊 Muhasebe</span>
+      </div>
       <div class="nav-item" data-view="lands" onclick="setView('lands')">
         <span>🏞 Arsa & Gayrimenkul</span>
       </div>
@@ -3181,6 +3187,386 @@ const VEHICLE_TYPES = {
 };
 const FUEL_PRICE = 52; // TL/litre (2026 Mayıs İstanbul motorin)
 
+// ============================================================
+// YATIRIM ENSTRÜMANLARI — 2026 Mayıs İstanbul piyasası
+// ============================================================
+// Tüm fiyatlar TL cinsinden başlangıç (initial)
+// volatility: günlük standart sapma yüzdesi (0.005 = %0.5, 0.05 = %5)
+// trend: günlük ortalama drift yüzdesi (0.0008 = günlük +%0.08, yıllık ~%34 değer artışı)
+const INVESTMENT_ASSETS = {
+  // DÖVİZ — yüksek likidite, düşük volatilite
+  USD:    { name: 'ABD Doları',  symbol: '🇺🇸', category: 'doviz',  initialPrice: 38.50,  volatility: 0.008, trend: 0.0009, decimals: 4 },
+  EUR:    { name: 'Euro',         symbol: '🇪🇺', category: 'doviz',  initialPrice: 42.20,  volatility: 0.009, trend: 0.0009, decimals: 4 },
+  GBP:    { name: 'İngiliz Sterlini', symbol: '🇬🇧', category: 'doviz', initialPrice: 49.30, volatility: 0.011, trend: 0.0008, decimals: 4 },
+
+  // KIYMETLİ MADEN — orta volatilite
+  GOLD:   { name: 'Altın (Gram)',  symbol: '🥇', category: 'maden',  initialPrice: 4180,   volatility: 0.013, trend: 0.0011, decimals: 2 },
+  SILVER: { name: 'Gümüş (Gram)',  symbol: '🥈', category: 'maden',  initialPrice: 52,     volatility: 0.018, trend: 0.0010, decimals: 4 },
+  PLATIN: { name: 'Platin (Gram)', symbol: '⚪', category: 'maden',  initialPrice: 1280,   volatility: 0.020, trend: 0.0009, decimals: 2 },
+
+  // KRİPTO — yüksek volatilite, %0.5 komisyon
+  BTC:    { name: 'Bitcoin',       symbol: '₿', category: 'kripto', initialPrice: 4280000, volatility: 0.055, trend: 0.0015, decimals: 8 },
+  ETH:    { name: 'Ethereum',      symbol: 'Ξ', category: 'kripto', initialPrice: 142000,  volatility: 0.070, trend: 0.0013, decimals: 6 },
+  BNB:    { name: 'Binance Coin',  symbol: '🟡', category: 'kripto', initialPrice: 28500,   volatility: 0.080, trend: 0.0010, decimals: 4 },
+  SOL:    { name: 'Solana',        symbol: '◎', category: 'kripto', initialPrice: 9800,    volatility: 0.090, trend: 0.0014, decimals: 4 },
+  XRP:    { name: 'Ripple',        symbol: '◉', category: 'kripto', initialPrice: 92,      volatility: 0.085, trend: 0.0009, decimals: 4 },
+  DOGE:   { name: 'Dogecoin',      symbol: '🐕', category: 'kripto', initialPrice: 12.50,   volatility: 0.110, trend: 0.0008, decimals: 4 }
+};
+
+// Alış/satış makası (komisyon)
+const SPREAD = {
+  doviz: 0.005,   // %0.5
+  maden: 0.010,   // %1
+  kripto: 0.005   // %0.5
+};
+
+// Vadeli hesap faiz oranları (2026 yıllık)
+const DEPOSIT_RATES = {
+  daily:   { annualRate: 0.42, minAmount: 50000,  label: 'Günlük Vadeli', desc: 'Her gün otomatik faiz, dilediğin an çek' },
+  monthly: { annualRate: 0.54, minAmount: 100000, label: 'Aylık Vadeli',  desc: '30 gün vade, vadesinden önce çekersen %20 ceza' }
+};
+
+// Bir varlığın güncel fiyatını al (history'den son fiyat ya da initial)
+function getCurrentAssetPrice(assetId) {
+  const hist = state.assetPriceHistory?.[assetId];
+  if (hist && hist.length > 0) return hist[hist.length - 1].price;
+  return INVESTMENT_ASSETS[assetId]?.initialPrice || 0;
+}
+
+// Alış fiyatı (spread eklenmiş)
+function getAssetBuyPrice(assetId) {
+  const a = INVESTMENT_ASSETS[assetId];
+  if (!a) return 0;
+  const base = getCurrentAssetPrice(assetId);
+  const spread = SPREAD[a.category] || 0.005;
+  return base * (1 + spread);
+}
+
+// Satış fiyatı (spread çıkarılmış)
+function getAssetSellPrice(assetId) {
+  const a = INVESTMENT_ASSETS[assetId];
+  if (!a) return 0;
+  const base = getCurrentAssetPrice(assetId);
+  const spread = SPREAD[a.category] || 0.005;
+  return base * (1 - spread);
+}
+
+// Günlük piyasa güncelleme — random walk modeli (her gün her varlık için)
+function updateMarketPrices() {
+  if (!state.assetPriceHistory) state.assetPriceHistory = {};
+  Object.keys(INVESTMENT_ASSETS).forEach(id => {
+    const a = INVESTMENT_ASSETS[id];
+    if (!state.assetPriceHistory[id]) state.assetPriceHistory[id] = [{ day: state.day - 1, price: a.initialPrice }];
+    const last = state.assetPriceHistory[id][state.assetPriceHistory[id].length - 1];
+    // Random walk: drift + Gaussian noise (approx via uniform pair)
+    const u1 = Math.random();
+    const u2 = Math.random();
+    const z = Math.sqrt(-2 * Math.log(u1 || 0.0001)) * Math.cos(2 * Math.PI * u2);  // ~N(0,1)
+    const dailyChange = a.trend + z * a.volatility;
+    let newPrice = last.price * (1 + dailyChange);
+    // Aşırı düşüşe karşı koruma — %85 alt, %200 üst sınır (yıllık)
+    newPrice = Math.max(a.initialPrice * 0.5, Math.min(newPrice, a.initialPrice * 25));
+    state.assetPriceHistory[id].push({ day: state.day, price: newPrice });
+    // Son 90 gün tut
+    if (state.assetPriceHistory[id].length > 90) state.assetPriceHistory[id] = state.assetPriceHistory[id].slice(-90);
+  });
+  state.lastMarketUpdate = state.day;
+}
+
+// ============================================================
+// KREDİ KARTLARI — 2026 Türkiye piyasası
+// ============================================================
+const CREDIT_CARD_TIERS = {
+  klasik: {
+    name: 'YapıBank Klasik',
+    limit: 50000,
+    monthlyRate: 0.045,    // %4.5/ay = ~%54 yıllık
+    annualFee: 500,
+    minRepGate: 10,
+    color: '#6b7280',
+    desc: 'Düşük limit, yüksek faiz · Başlangıç kartı'
+  },
+  gold: {
+    name: 'YapıBank Gold',
+    limit: 250000,
+    monthlyRate: 0.038,    // %3.8/ay = ~%46 yıllık
+    annualFee: 2500,
+    minRepGate: 30,
+    color: '#d4a017',
+    desc: 'Orta limit, makul faiz · İş için ideal'
+  },
+  platinum: {
+    name: 'YapıBank Platinum',
+    limit: 1000000,
+    monthlyRate: 0.032,    // %3.2/ay = ~%38 yıllık
+    annualFee: 8000,
+    minRepGate: 60,
+    color: '#4b5563',
+    desc: 'Yüksek limit, düşük faiz · Üst düzey'
+  }
+};
+
+// Yeni kredi kartı başvurusu
+function applyCreditCard(tier) {
+  const t = CREDIT_CARD_TIERS[tier];
+  if (!t) return;
+  if (state.reputation < t.minRepGate) {
+    toast(`Bu kart için minimum %${t.minRepGate} itibar gerekli (şu an: %${Math.round(state.reputation)})`, 'error');
+    return;
+  }
+  // Aynı tier'dan en fazla 1 kart
+  if ((state.creditCards || []).some(c => c.tier === tier)) {
+    toast(`Bu segmentten zaten bir kartın var`, 'error');
+    return;
+  }
+  if (state.cash < t.annualFee) {
+    toast(`Yıllık aidat için ${fmt(t.annualFee)} gerekli`, 'error');
+    return;
+  }
+  spend(t.annualFee, 'kart-aidat');
+
+  if (!state.creditCards) state.creditCards = [];
+  state.creditCards.push({
+    id: 'CC' + uid(),
+    tier,
+    limit: t.limit,
+    balance: 0,           // mevcut borç
+    monthlyRate: t.monthlyRate,
+    annualFee: t.annualFee,
+    issuedDay: state.day,
+    lastStatementDay: state.day,
+    dueDay: state.day + 30,
+    lastInterestDay: state.day,
+    totalSpent: 0,
+    aidat: t.annualFee
+  });
+  closeModal();
+  toast(`✓ ${t.name} kartın hazır! Limit: ${fmt(t.limit)}`, 'success');
+  addXP(20, 'kredi kartı başvurusu');
+  render();
+}
+
+// Kartın limit ve borç durumu kontrolü
+function creditCardAvailable(card) {
+  return Math.max(0, card.limit - card.balance);
+}
+
+// Kartla harcama (manuel — örn. acil nakit çekim için)
+function spendFromCreditCard(cardId, amount, description) {
+  const card = (state.creditCards || []).find(c => c.id === cardId);
+  if (!card) return false;
+  if (amount > creditCardAvailable(card)) {
+    toast('Kart limiti yetersiz', 'error');
+    return false;
+  }
+  card.balance += amount;
+  card.totalSpent += amount;
+  earn(amount, 'kart-nakit');  // kasaya geçer
+  return true;
+}
+
+// Karttan kasaya nakit çekme modalı
+function openCardCashAdvanceModal(cardId) {
+  const card = (state.creditCards || []).find(c => c.id === cardId);
+  if (!card) return;
+  const t = CREDIT_CARD_TIERS[card.tier];
+  const available = creditCardAvailable(card);
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2 style="color: ${t.color};">💳 ${t.name} — Nakit Avans</h2>
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid ${t.color}; margin: 12px 0; font-size: 12px; line-height: 1.7;">
+        Kullanılabilir limit: <strong>${fmt(available)}</strong><br>
+        Aylık faiz: <strong>%${(card.monthlyRate * 100).toFixed(2)}</strong><br>
+        Ekstre kesimi: <strong>Gün ${card.dueDay}</strong> (${Math.max(0, card.dueDay - state.day)} gün kaldı)<br>
+        <span style="color: var(--ink-dim); font-size: 10px;">Çekilen tutar kasaya ekleyecek, ekstre kesince ödeme istenecek.</span>
+      </div>
+      <label style="font-size: 11px; color: var(--ink-dim); display: block; margin-bottom: 4px;">Çekilecek Tutar (TL)</label>
+      <input type="number" id="ca-amount" class="text-input" style="width: 100%; margin-bottom: 14px;" value="${Math.min(50000, available)}" min="1000" max="${available}" step="1000">
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1;" onclick="confirmCashAdvance('${cardId}')">💰 ÇEK & KASAYA EKLE</button>
+        <button class="btn" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmCashAdvance(cardId) {
+  const amount = parseInt(document.getElementById('ca-amount').value);
+  if (isNaN(amount) || amount <= 0) { toast('Geçersiz tutar', 'error'); return; }
+  if (spendFromCreditCard(cardId, amount, 'nakit-avans')) {
+    closeModal();
+    toast(`✓ ${fmt(amount)} nakit avans alındı. Ekstre kesiminde geri ödenecek.`, 'success');
+    render();
+  }
+}
+
+// Kart borcunu öde
+function payCreditCard(cardId, amount) {
+  const card = (state.creditCards || []).find(c => c.id === cardId);
+  if (!card) return;
+  if (state.cash < amount) { toast('Kasada yetmez', 'error'); return; }
+  if (amount > card.balance) amount = card.balance;
+  spend(amount, 'kart-odeme');
+  card.balance -= amount;
+  closeModal();
+  if (card.balance <= 0) {
+    toast(`✓ Kart borcu tamamen kapatıldı: ${fmt(amount)}`, 'success');
+  } else {
+    toast(`✓ ${fmt(amount)} ödendi. Kalan borç: ${fmt(card.balance)}`, 'success');
+  }
+  render();
+}
+
+function openPayCreditCardModal(cardId) {
+  const card = (state.creditCards || []).find(c => c.id === cardId);
+  if (!card) return;
+  const t = CREDIT_CARD_TIERS[card.tier];
+  const minPayment = Math.max(1000, Math.round(card.balance * 0.20));
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2 style="color: ${t.color};">💳 ${t.name} — Borç Öde</h2>
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid ${t.color}; margin: 12px 0; font-size: 12px; line-height: 1.7;">
+        Mevcut borç: <strong style="color: var(--red);">${fmt(card.balance)}</strong><br>
+        Asgari ödeme (%20): <strong>${fmt(minPayment)}</strong><br>
+        Aylık faiz oranı: <strong>%${(card.monthlyRate * 100).toFixed(2)}</strong><br>
+        Kasanda: <strong>${fmt(state.cash)}</strong>
+      </div>
+      <label style="font-size: 11px; color: var(--ink-dim); display: block; margin-bottom: 4px;">Ödenecek Tutar (TL)</label>
+      <input type="number" id="pay-amount" class="text-input" style="width: 100%; margin-bottom: 8px;" value="${Math.min(card.balance, state.cash)}" min="100" max="${Math.min(card.balance, state.cash)}" step="1000">
+      <div style="display: flex; gap: 4px; margin-bottom: 14px;">
+        <button class="btn small" style="flex: 1;" onclick="document.getElementById('pay-amount').value=${minPayment}">ASGARİ</button>
+        <button class="btn small" style="flex: 1;" onclick="document.getElementById('pay-amount').value=${Math.round(card.balance * 0.50)}">YARISI</button>
+        <button class="btn small" style="flex: 1;" onclick="document.getElementById('pay-amount').value=${card.balance}">TAMAMI</button>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1;" onclick="confirmPayCreditCard('${cardId}')">💸 ÖDE</button>
+        <button class="btn" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmPayCreditCard(cardId) {
+  const amount = parseInt(document.getElementById('pay-amount').value);
+  if (isNaN(amount) || amount <= 0) { toast('Geçersiz tutar', 'error'); return; }
+  payCreditCard(cardId, amount);
+}
+
+// Kartı iptal et
+function cancelCreditCard(cardId) {
+  const card = (state.creditCards || []).find(c => c.id === cardId);
+  if (!card) return;
+  if (card.balance > 0) {
+    toast('Önce borcu öde, sonra iptal edebilirsin', 'error');
+    return;
+  }
+  const t = CREDIT_CARD_TIERS[card.tier];
+  state.creditCards = state.creditCards.filter(c => c.id !== cardId);
+  toast(`${t.name} iptal edildi`, 'info');
+  render();
+}
+
+// Vadeli hesap aç
+function openDeposit(type, amount) {
+  const rate = DEPOSIT_RATES[type];
+  if (!rate) { toast('Geçersiz vade tipi', 'error'); return; }
+  if (amount < rate.minAmount) { toast(`Minimum ${fmt(rate.minAmount)} gerekli`, 'error'); return; }
+  if (state.cash < amount) { toast('Yetersiz bakiye', 'error'); return; }
+
+  if (!state.deposits) state.deposits = [];
+  spend(amount, 'vadeli-acilis');
+  state.deposits.push({
+    id: 'D' + uid(),
+    type,
+    amount,
+    openedDay: state.day,
+    dueDay: type === 'monthly' ? state.day + 30 : null,
+    annualRate: rate.annualRate,
+    accruedInterest: 0
+  });
+  closeModal();
+  toast(`✓ ${rate.label} hesabı açıldı: ${fmt(amount)} (yıllık %${(rate.annualRate * 100).toFixed(0)})`, 'success');
+  render();
+}
+
+// Vadeli hesabı kapat (vade dolmadan kapatırsa ceza)
+function closeDeposit(depositId) {
+  const idx = state.deposits.findIndex(d => d.id === depositId);
+  if (idx < 0) return;
+  const d = state.deposits[idx];
+  let payout = d.amount + d.accruedInterest;
+  let penalty = 0;
+  if (d.type === 'monthly' && state.day < d.dueDay) {
+    penalty = Math.round(d.accruedInterest * 0.20); // %20 ceza
+    payout -= penalty;
+  }
+  earn(payout, 'vadeli-kapanis');
+  state.deposits.splice(idx, 1);
+  closeModal();
+  if (penalty > 0) {
+    toast(`✓ Vade dolmadan kapatıldı. ${fmt(payout)} alındı (${fmt(penalty)} ceza kesildi)`, 'info');
+  } else {
+    toast(`✓ Vadeli hesap kapatıldı: ${fmt(payout)} (${fmt(d.accruedInterest)} faiz)`, 'success');
+  }
+  render();
+}
+
+// Varlık satın al (cinsten miktar)
+function buyAsset(assetId, tlAmount) {
+  const a = INVESTMENT_ASSETS[assetId];
+  if (!a) return;
+  if (state.cash < tlAmount) { toast('Yetersiz bakiye', 'error'); return; }
+  const buyPrice = getAssetBuyPrice(assetId);
+  const quantity = tlAmount / buyPrice;
+
+  spend(tlAmount, `${a.category}-alim`);
+  if (!state.portfolio) state.portfolio = {};
+  state.portfolio[assetId] = (state.portfolio[assetId] || 0) + quantity;
+  if (!state.investmentHistory) state.investmentHistory = [];
+  state.investmentHistory.push({
+    day: state.day,
+    type: 'buy',
+    asset: assetId,
+    quantity,
+    price: buyPrice,
+    total: tlAmount
+  });
+  if (state.investmentHistory.length > 200) state.investmentHistory = state.investmentHistory.slice(-200);
+  closeModal();
+  toast(`✓ ${a.name} alındı: ${quantity.toFixed(a.decimals)} ${a.category === 'kripto' ? '' : 'birim'} (${fmt(tlAmount)})`, 'success');
+  render();
+}
+
+// Varlık sat (cinsten miktar)
+function sellAsset(assetId, quantity) {
+  const a = INVESTMENT_ASSETS[assetId];
+  if (!a) return;
+  const have = (state.portfolio || {})[assetId] || 0;
+  if (have < quantity) { toast('Yeterli miktar yok', 'error'); return; }
+  const sellPrice = getAssetSellPrice(assetId);
+  const tlAmount = quantity * sellPrice;
+
+  state.portfolio[assetId] -= quantity;
+  if (state.portfolio[assetId] < 0.00000001) delete state.portfolio[assetId];
+  earn(tlAmount, `${a.category}-satis`);
+  if (!state.investmentHistory) state.investmentHistory = [];
+  state.investmentHistory.push({
+    day: state.day,
+    type: 'sell',
+    asset: assetId,
+    quantity,
+    price: sellPrice,
+    total: tlAmount
+  });
+  if (state.investmentHistory.length > 200) state.investmentHistory = state.investmentHistory.slice(-200);
+  closeModal();
+  toast(`✓ ${a.name} satıldı: ${quantity.toFixed(a.decimals)} → ${fmt(tlAmount)}`, 'success');
+  render();
+}
+
 // Bir aracın güncel değerini hesapla — KM'ye göre yıpranma
 // 0 km → %95 (sıfır indirim, hemen %5 değer kaybı)
 // 600.000 km → %20 (taban değer)
@@ -3449,6 +3835,100 @@ function buyLand(listingId) {
   const l = state.landMarket[idx];
   if (state.cash < l.price) { toast('Kasada yetmez.', 'error'); return; }
 
+  // Sözleşme modal'ı göster
+  showLandPurchaseContract(listingId);
+}
+
+function showLandPurchaseContract(listingId) {
+  const idx = state.landMarket.findIndex(l => l.id === listingId);
+  if (idx < 0) { toast('İlan kaldırılmış', 'error'); return; }
+  const l = state.landMarket[idx];
+  const ilceData = ILCELER[l.ilce];
+  const cashAfter = state.cash - l.price;
+  const m2Price = Math.round(l.price / l.m2);
+  const companyName = state.company?.name || 'YAPI TİCARET';
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-header">
+        <div class="r-company">📜 ARSA ALIM SÖZLEŞMESİ</div>
+        <div class="r-tagline">Gayrimenkul Tapu Devri · İstanbul</div>
+      </div>
+
+      <div class="receipt-title-bar">
+        <div class="r-title">TAPU SENEDİ TASLAĞI</div>
+        <div class="r-number">
+          <div>Belge No: <strong>AL-${state.day}-${listingId.slice(-4).toUpperCase()}</strong></div>
+          <div>Gün: <strong>${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Alıcı (Bu Sözleşmenin Tarafı)</div>
+          <div class="ri-val">${companyName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">Müteahhitlik & İnşaat Ticareti</span>
+          </div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">Mülk Bilgisi</div>
+          <div class="ri-val">${ilceData.name}, İstanbul<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası · ${ilceData.km} km mesafe</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr><th>Açıklama</th><th class="num">Birim</th><th class="num">Tutar</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="r-product">${l.m2} m² Arsa</span><br><span style="font-size: 10px; color: #5a5048;">${ilceData.name} · Güncel piyasa: ${fmt(ilceData.m2Price)}/m²</span></td>
+              <td class="num">${fmt(m2Price)}/m²</td>
+              <td class="num">${fmt(l.price)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-totals">
+        <div class="rt-row grand">
+          <span>TOPLAM ÖDEME (Peşin)</span>
+          <span>${fmt(l.price)}</span>
+        </div>
+        <div class="rt-row subtotal">
+          <span>Kasa (Şu an)</span>
+          <span>${fmt(state.cash)}</span>
+        </div>
+        <div class="rt-row vat" style="color: ${cashAfter >= 0 ? '#3a3024' : '#b00020'};">
+          <span>Ödeme Sonrası Kalan</span>
+          <span>${fmt(cashAfter)}</span>
+        </div>
+      </div>
+
+      <div style="padding: 10px 14px; background: #fff7e6; border-left: 3px solid #b45309; margin-top: 12px; font-size: 11px; color: #5a3920; line-height: 1.6;">
+        💡 <strong>Önemli:</strong> Arsa alımı kesinleşince tapu hemen üzerinize geçer. Üzerine inşaat yapabilir, daire üretip satabilir veya kiralayabilirsiniz. Arsayı dilediğiniz an satabilirsiniz (%8 hızlı satış indirimiyle).
+      </div>
+
+      <div class="receipt-actions">
+        <button class="primary" onclick="confirmBuyLand('${listingId}')" ${state.cash >= l.price ? '' : 'disabled'}>
+          ${state.cash >= l.price ? `✓ TAPUYU AL (${fmt(l.price)})` : 'YETERSİZ BAKİYE'}
+        </button>
+        <button onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmBuyLand(listingId) {
+  const idx = state.landMarket.findIndex(l => l.id === listingId);
+  if (idx < 0) { toast('İlan artık mevcut değil.', 'error'); closeModal(); return; }
+  const l = state.landMarket[idx];
+  if (state.cash < l.price) { toast('Kasada yetmez.', 'error'); return; }
+
   spend(l.price, 'arsa');
   if (!state.lands) state.lands = [];
   state.lands.push({
@@ -3460,6 +3940,7 @@ function buyLand(listingId) {
     building: null
   });
   state.landMarket.splice(idx, 1);
+  closeModal();
   toast(`✓ ${ILCELER[l.ilce].name}'da ${l.m2} m² arsa alındı: ${fmt(l.price)}`, 'success');
   addXP(20, 'arsa alımı');
   render();
@@ -3482,20 +3963,112 @@ function sellLand(landId) {
     return;
   }
 
-  // Hızlı satış fiyatı (alıcı bulma kolaylığı için %5-10 indirim)
+  // Hızlı satış fiyatı (alıcı bulma kolaylığı için %8 indirim)
   const marketValue = landCurrentValue(land);
-  const sellPrice = Math.round(marketValue * 0.92); // %8 hızlı satış indirimi
+  const sellPrice = Math.round(marketValue * 0.92);
   const profit = sellPrice - land.purchasePrice;
-  const profitPct = ((profit / land.purchasePrice) * 100).toFixed(1);
+  const profitPct = land.purchasePrice > 0 ? ((profit / land.purchasePrice) * 100).toFixed(1) : '—';
+  const ilceData = ILCELER[land.ilce];
+  const m2SellPrice = Math.round(sellPrice / land.m2);
+  const heldDays = state.day - (land.purchaseDay || state.day);
+  const companyName = state.company?.name || 'YAPI TİCARET';
 
-  const profitInfo = profit >= 0
-    ? `\nKâr: +${fmt(profit)} (+%${profitPct})`
-    : `\nZarar: ${fmt(profit)} (%${profitPct})`;
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-header">
+        <div class="r-company">📜 ARSA SATIŞ SÖZLEŞMESİ</div>
+        <div class="r-tagline">Gayrimenkul Devir İşlemi · İstanbul</div>
+      </div>
 
-  if (!confirm(`${ILCELER[land.ilce].name}'da ${land.m2} m² arsa satılacak\nGüncel piyasa: ${fmt(marketValue)}\nHızlı satış fiyatı: ${fmt(sellPrice)} (-%8)${profitInfo}\n\nDevam edilsin mi?`)) return;
+      <div class="receipt-title-bar">
+        <div class="r-title">SATIŞ TAPU TASLAĞI</div>
+        <div class="r-number">
+          <div>Belge No: <strong>SAT-${state.day}-${landId.slice(-4).toUpperCase()}</strong></div>
+          <div>Gün: <strong>${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Satıcı</div>
+          <div class="ri-val">${companyName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${heldDays} gün boyunca elde tutuldu</span>
+          </div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">Satılan Mülk</div>
+          <div class="ri-val">${ilceData.name}, İstanbul<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${land.m2} m² · ${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr><th>Açıklama</th><th class="num">Birim</th><th class="num">Tutar</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="r-product">Alış Bedeli</span><br><span style="font-size: 10px; color: #5a5048;">G${land.purchaseDay} tarihinde alındı</span></td>
+              <td class="num">—</td>
+              <td class="num">${fmt(land.purchasePrice)}</td>
+            </tr>
+            <tr>
+              <td><span class="r-product">Güncel Piyasa</span><br><span style="font-size: 10px; color: #5a5048;">${fmt(ilceData.m2Price)}/m²</span></td>
+              <td class="num">—</td>
+              <td class="num">${fmt(marketValue)}</td>
+            </tr>
+            <tr class="r-shipping">
+              <td><em>🏷 Hızlı Satış İndirimi (-%8)</em></td>
+              <td class="num">—</td>
+              <td class="num">-${fmt(marketValue - sellPrice)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-totals">
+        <div class="rt-row grand">
+          <span>SATIŞ FİYATI</span>
+          <span>${fmt(sellPrice)}</span>
+        </div>
+        <div class="rt-row vat" style="color: ${profit >= 0 ? '#0d7c46' : '#b00020'};">
+          <span>${profit >= 0 ? 'NET KÂR' : 'NET ZARAR'} ${profitPct !== '—' ? `(%${profitPct})` : ''}</span>
+          <span>${profit >= 0 ? '+' : ''}${fmt(profit)}</span>
+        </div>
+        <div class="rt-row subtotal">
+          <span>Kasa Bakiyesi (Sonrası)</span>
+          <span>${fmt(state.cash + sellPrice)}</span>
+        </div>
+      </div>
+
+      <div class="receipt-actions">
+        <button class="primary" onclick="confirmSellLand('${landId}')">
+          ✓ ARSAYI SAT (+${fmt(sellPrice)})
+        </button>
+        <button onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmSellLand(landId) {
+  const idx = state.lands.findIndex(l => l.id === landId);
+  if (idx < 0) { closeModal(); return; }
+  const land = state.lands[idx];
+  if (land.building) {
+    toast('Üzerinde inşaat var, satılamaz', 'error');
+    return;
+  }
+  const marketValue = landCurrentValue(land);
+  const sellPrice = Math.round(marketValue * 0.92);
+  const profit = sellPrice - land.purchasePrice;
 
   earn(sellPrice, 'arsa-satis');
   state.lands.splice(idx, 1);
+  closeModal();
   toast(`✓ Arsa satıldı: +${fmt(sellPrice)} ${profit >= 0 ? '(kâr: ' + fmt(profit) + ')' : '(zarar: ' + fmt(profit) + ')'}`, profit >= 0 ? 'success' : 'info');
   addXP(10, 'arsa satışı');
   render();
@@ -3614,11 +4187,47 @@ function progressConstruction(land) {
     return;
   }
 
-  // Taşeronda mı? Eğer öyleyse sadece gün sayıyoruz, malzeme/işçilik düşmüyor
+  // Taşeronda mı? İşçilik taşeronda — ama malzemeyi biz tedarik ediyoruz (stoktan tüketilir)
   if (b.isSubcontracted) {
+    // Malzeme kontrolü — bizim tedarik etmemiz gerekiyor
+    let canProgressSub = true;
+    const totalDaysSub = b.totalDays;
+    const consumptionTodaySub = [];
+
+    for (const m of b.materialsNeeded) {
+      const remaining = m.qty - m.consumed;
+      if (remaining <= 0) continue;
+      const remainingDaysSub = Math.max(1, totalDaysSub - b.daysPassed);
+      const todayNeed = Math.ceil(remaining / remainingDaysSub);
+      const have = state.inventory[m.productId] || 0;
+
+      if (have < todayNeed) {
+        canProgressSub = false;
+        break;
+      }
+      consumptionTodaySub.push({ productId: m.productId, qty: todayNeed });
+    }
+
+    if (!canProgressSub) {
+      if (b.status !== 'paused-warned') {
+        b.status = 'paused-warned';
+        state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} (TAŞERON) inşaatı malzeme yetmediği için durdu — siz tedarik etmelisiniz`);
+        toast(`⚠️ Taşeron inşaatı malzeme bekliyor! Tedarikçilerden alın.`, 'error');
+      }
+      return;
+    }
+
+    if (b.status === 'paused-warned') b.status = 'building';
+
+    // Malzeme tüket (stoktan)
+    consumptionTodaySub.forEach(c => {
+      state.inventory[c.productId] -= c.qty;
+      const m = b.materialsNeeded.find(x => x.productId === c.productId);
+      if (m) m.consumed += c.qty;
+    });
+
     b.daysPassed++;
     if (b.daysPassed >= b.totalDays) {
-      // Bina hazır
       b.status = 'completed';
       b.apartments = generateApartmentsFor(b.type, land.m2);
       b.completedDay = state.day;
@@ -4038,15 +4647,96 @@ function sellApartment(landId, aptId) {
   const apt = land.building.apartments.find(a => a.id === aptId);
   if (!apt || apt.status !== 'unsold') return;
 
-  if (!confirm(`Daire #${apt.number} satılacak\n\n${apt.m2} m² · ${apt.floor}. kat\nSatış fiyatı: ${fmt(apt.salePrice)}\n\nDevam edelim mi?`)) return;
+  const t = BUILDING_TYPES[land.building.type];
+  const ilceData = ILCELER[land.ilce];
+  const m2Price = Math.round(apt.salePrice / apt.m2);
+  const buyerName = fullName();
+  const companyName = state.company?.name || 'YAPI TİCARET';
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-header">
+        <div class="r-company">📜 KONUT SATIŞ SÖZLEŞMESİ</div>
+        <div class="r-tagline">Daire Tapu Devri · ${ilceData.name}</div>
+      </div>
+
+      <div class="receipt-title-bar">
+        <div class="r-title">SATIŞ SENEDİ</div>
+        <div class="r-number">
+          <div>Belge No: <strong>DS-${state.day}-${aptId.slice(-4).toUpperCase()}</strong></div>
+          <div>Gün: <strong>${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Satıcı</div>
+          <div class="ri-val">${companyName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">Müteahhitlik</span>
+          </div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">Alıcı</div>
+          <div class="ri-val">${buyerName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">Bireysel müşteri · Banka havalesi</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr><th>Açıklama</th><th class="num">m²</th><th class="num">m² Fiyatı</th><th class="num">Tutar</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <span class="r-product">${t.icon} ${t.name} - Daire #${apt.number}</span><br>
+                <span style="font-size: 10px; color: #5a5048;">${apt.floor}. kat · ${apt.m2} m² · ${ilceData.name}</span>
+              </td>
+              <td class="num">${apt.m2}</td>
+              <td class="num">${fmt(m2Price)}</td>
+              <td class="num">${fmt(apt.salePrice)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-totals">
+        <div class="rt-row grand">
+          <span>SATIŞ FİYATI</span>
+          <span>${fmt(apt.salePrice)}</span>
+        </div>
+        <div class="rt-row subtotal">
+          <span>Kasa Bakiyesi (Sonrası)</span>
+          <span>${fmt(state.cash + apt.salePrice)}</span>
+        </div>
+      </div>
+
+      <div class="receipt-actions">
+        <button class="primary" onclick="confirmSellApartment('${landId}', '${aptId}')">
+          ✓ DAİREYİ SAT (+${fmt(apt.salePrice)})
+        </button>
+        <button onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmSellApartment(landId, aptId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) { closeModal(); return; }
+  const apt = land.building.apartments.find(a => a.id === aptId);
+  if (!apt || apt.status !== 'unsold') { closeModal(); return; }
 
   earn(apt.salePrice, 'daire-satis');
   apt.status = 'sold';
   apt.soldDay = state.day;
+  closeModal();
   toast(`✓ Daire #${apt.number} satıldı: +${fmt(apt.salePrice)}`, 'success');
   addXP(30 + Math.round(apt.salePrice / 100000), 'daire satışı');
-  closeModal();
-  openApartmentsModal(landId); // yenile
+  openApartmentsModal(landId);
 }
 
 // Daire kiraya ver
@@ -4057,16 +4747,119 @@ function rentApartment(landId, aptId) {
   if (!apt || apt.status !== 'unsold') return;
 
   const tenantName = fullName();
-  if (!confirm(`Daire #${apt.number} kiraya verilecek\n\nKiracı: ${tenantName}\nAylık kira: ${fmt(apt.rentMonthly)}\n\nKira her 30 günde bir otomatik kasaya girecek.\nDevam edelim mi?`)) return;
+  const t = BUILDING_TYPES[land.building.type];
+  const ilceData = ILCELER[land.ilce];
+  const annualRent = apt.rentMonthly * 12;
+  const m2Rent = Math.round(apt.rentMonthly / apt.m2);
+  const companyName = state.company?.name || 'YAPI TİCARET';
+
+  // Tenant adını state'e geçici sakla (rastgele tekrar üretmesin)
+  state._pendingRent = { landId, aptId, tenantName };
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-header">
+        <div class="r-company">📜 KİRA SÖZLEŞMESİ</div>
+        <div class="r-tagline">Konut Kiralama · ${ilceData.name}</div>
+      </div>
+
+      <div class="receipt-title-bar">
+        <div class="r-title">KİRA AKTİ</div>
+        <div class="r-number">
+          <div>Belge No: <strong>KR-${state.day}-${aptId.slice(-4).toUpperCase()}</strong></div>
+          <div>Başlangıç: <strong>Gün ${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Kiralayan (Mülk Sahibi)</div>
+          <div class="ri-val">${companyName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">Müteahhitlik</span>
+          </div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">Kiracı</div>
+          <div class="ri-val">${tenantName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">Kira ödemesi her ay 1'inde</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr><th>Madde</th><th class="num">Tutar</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <span class="r-product">${t.icon} Daire #${apt.number} (${apt.floor}. kat, ${apt.m2} m²)</span><br>
+                <span style="font-size: 10px; color: #5a5048;">${ilceData.name} · Aylık kira: ${fmt(m2Rent)}/m²</span>
+              </td>
+              <td class="num">—</td>
+            </tr>
+            <tr>
+              <td><em>Aylık Kira Bedeli</em></td>
+              <td class="num">${fmt(apt.rentMonthly)}/ay</td>
+            </tr>
+            <tr>
+              <td><em>Yıllık Toplam Gelir</em></td>
+              <td class="num">${fmt(annualRent)}/yıl</td>
+            </tr>
+            <tr class="r-shipping">
+              <td><em>🏠 Depozito (peşin alınacak)</em></td>
+              <td class="num">+${fmt(apt.rentMonthly)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-totals">
+        <div class="rt-row grand">
+          <span>İLK ÖDEME (DEPOZİTO)</span>
+          <span>+${fmt(apt.rentMonthly)}</span>
+        </div>
+        <div class="rt-row subtotal">
+          <span>30 günde bir otomatik tahsilat</span>
+          <span>${fmt(apt.rentMonthly)}</span>
+        </div>
+      </div>
+
+      <div style="padding: 10px 14px; background: #fff7e6; border-left: 3px solid #b45309; margin-top: 12px; font-size: 11px; color: #5a3920; line-height: 1.6;">
+        💡 <strong>Şartlar:</strong> Kira her 30 günde bir otomatik kasaya girer. Kiracıyı istediğin zaman çıkarabilirsin (fesh ederek), ya da satışa çıkarmak için önce feshetmen gerekir.
+      </div>
+
+      <div class="receipt-actions">
+        <button class="primary" onclick="confirmRentApartment()">
+          ✓ KİRAYI BAŞLAT (+${fmt(apt.rentMonthly)})
+        </button>
+        <button onclick="state._pendingRent=null; closeModal();">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmRentApartment() {
+  const pending = state._pendingRent;
+  if (!pending) { closeModal(); return; }
+  const { landId, aptId, tenantName } = pending;
+  state._pendingRent = null;
+
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) { closeModal(); return; }
+  const apt = land.building.apartments.find(a => a.id === aptId);
+  if (!apt || apt.status !== 'unsold') { closeModal(); return; }
 
   apt.status = 'rented';
   apt.tenantName = tenantName;
   apt.rentStartDay = state.day;
-  apt.lastRentDay = state.day; // ilk ay başlangıç ödemesi olarak kabul (depozito)
-  earn(apt.rentMonthly, 'kira-depozito'); // İlk ay (depozito) peşin
+  apt.lastRentDay = state.day;
+  earn(apt.rentMonthly, 'kira-depozito');
+  closeModal();
   toast(`✓ Daire #${apt.number} ${tenantName} adına kiralandı: ${fmt(apt.rentMonthly)}/ay`, 'success');
   addXP(15, 'kiralama');
-  closeModal();
   openApartmentsModal(landId);
 }
 
@@ -4077,14 +4870,92 @@ function terminateRent(landId, aptId) {
   const apt = land.building.apartments.find(a => a.id === aptId);
   if (!apt || apt.status !== 'rented') return;
 
-  if (!confirm(`Daire #${apt.number} kira sözleşmesi feshedilecek\n\nKiracı: ${apt.tenantName}\n\nDevam edelim mi?`)) return;
+  const t = BUILDING_TYPES[land.building.type];
+  const ilceData = ILCELER[land.ilce];
+  const rentDays = state.day - (apt.rentStartDay || state.day);
+  const totalRentEarned = Math.floor(rentDays / 30) * apt.rentMonthly + apt.rentMonthly; // depozito + aylık
+  const companyName = state.company?.name || 'YAPI TİCARET';
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-header">
+        <div class="r-company">📜 KİRA SÖZLEŞMESİ FESHİ</div>
+        <div class="r-tagline">Tahliye Tebligatı · ${ilceData.name}</div>
+      </div>
+
+      <div class="receipt-title-bar">
+        <div class="r-title">FESİH BELGESİ</div>
+        <div class="r-number">
+          <div>Belge No: <strong>FS-${state.day}-${aptId.slice(-4).toUpperCase()}</strong></div>
+          <div>Tarih: <strong>Gün ${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Kiralayan</div>
+          <div class="ri-val">${companyName}</div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">Kiracı (Çıkarılan)</div>
+          <div class="ri-val">${apt.tenantName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${rentDays} gün kiracı olarak kaldı</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr><th>Açıklama</th><th class="num">Tutar</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <span class="r-product">${t.icon} Daire #${apt.number}</span><br>
+                <span style="font-size: 10px; color: #5a5048;">${apt.m2} m² · ${apt.floor}. kat · ${ilceData.name}</span>
+              </td>
+              <td class="num">—</td>
+            </tr>
+            <tr>
+              <td><em>Bu kiracıdan alınan toplam kira</em></td>
+              <td class="num">${fmt(totalRentEarned)}</td>
+            </tr>
+            <tr>
+              <td><em>Aylık kira</em></td>
+              <td class="num">${fmt(apt.rentMonthly)}/ay</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="padding: 10px 14px; background: #fff5f5; border-left: 3px solid #b00020; margin-top: 12px; font-size: 11px; color: #5a2030; line-height: 1.6;">
+        ⚠️ <strong>Fesih Sonrası:</strong> Daire boşa düşer (durumu "Satılık" olur). Yeniden kiraya verebilir ya da satışa çıkarabilirsiniz. Bu kiracıyla daha fazla gelir alınmaz.
+      </div>
+
+      <div class="receipt-actions">
+        <button class="primary" style="background: #b00020;" onclick="confirmTerminateRent('${landId}', '${aptId}')">
+          ✕ KİRAYI FESHET
+        </button>
+        <button onclick="closeModal()">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmTerminateRent(landId, aptId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) { closeModal(); return; }
+  const apt = land.building.apartments.find(a => a.id === aptId);
+  if (!apt || apt.status !== 'rented') { closeModal(); return; }
 
   apt.status = 'unsold';
   apt.tenantName = null;
   apt.rentStartDay = null;
   apt.lastRentDay = 0;
-  toast(`Daire #${apt.number} kira sözleşmesi feshedildi`, 'info');
   closeModal();
+  toast(`Daire #${apt.number} kira sözleşmesi feshedildi`, 'info');
   openApartmentsModal(landId);
 }
 
@@ -4167,6 +5038,7 @@ function generateUrbanRenewalProposal() {
     estTotalCost: totalCost,
     estMaterialCost,
     estLabor: totalLabor,
+    materials,
     ourShareValue,
     estProfit,
     receivedDay: state.day,
@@ -4261,6 +5133,43 @@ function approveUrbanRenewal(emailId) {
         </tbody>
       </table>
 
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">🧱 KULLANILACAK MALZEMELER</h3>
+
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 12px; font-size: 11px; line-height: 1.6;">
+        💡 <strong>Önemli:</strong> Malzemeleri <strong>siz tedarik edersiniz</strong> (Tedarikçiler sayfasından alın). Taşerona devretseniz bile malzeme alımı sizde kalır.
+      </div>
+
+      <div class="table-scroll">
+      <table class="data-table" style="margin-bottom: 16px;">
+        <thead>
+          <tr>
+            <th>Malzeme</th>
+            <th class="num">Miktar</th>
+            <th class="num">Tahmini Birim</th>
+            <th class="num">Toplam</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(e.materials || []).map(m => {
+            const p = PRODUCTS[m.productId];
+            const cheapest = cheapestSupplier(m.productId);
+            const unitPrice = cheapest ? cheapest.price : 0;
+            const total = unitPrice * m.qty;
+            return `<tr>
+              <td>${p.name}</td>
+              <td class="num">${m.qty} ${p.unit}</td>
+              <td class="num">${fmt(unitPrice)}</td>
+              <td class="num">${fmt(total)}</td>
+            </tr>`;
+          }).join('')}
+          <tr style="background: var(--panel-2); border-top: 2px solid var(--border);">
+            <td colspan="3"><strong>TOPLAM MALZEME (tahmini)</strong></td>
+            <td class="num"><strong style="color: var(--red);">${fmt(e.estMaterialCost)}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+
       <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">SÜREÇ & MALİYET</h3>
 
       <table class="data-table" style="margin-bottom: 16px;">
@@ -4280,10 +5189,16 @@ function approveUrbanRenewal(emailId) {
             <td style="font-size: 11px;">Hemen ödenir (onay sonrası)</td>
           </tr>
           <tr>
-            <td><strong>🏗 İnşaat</strong></td>
+            <td><strong>🧱 Malzeme</strong></td>
+            <td class="num">—</td>
+            <td class="num" style="color: var(--red);">${fmt(e.estMaterialCost)}</td>
+            <td style="font-size: 11px;">Siz tedarik edeceksiniz</td>
+          </tr>
+          <tr>
+            <td><strong>👷 İşçilik</strong></td>
             <td class="num">${buildDays} gün</td>
-            <td class="num" style="color: var(--red);">${fmt(e.estMaterialCost + e.estLabor)}</td>
-            <td style="font-size: 11px;">Malzeme + işçilik (günlük)</td>
+            <td class="num" style="color: var(--red);">${fmt(e.estLabor)}</td>
+            <td style="font-size: 11px;">Günlük ödenir</td>
           </tr>
           <tr style="background: var(--panel-2); border-top: 2px solid var(--border);">
             <td><strong>TOPLAM</strong></td>
@@ -4473,16 +5388,11 @@ function subcontractBuilding(landId) {
   const remainingDays = b.totalDays - b.daysPassed;
   if (remainingDays <= 0) return;
 
-  // Taşeron ücreti: kalan günlerin maliyeti + %18 kar marjı (taşeron kazancı)
+  // Taşeron ücreti: SADECE İŞÇİLİK + %22 kar marjı (taşeron kazancı)
+  // Malzemeleri biz tedarik ederiz, taşeron yalnızca işçilik yapar
   const totalArea = land.m2 * t.floorMultiplier;
   const labourRemaining = Math.round(totalArea * 80 * remainingDays);
-  let remainingMaterialCost = 0;
-  b.materialsNeeded.forEach(m => {
-    const remaining = m.qty - m.consumed;
-    const cheapest = cheapestSupplier(m.productId);
-    if (cheapest && remaining > 0) remainingMaterialCost += cheapest.price * remaining;
-  });
-  const subcontractFee = Math.round((labourRemaining + remainingMaterialCost) * 1.18);
+  const subcontractFee = Math.round(labourRemaining * 1.22);
   const speedupFactor = 0.6;
   const newRemainingDays = Math.ceil(remainingDays * speedupFactor);
 
@@ -4509,7 +5419,7 @@ function subcontractBuilding(landId) {
       <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
         <strong>${ILCELER[land.ilce].name}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
         Kalan süre: <strong>${remainingDays} gün</strong> → Taşeronda: <strong style="color: var(--green);">${newRemainingDays} gün</strong> (%${Math.round((1 - speedupFactor) * 100)} daha hızlı)<br>
-        Taşeron, malzeme + işçiliği üstlenir — bundan sonra hiçbir ek ödeme yapmazsın.
+        <strong>Taşeron yalnızca işçilik yapar.</strong> Malzemeleri <strong style="color: var(--accent);">siz tedarik edersiniz</strong> (Tedarikçiler sayfasından alın, stoktan günlük tüketilir).
       </div>
 
       <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">ÖDEME SEÇENEKLERİ</h3>
@@ -4520,8 +5430,8 @@ function subcontractBuilding(landId) {
         <div class="card" style="border-left: 3px solid ${canCash ? 'var(--green)' : 'var(--red)'}; opacity: ${canCash ? 1 : 0.6};">
           <h3>💰 Nakit Öde</h3>
           <div style="font-size: 12px; line-height: 1.8;">
-            <div>Tutar: <strong style="font-family: 'Bebas Neue'; font-size: 20px; color: ${canCash ? 'var(--red)' : 'var(--red)'};">${fmt(subcontractFee)}</strong></div>
-            <div style="font-size: 10px; color: var(--ink-dim);">Kalan malzeme + işçilik × %18 marj</div>
+            <div>Tutar: <strong style="font-family: 'Bebas Neue'; font-size: 20px; color: var(--red);">${fmt(subcontractFee)}</strong></div>
+            <div style="font-size: 10px; color: var(--ink-dim);">Sadece işçilik × %22 taşeron marjı</div>
             <div style="margin-top: 6px;">Kasandaki para: <strong style="color: ${canCash ? 'var(--green)' : 'var(--red)'};">${fmt(state.cash)}</strong></div>
             <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
               <strong style="color: var(--green);">✓ Avantaj:</strong> Tüm daireler sende kalır
@@ -4578,13 +5488,7 @@ function confirmSubcontractCash(landId) {
   const remainingDays = b.totalDays - b.daysPassed;
   const totalArea = land.m2 * t.floorMultiplier;
   const labourRemaining = Math.round(totalArea * 80 * remainingDays);
-  let remainingMaterialCost = 0;
-  b.materialsNeeded.forEach(m => {
-    const remaining = m.qty - m.consumed;
-    const cheapest = cheapestSupplier(m.productId);
-    if (cheapest && remaining > 0) remainingMaterialCost += cheapest.price * remaining;
-  });
-  const subcontractFee = Math.round((labourRemaining + remainingMaterialCost) * 1.18);
+  const subcontractFee = Math.round(labourRemaining * 1.22);
   const newRemainingDays = Math.ceil(remainingDays * 0.6);
 
   if (state.cash < subcontractFee) {
@@ -4672,9 +5576,34 @@ const state = {
   fieldSalesReps: [], // Saha Satış Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDeals, totalRevenue }
   purchasers: [],     // Satın Alma Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalPurchases, totalSavings }
   dispatchers: [],    // Sevkiyat Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDispatches }
+  accountants: [],    // Muhasebeci: { id, name, salary, level, xp, hireDay, totalCollected, totalCollectionCount }
+
+  // Günlük muhasebe defteri (income/expense kayıtları)
+  // { day, type: 'income'|'expense', category, amount, description }
+  dailyLedger: [],
+
+  // Tüm tahsilat makbuzları (sözleşme bazlı, makbuza geri dönülebilir)
+  // { receiptNo, day, customerId, customerName, total, profit, contractId, items, externalShippingLog, ... }
+  receipts: [],
 
   // Bank
   loans: [],          // { id, principal, remaining, interestRate, dailyPayment, daysLeft, takenDay }
+
+  // Kredi kartları
+  // { id, tier: 'klasik'|'gold'|'platinum', limit, balance, lastStatementDay, dueDay, lastInterestDay, totalSpent }
+  creditCards: [],
+
+  // YATIRIM SİSTEMİ — Vadeli hesap, döviz, kıymetli maden, kripto
+  // Vadeli hesaplar
+  deposits: [],       // { id, type: 'daily'|'monthly', amount, openedDay, dueDay (sadece monthly), annualRate, accruedInterest }
+  // Portföy: { 'USD': miktar, 'EUR': miktar, 'BTC': miktar, ... } (cinsten miktar)
+  portfolio: {},
+  // Yatırım işlem geçmişi
+  investmentHistory: [],  // { day, type: 'buy'|'sell'|'deposit-open'|'deposit-close', asset, amount, price, total }
+  // Piyasa fiyat geçmişi (asset → [{ day, price }])
+  assetPriceHistory: {},
+  // Son piyasa güncelleme günü
+  lastMarketUpdate: 0,
 
   // Pending visits scheduled
   pendingVisits: [],  // {repId, customerId, dueDay}
@@ -4912,10 +5841,39 @@ function availableVehicles(now) {
 function spend(amount, category) {
   state.cash -= amount;
   if (category !== 'noop') state.monthlyExpenses += amount;
+  // Günlük defter kaydı
+  if (category !== 'noop' && amount > 0) {
+    if (!state.dailyLedger) state.dailyLedger = [];
+    state.dailyLedger.push({
+      day: state.day,
+      type: 'expense',
+      category: category || 'diger',
+      amount,
+      timestamp: Date.now()
+    });
+    // En fazla 500 kayıt tut (daha yenisi)
+    if (state.dailyLedger.length > 500) {
+      state.dailyLedger = state.dailyLedger.slice(-500);
+    }
+  }
 }
 function earn(amount, category) {
   state.cash += amount;
   if (category !== 'noop') state.monthlyRevenue += amount;
+  // Günlük defter kaydı
+  if (category !== 'noop' && amount > 0) {
+    if (!state.dailyLedger) state.dailyLedger = [];
+    state.dailyLedger.push({
+      day: state.day,
+      type: 'income',
+      category: category || 'diger',
+      amount,
+      timestamp: Date.now()
+    });
+    if (state.dailyLedger.length > 500) {
+      state.dailyLedger = state.dailyLedger.slice(-500);
+    }
+  }
 }
 
 // Aktif sözleşmelerde her productId için kalan toplam ihtiyaç
@@ -5662,6 +6620,8 @@ function render() {
   else if (state.view === 'visits') renderVisits();
   else if (state.view === 'bank') renderBank();
   else if (state.view === 'lands') renderLands();
+  else if (state.view === 'accounting') renderAccounting();
+  else if (state.view === 'investment') renderInvestment();
   else if (state.view === 'archive') renderArchive();
   else if (state.view === 'profile') renderProfile();
   else if (state.view === 'leaderboard') renderLeaderboard();
@@ -7466,7 +8426,8 @@ function renderContractsView() {
             ${!ct.delivered && dispatcherCount > 0 ? `<button class="btn" style="background: var(--red); color: #fff; border-color: var(--red);" onclick="autoDispatchContract('${ct.id}')" title="Sevkiyat sorumlusu en uygun aracı seçer ve hemen başlatır">🚛 SEVKİYATÇIYLA GÖNDER</button>` : ''}
             ${!ct.delivered ? `<button class="btn" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="openExternalCarrierModal('${ct.id}')" title="Dış nakliye firması — kendi aracın yoksa veya acil teslimat için (~2-2.5 kat pahalı)">🚚 DIŞ NAKLİYE</button>` : ''}
             ${!ct.delivered && dispatcherCount === 0 ? `<button class="btn" style="opacity: 0.55; background: var(--panel); color: var(--ink-dim);" onclick="setView('hr'); switchHRTab('dispatchers');" title="Sevkiyat sorumlusu işe almalısın">🚛 Sevkiyat Sorumlusu işe al →</button>` : ''}
-            ${ct.delivered && !ct.paid ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
+            ${ct.delivered && !ct.paid && (state.accountants || []).length === 0 ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
+            ${ct.delivered && !ct.paid && (state.accountants || []).length > 0 ? `<span style="color: #f59e0b; font-size: 12px; padding: 6px 10px; background: var(--panel-2); border-left: 2px solid #f59e0b;">📊 Muhasebeci yarın tahsil edecek (${fmt(ct.total)})</span>` : ''}
             ${ct.paid ? `<span style="color: var(--green); font-size: 12px;">✓ Ödeme alındı, sözleşme kapandı</span>` : ''}
           </div>
         </div>`;
@@ -7494,7 +8455,7 @@ function collectPayment(ctId) {
   cust.balance -= ct.total; // pay off debt
   cust.totalRevenue += ct.total;
   cust.trust = Math.min(100, cust.trust + 4);
-  state.totalProfit += ct.total - ct.estimatedCost;
+  state.totalProfit += ct.total - ct.estimatedCost - (ct.externalShippingTotal || 0);
   state.contractsCompleted++;
   state.reputation = Math.min(100, state.reputation + 2);
   ct.paid = true;
@@ -7502,6 +8463,35 @@ function collectPayment(ctId) {
   ct.collectedDay = state.day;
 
   state.archive.push({ ...ct, type: 'contract', status: 'completed', completedDay: state.day });
+
+  // Makbuzu state.receipts'e kaydet (Muhasebe sayfasında listelenecek)
+  if (!state.receipts) state.receipts = [];
+  const profit = ct.total - (ct.estimatedCost || 0) - (ct.externalShippingTotal || 0);
+  state.receipts.push({
+    receiptNo: ct.receiptNo,
+    day: state.day,
+    contractId: ct.id,
+    customerId: ct.customerId,
+    customerName: cust.name,
+    customerIlce: cust.ilce,
+    total: ct.total,
+    estimatedCost: ct.estimatedCost || 0,
+    externalShippingTotal: ct.externalShippingTotal || 0,
+    profit,
+    items: ct.items,
+    unitPrices: ct.unitPrices,
+    shippingCost: ct.shippingCost || 0,
+    shippingType: ct.shippingType,
+    externalShippingLog: ct.externalShippingLog || [],
+    startedDay: ct.startedDay,
+    collectedDay: state.day,
+    collectedByAccountant: false  // muhasebeci tarafından yapıldıysa true olur
+  });
+  // Son 200 makbuzla sınırla
+  if (state.receipts.length > 200) {
+    state.receipts = state.receipts.slice(-200);
+  }
+
   state.contracts.splice(idx, 1);
 
   addXP(20 + Math.round(ct.total / 10000), 'sözleşme tamamlandı');
@@ -7520,7 +8510,15 @@ function showReceiptModal(ct, cust) {
   // KDV %20 (toplam içinden hesaplanır — Türkiye'de fiyatlar genelde KDV dahildir)
   const subtotal = Math.round(ct.total / 1.20);
   const vat = ct.total - subtotal;
-  const profit = ct.total - (ct.estimatedCost || 0);
+  // Net kâr = ct.total - estimatedCost - dış nakliye giderleri
+  const externalShipping = ct.externalShippingTotal || 0;
+  const profit = ct.total - (ct.estimatedCost || 0) - externalShipping;
+
+  // Dış nakliye log: her bir gönderi ayrı satır
+  const externalShippingRows = (ct.externalShippingLog || []).map(log => `<tr class="r-shipping" style="color: #b45309;">
+    <td colspan="3"><em>🚚 ${log.carrier} (dış nakliye, ${log.items} kalem, ${log.weight.toFixed(1)}t)</em></td>
+    <td class="num">-${fmt(log.cost)}</td>
+  </tr>`).join('');
 
   // Şirket logosu (varsa)
   const companyName = state.company?.name || 'YAPI TİCARET';
@@ -7593,9 +8591,14 @@ function showReceiptModal(ct, cust) {
               <td colspan="3"><em>🚛 Nakliye Hizmeti${ct.shippingType ? ' (' + (VEHICLE_TYPES[ct.shippingType]?.name || ct.shippingType) + ')' : ''}</em></td>
               <td class="num">${fmt(shippingCost)}</td>
             </tr>` : ''}
+            ${externalShippingRows}
           </tbody>
         </table>
       </div>
+
+      ${externalShipping > 0 ? `<div style="padding: 8px 14px; background: #fff7e6; border-left: 3px solid #b45309; margin-top: 10px; font-size: 11px; color: #5a3920;">
+        🚚 <strong>Dış Nakliye Giderleri:</strong> Bu sözleşmede ${ct.externalShippingLog.length} sevkiyat dış firmaya yaptırıldı. Toplam ek gider: <strong>${fmt(externalShipping)}</strong> (net kârdan düşülür)
+      </div>` : ''}
 
       <div class="receipt-totals">
         <div class="rt-row subtotal">
@@ -8251,6 +9254,17 @@ function dispatchExternalDirect(ctId, load, carrierId, opts) {
   load.forEach(l => state.inventory[l.productId] -= l.qty);
   spend(calc.cost, 'dis-nakliye');
 
+  // Sözleşmeye dış nakliye giderlerini ekle (makbuzda gösterilir, kâr hesabına girer)
+  ct.externalShippingTotal = (ct.externalShippingTotal || 0) + calc.cost;
+  if (!ct.externalShippingLog) ct.externalShippingLog = [];
+  ct.externalShippingLog.push({
+    day: state.day,
+    carrier: carrier.name,
+    cost: calc.cost,
+    weight: calc.totalWeight,
+    items: load.length
+  });
+
   // İrsaliye
   const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase() + '-EXT';
   ct.deliveries.push({
@@ -8615,11 +9629,13 @@ function renderHR() {
   const fieldSalesList = state.fieldSalesReps || [];
   const purchasersList = state.purchasers || [];
   const dispatchersList = state.dispatchers || [];
+  const accountantsList = state.accountants || [];
   const totalMonthly = state.drivers.reduce((s,d) => s + d.salary, 0)
     + state.salesReps.reduce((s,r) => s + r.salary, 0)
     + fieldSalesList.reduce((s,r) => s + r.salary, 0)
     + purchasersList.reduce((s,r) => s + r.salary, 0)
-    + dispatchersList.reduce((s,r) => s + r.salary, 0);
+    + dispatchersList.reduce((s,r) => s + r.salary, 0)
+    + accountantsList.reduce((s,r) => s + r.salary, 0);
   const nextPayDay = state.lastPayrollDay + 30;
   const daysToPay = nextPayDay - state.day;
 
@@ -8634,18 +9650,20 @@ function renderHR() {
 
     <div class="stat-grid">
       <div class="stat-tile"><div class="stat-label">Şoför</div><div class="stat-val" style="color: var(--blue)">${state.drivers.length}</div></div>
-      <div class="stat-tile"><div class="stat-label">Pazarlamacı</div><div class="stat-val" style="color: var(--purple)">${state.salesReps.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Pazarlama</div><div class="stat-val" style="color: var(--purple)">${state.salesReps.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Saha Satış</div><div class="stat-val" style="color: var(--green)">${fieldSalesList.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Satın Alma</div><div class="stat-val" style="color: var(--accent)">${purchasersList.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Sevkiyat</div><div class="stat-val" style="color: var(--red)">${dispatchersList.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Muhasebe</div><div class="stat-val" style="color: #f59e0b">${accountantsList.length}</div></div>
     </div>
 
     <div class="tabs">
       <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖR (${state.drivers.length})</div>
-      <div class="tab" onclick="switchHRTab('sales')">PAZARLAMACI (${state.salesReps.length})</div>
+      <div class="tab" onclick="switchHRTab('sales')">PAZARLAMA (${state.salesReps.length})</div>
       <div class="tab" onclick="switchHRTab('fieldsales')">SAHA SATIŞ (${fieldSalesList.length})</div>
       <div class="tab" onclick="switchHRTab('purchasers')">SATIN ALMA (${purchasersList.length})</div>
       <div class="tab" onclick="switchHRTab('dispatchers')">SEVKİYAT (${dispatchersList.length})</div>
+      <div class="tab" onclick="switchHRTab('accountants')">MUHASEBE (${accountantsList.length})</div>
     </div>
     <div id="hr-content"></div>`;
   switchHRTab('drivers');
@@ -8655,7 +9673,7 @@ function switchHRTab(tab) {
   document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
   if (event && event.target) event.target.classList.add('active');
   else {
-    const order = { drivers: 0, sales: 1, fieldsales: 2, purchasers: 3, dispatchers: 4 };
+    const order = { drivers: 0, sales: 1, fieldsales: 2, purchasers: 3, dispatchers: 4, accountants: 5 };
     document.querySelectorAll('.tabs .tab')[order[tab] || 0]?.classList.add('active');
   }
 
@@ -8875,6 +9893,52 @@ function switchHRTab(tab) {
         </div>`;
       }).join('')}
     </div>`;
+  } else if (tab === 'accountants') {
+    const acList = state.accountants || [];
+    c.innerHTML = `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid #f59e0b; font-size: 11px; line-height: 1.5;">
+      <strong style="color: #f59e0b;">Muhasebeci</strong> — Teslim edilmiş sözleşmelerin ödemelerini <strong>otomatik tahsil eder</strong>. Sv yükseldikçe hızlanır. Aynı zamanda <strong>📊 Muhasebe sayfasında</strong> günlük K/Z ve makbuz listesini görebilirsin.
+    </div>
+    <div class="grid-2">
+      ${acList.length === 0 ? '<div class="card"><div class="empty">Henüz muhasebeci yok. İşe alırsan teslim edilmiş sözleşmelerin TÜM tahsilatını otomatik yapar.</div></div>' : ''}
+      ${acList.map(r => {
+        const xpReq = 100 * r.level;
+        const bonusDesc = r.level === 1 ? 'Standart tahsilat' : r.level === 2 ? '+%5 müşteri güveni bonusu' : '+%10 güven + %2 itibar bonusu';
+        return `<div class="emp-card sales" style="border-left: 3px solid #f59e0b;">
+          <div class="emp-avatar" style="background: #f59e0b;">📊</div>
+          <div class="emp-info">
+            <div class="emp-name">${r.name}</div>
+            <div class="emp-role">Muhasebeci · Seviye ${r.level} · <span class="stars">${'★'.repeat(r.level)}${'☆'.repeat(Math.max(0, 5 - r.level))}</span></div>
+            <div class="emp-stats">Maaş: ${fmt(r.salary)}/ay · Etki: <strong>${bonusDesc}</strong></div>
+            <div class="emp-stats">Toplam tahsilat: <strong>${r.totalCollectionCount || 0}</strong> sözleşme · <strong style="color: var(--green);">${fmt(r.totalCollected || 0)}</strong></div>
+            <div class="emp-stats">XP: ${r.xp}/${xpReq}</div>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${(r.xp / xpReq) * 100}%; background: #f59e0b;"></div></div>
+          </div>
+          <div>
+            <button class="btn small danger" onclick="fireEmployee('accountant', '${r.id}')">KOVA</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-top: 20px;">YENİ MUHASEBECİ İŞE AL</h3>
+    <div class="grid-3">
+      ${[1, 2, 3].map(lvl => {
+        const monthlySalary = 38000 + (lvl - 1) * 19000;
+        const hireFee = 12000 + (lvl - 1) * 20000;
+        const bonusDesc = lvl === 1 ? 'Standart tahsilat' : lvl === 2 ? '+%5 müşteri güveni bonusu' : '+%10 güven + %2 itibar bonusu';
+        const titles = ['Junior Muhasebeci', 'Mali Müşavir', 'Mali İşler Müdürü'];
+        return `<div class="card">
+          <h3>${titles[lvl - 1]} (Sv ${lvl})</h3>
+          <div style="font-size: 11px; line-height: 1.7;">
+            <div>Tahsilat: <strong>Tüm sözleşmeler / gün</strong></div>
+            <div>Etki: <strong>${bonusDesc}</strong></div>
+            <div>Detay raporu: <strong>${lvl === 1 ? 'Temel' : lvl === 2 ? 'Orta' : 'Profesyonel'}</strong></div>
+            <div>Aylık maaş: <strong>${fmt(monthlySalary)}</strong></div>
+            <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(hireFee)}</span></div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px;" onclick="hireAccountant(${lvl})" ${state.cash >= hireFee ? '' : 'disabled'}>İŞE AL</button>
+        </div>`;
+      }).join('')}
+    </div>`;
   }
 }
 
@@ -8985,6 +10049,28 @@ function hireDispatcher(lvl) {
   render();
 }
 
+// Muhasebeci işe alımı
+function hireAccountant(lvl) {
+  // 2026 muhasebeci maaşları
+  const monthlySalary = 38000 + (lvl - 1) * 19000;  // Sv1: 38k, Sv2: 57k, Sv3: 76k
+  const fee = 12000 + (lvl - 1) * 20000;
+  if (state.cash < fee) { toast('Yetersiz para.', 'error'); return; }
+  if (!state.accountants) state.accountants = [];
+  spend(fee, "ise-alim");
+  state.accountants.push({
+    id: 'ac' + uid(),
+    name: fullName(),
+    salary: monthlySalary,
+    level: lvl,
+    xp: 0,
+    hireDay: state.day,
+    totalCollected: 0,
+    totalCollectionCount: 0
+  });
+  toast(`✓ Yeni muhasebeci işe alındı: Sv${lvl}`, 'success');
+  render();
+}
+
 function fireEmployee(type, id) {
   if (type === 'driver') {
     state.drivers = state.drivers.filter(d => d.id !== id);
@@ -8996,6 +10082,8 @@ function fireEmployee(type, id) {
     state.purchasers = (state.purchasers || []).filter(r => r.id !== id);
   } else if (type === 'dispatcher') {
     state.dispatchers = (state.dispatchers || []).filter(r => r.id !== id);
+  } else if (type === 'accountant') {
+    state.accountants = (state.accountants || []).filter(r => r.id !== id);
   }
   toast('Personel işten çıkarıldı.', 'info');
   render();
@@ -9226,6 +10314,95 @@ function renderBank() {
     <div style="font-size: 10px; color: var(--ink-dim); margin-top: 14px; line-height: 1.6;">
       💡 Yüksek itibar ve seviye kredi limitini ve faiz indirimini artırır. Şu anki limitin: ${fmt(maxLoan)}.<br>
       📌 Tahsilat aylıktır (30 gün). Erken kapatmada sadece o ayın faizi alınır, sonraki ayların faizi tahsil edilmez.
+    </div>
+
+    <!-- KREDİ KARTLARI BÖLÜMÜ -->
+    <hr style="margin: 30px 0; border: 0; border-top: 1px solid var(--border);">
+
+    <h2 style="font-family: 'Bebas Neue'; letter-spacing: 2px;">💳 KREDİ KARTLARI</h2>
+    <div class="subtitle">Acil nakit ihtiyacında kullan · Ekstre 30 günde bir kesilir · Asgari ödeme %20</div>
+
+    ${(state.creditCards && state.creditCards.length > 0) ? `
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile"><div class="stat-label">Aktif Kart</div><div class="stat-val">${state.creditCards.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Limit</div><div class="stat-val" style="color: var(--blue)">${fmt(state.creditCards.reduce((s, c) => s + c.limit, 0))}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Borç</div><div class="stat-val" style="color: var(--red)">${fmt(state.creditCards.reduce((s, c) => s + c.balance, 0))}</div></div>
+      <div class="stat-tile"><div class="stat-label">Kullanılabilir</div><div class="stat-val" style="color: var(--green)">${fmt(state.creditCards.reduce((s, c) => s + (c.limit - c.balance), 0))}</div></div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">AKTİF KARTLARIM</h3>
+    <div class="grid-2" style="margin-bottom: 20px;">
+      ${state.creditCards.map(c => {
+        const t = CREDIT_CARD_TIERS[c.tier];
+        const usage = c.limit > 0 ? (c.balance / c.limit) * 100 : 0;
+        const usageColor = usage > 80 ? 'var(--red)' : usage > 50 ? 'var(--accent)' : 'var(--green)';
+        const daysToStatement = Math.max(0, c.dueDay - state.day);
+        const minPayment = Math.max(1000, Math.round(c.balance * 0.20));
+        return `<div class="card" style="border-left: 3px solid ${t.color}; background: linear-gradient(135deg, var(--panel) 0%, var(--panel-2) 100%);">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+            <div>
+              <h3 style="margin: 0; color: ${t.color};">💳 ${t.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim);">Kart No: **** **** **** ${c.id.slice(-4).toUpperCase()}</div>
+            </div>
+            <div style="text-align: right; font-size: 11px;">
+              <div style="color: var(--ink-dim);">Faiz: <strong>%${(c.monthlyRate * 100).toFixed(2)}/ay</strong></div>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+              <span style="color: var(--ink-dim);">Limit Kullanımı</span>
+              <span><strong style="color: ${usageColor};">%${usage.toFixed(1)}</strong></span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(100, usage)}%; background: ${usageColor};"></div></div>
+          </div>
+
+          <div style="font-size: 11px; line-height: 1.8;">
+            <div>Limit: <strong>${fmt(c.limit)}</strong></div>
+            <div>Mevcut borç: <strong style="color: ${c.balance > 0 ? 'var(--red)' : 'var(--green)'};">${fmt(c.balance)}</strong></div>
+            <div>Kullanılabilir: <strong style="color: var(--green);">${fmt(c.limit - c.balance)}</strong></div>
+            <div>Ekstre kesimi: <strong>${daysToStatement === 0 ? 'BUGÜN' : `Gün ${c.dueDay} (${daysToStatement} gün)`}</strong></div>
+            ${c.balance > 0 ? `<div>Asgari ödeme: <strong>${fmt(minPayment)}</strong></div>` : ''}
+          </div>
+
+          <div style="display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap;">
+            <button class="btn small primary" onclick="openCardCashAdvanceModal('${c.id}')" ${c.limit - c.balance > 0 ? '' : 'disabled'}>💰 NAKİT ÇEK</button>
+            <button class="btn small" style="background: var(--green); color: #fff; border-color: var(--green);" onclick="openPayCreditCardModal('${c.id}')" ${c.balance > 0 ? '' : 'disabled'}>💸 BORÇ ÖDE</button>
+            <button class="btn small danger" onclick="cancelCreditCard('${c.id}')" ${c.balance === 0 ? '' : 'disabled'} title="${c.balance > 0 ? 'Önce borcu öde' : 'Kartı iptal et'}">İPTAL</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    ` : '<div class="empty" style="margin: 16px 0;">Henüz kredi kartın yok. Aşağıdan başvur.</div>'}
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">YENİ KART BAŞVURUSU</h3>
+    <div class="grid-3">
+      ${Object.entries(CREDIT_CARD_TIERS).map(([tier, t]) => {
+        const hasCard = (state.creditCards || []).some(c => c.tier === tier);
+        const canApply = state.reputation >= t.minRepGate && state.cash >= t.annualFee && !hasCard;
+        const blockedReason = hasCard ? 'Zaten bu kartın var'
+          : state.reputation < t.minRepGate ? `İtibar %${t.minRepGate} gerekli (şu an %${Math.round(state.reputation)})`
+          : state.cash < t.annualFee ? `Aidat için ${fmt(t.annualFee)} gerekli`
+          : '';
+        return `<div class="card" style="border-left: 3px solid ${t.color}; ${!canApply ? 'opacity: 0.6;' : ''}">
+          <h3 style="color: ${t.color};">💳 ${t.name}</h3>
+          <div style="font-size: 11px; line-height: 1.8;">
+            <div>Limit: <strong style="color: var(--blue); font-size: 14px;">${fmt(t.limit)}</strong></div>
+            <div>Aylık faiz: <strong>%${(t.monthlyRate * 100).toFixed(2)}</strong></div>
+            <div>Yıllık aidat: <strong>${fmt(t.annualFee)}</strong></div>
+            <div>Şart: <strong>%${t.minRepGate} itibar+</strong></div>
+            <div style="margin-top: 6px; font-size: 10px; color: var(--ink-dim);">${t.desc}</div>
+          </div>
+          <button class="btn primary" style="margin-top: 12px; width: 100%; background: ${t.color}; color: #fff; border-color: ${t.color};" onclick="applyCreditCard('${tier}')" ${canApply ? '' : 'disabled'} title="${blockedReason}">
+            ${canApply ? 'BAŞVUR' : (blockedReason || 'UYGUN DEĞİL')}
+          </button>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div style="font-size: 10px; color: var(--ink-dim); margin-top: 14px; line-height: 1.6;">
+      💡 Ekstre kesim günü borca aylık faiz işler. Asgari ödeme (%20) yapmazsan faiz devam eder.<br>
+      📌 Kartı iptal etmek için önce tüm borcu ödemelisin. Yıllık aidat her yılbaşı kart kullanımının 365. gününde otomatik kesilir.
     </div>`;
 }
 
@@ -9453,6 +10630,653 @@ function renderLandMarket() {
       </div>`;
     }).join('')}
   </div>`;
+}
+
+// ============================================================
+// YATIRIM SAYFASI
+// ============================================================
+
+let _investmentTab = 'overview';
+
+function renderInvestment() {
+  const c = $('center');
+
+  // İlk girişte fiyatları güncelle (yeni oyunlar için)
+  if (!state.assetPriceHistory || Object.keys(state.assetPriceHistory).length === 0) {
+    updateMarketPrices();
+  }
+
+  // Portföy değeri hesabı
+  const portfolio = state.portfolio || {};
+  let portfolioValueTL = 0;
+  const portfolioBreakdown = [];
+  Object.keys(portfolio).forEach(id => {
+    const qty = portfolio[id];
+    if (qty <= 0) return;
+    const sellPrice = getAssetSellPrice(id);
+    const value = qty * sellPrice;
+    portfolioValueTL += value;
+    portfolioBreakdown.push({ id, qty, value, a: INVESTMENT_ASSETS[id] });
+  });
+
+  // Vadeli toplam
+  const deposits = state.deposits || [];
+  const depositsValue = deposits.reduce((s, d) => s + d.amount + d.accruedInterest, 0);
+
+  // Toplam yatırım
+  const totalInvested = portfolioValueTL + depositsValue;
+
+  c.innerHTML = `<h2>💎 YATIRIM</h2>
+    <div class="subtitle">Vadeli hesap · Döviz · Kıymetli maden · Kripto borsa · 2026 piyasası</div>
+
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile"><div class="stat-label">💰 Kasa</div><div class="stat-val" style="color: var(--green); font-size: 15px;">${fmt(state.cash)}</div></div>
+      <div class="stat-tile"><div class="stat-label">🏦 Vadeli</div><div class="stat-val" style="color: var(--blue); font-size: 15px;">${fmt(Math.round(depositsValue))}</div></div>
+      <div class="stat-tile"><div class="stat-label">📈 Portföy</div><div class="stat-val" style="color: var(--accent); font-size: 15px;">${fmt(Math.round(portfolioValueTL))}</div></div>
+      <div class="stat-tile"><div class="stat-label">💎 Toplam Servet</div><div class="stat-val" style="font-size: 16px;">${fmt(Math.round(state.cash + totalInvested))}</div></div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab ${_investmentTab === 'overview' ? 'active' : ''}" onclick="switchInvestmentTab('overview')">📊 GENEL</div>
+      <div class="tab ${_investmentTab === 'deposits' ? 'active' : ''}" onclick="switchInvestmentTab('deposits')">🏦 VADELİ (${deposits.length})</div>
+      <div class="tab ${_investmentTab === 'doviz' ? 'active' : ''}" onclick="switchInvestmentTab('doviz')">💵 DÖVİZ</div>
+      <div class="tab ${_investmentTab === 'maden' ? 'active' : ''}" onclick="switchInvestmentTab('maden')">🥇 KIYMETLİ MADEN</div>
+      <div class="tab ${_investmentTab === 'kripto' ? 'active' : ''}" onclick="switchInvestmentTab('kripto')">₿ KRİPTO BORSA</div>
+    </div>
+    <div id="investment-content"></div>`;
+
+  renderInvestmentTab();
+}
+
+function switchInvestmentTab(tab) {
+  _investmentTab = tab;
+  document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+  const order = { overview: 0, deposits: 1, doviz: 2, maden: 3, kripto: 4 };
+  document.querySelectorAll('.tabs .tab')[order[tab] || 0]?.classList.add('active');
+  renderInvestmentTab();
+}
+
+function renderInvestmentTab() {
+  const c = $('investment-content');
+  if (!c) return;
+
+  if (_investmentTab === 'overview') {
+    // Portföy özeti
+    const portfolio = state.portfolio || {};
+    const deposits = state.deposits || [];
+    const portfolioBreakdown = Object.keys(portfolio).map(id => {
+      const qty = portfolio[id];
+      if (qty <= 0) return null;
+      const sellPrice = getAssetSellPrice(id);
+      return { id, qty, value: qty * sellPrice, a: INVESTMENT_ASSETS[id] };
+    }).filter(Boolean).sort((a, b) => b.value - a.value);
+
+    // Son 10 işlem
+    const recent = (state.investmentHistory || []).slice(-10).reverse();
+
+    c.innerHTML = `
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📦 PORTFÖYÜM</h3>
+      ${portfolioBreakdown.length === 0 && deposits.length === 0
+        ? '<div class="empty" style="margin-bottom: 16px;">Henüz yatırımın yok. Bir varlık veya vadeli hesap aç.</div>'
+        : `<div class="table-scroll">
+          <table class="data-table" style="margin-bottom: 16px;">
+            <thead><tr><th>Varlık</th><th>Tip</th><th class="num">Miktar</th><th class="num">Anlık Fiyat</th><th class="num">Toplam Değer</th></tr></thead>
+            <tbody>
+              ${deposits.map(d => {
+                const rate = DEPOSIT_RATES[d.type];
+                return `<tr>
+                  <td><strong>🏦 ${rate.label}</strong></td>
+                  <td><span style="color: var(--blue);">Vadeli</span></td>
+                  <td class="num">${fmt(d.amount)}</td>
+                  <td class="num">+${fmt(Math.round(d.accruedInterest))} faiz</td>
+                  <td class="num"><strong>${fmt(d.amount + Math.round(d.accruedInterest))}</strong></td>
+                </tr>`;
+              }).join('')}
+              ${portfolioBreakdown.map(p => `<tr>
+                <td><strong>${p.a.symbol} ${p.a.name}</strong></td>
+                <td><span style="color: ${p.a.category === 'doviz' ? 'var(--green)' : p.a.category === 'maden' ? 'var(--accent)' : 'var(--purple)'};">${p.a.category.toUpperCase()}</span></td>
+                <td class="num">${p.qty.toFixed(p.a.decimals)}</td>
+                <td class="num">${fmt(getAssetSellPrice(p.id))}</td>
+                <td class="num"><strong>${fmt(Math.round(p.value))}</strong></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📜 SON İŞLEMLER</h3>
+      ${recent.length === 0 ? '<div class="empty">Henüz işlem yok.</div>' : `<div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Gün</th><th>İşlem</th><th>Varlık</th><th class="num">Miktar</th><th class="num">Fiyat</th><th class="num">Toplam</th></tr></thead>
+          <tbody>${recent.map(h => {
+            const a = INVESTMENT_ASSETS[h.asset];
+            return `<tr>
+              <td class="num">G${h.day}</td>
+              <td><span style="color: ${h.type === 'buy' ? 'var(--red)' : 'var(--green)'}; font-weight: 700;">${h.type === 'buy' ? '🛒 ALIM' : '💰 SATIM'}</span></td>
+              <td>${a ? a.symbol + ' ' + a.name : h.asset}</td>
+              <td class="num">${h.quantity.toFixed(a?.decimals || 2)}</td>
+              <td class="num">${fmt(h.price)}</td>
+              <td class="num">${fmt(h.total)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`}`;
+  }
+
+  else if (_investmentTab === 'deposits') {
+    const deposits = state.deposits || [];
+    c.innerHTML = `
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">🏦 YENİ VADELİ HESAP AÇ</h3>
+      <div class="grid-2" style="margin-bottom: 20px;">
+        ${Object.entries(DEPOSIT_RATES).map(([type, r]) => `<div class="card" style="border-left: 3px solid var(--blue);">
+          <h3>${r.label}</h3>
+          <div style="font-size: 12px; line-height: 1.8;">
+            <div>Yıllık faiz: <strong style="color: var(--green); font-size: 18px;">%${(r.annualRate * 100).toFixed(0)}</strong></div>
+            <div>Günlük faiz: <strong>%${(r.annualRate * 100 / 365).toFixed(3)}</strong></div>
+            <div>Minimum: <strong>${fmt(r.minAmount)}</strong></div>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 11px;">${r.desc}</div>
+          </div>
+          <button class="btn primary" style="margin-top: 10px; width: 100%;" onclick="openDepositModal('${type}')">💰 HESAP AÇ</button>
+        </div>`).join('')}
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📂 AKTİF VADELİ HESAPLAR (${deposits.length})</h3>
+      ${deposits.length === 0 ? '<div class="empty">Aktif vadeli hesap yok.</div>' : `<div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Tip</th><th class="num">Anapara</th><th class="num">Faiz Yıllık</th><th class="num">Birikim Faiz</th><th class="num">Toplam Değer</th><th>Vade</th><th>İşlem</th></tr></thead>
+          <tbody>${deposits.map(d => {
+            const rate = DEPOSIT_RATES[d.type];
+            const totalValue = d.amount + Math.round(d.accruedInterest);
+            const daysHeld = state.day - d.openedDay;
+            const dueLabel = d.type === 'monthly'
+              ? (d.dueDay <= state.day ? '<span style="color: var(--green);">Olgun</span>' : `G${d.dueDay} <span style="color: var(--ink-dim); font-size: 10px;">(${d.dueDay - state.day} gün)</span>`)
+              : `<span style="color: var(--green);">Esnek (${daysHeld} gün)</span>`;
+            return `<tr>
+              <td><strong>${rate.label}</strong></td>
+              <td class="num">${fmt(d.amount)}</td>
+              <td class="num">%${(d.annualRate * 100).toFixed(0)}</td>
+              <td class="num" style="color: var(--green);">+${fmt(Math.round(d.accruedInterest))}</td>
+              <td class="num"><strong>${fmt(totalValue)}</strong></td>
+              <td>${dueLabel}</td>
+              <td><button class="btn small ${d.type === 'monthly' && state.day < d.dueDay ? 'danger' : 'primary'}" onclick="closeDepositConfirm('${d.id}')">${d.type === 'monthly' && state.day < d.dueDay ? 'ERKEN ÇEK' : 'PARAYI AL'}</button></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`}`;
+  }
+
+  else if (_investmentTab === 'doviz' || _investmentTab === 'maden' || _investmentTab === 'kripto') {
+    const cat = _investmentTab;
+    const assets = Object.entries(INVESTMENT_ASSETS).filter(([_, a]) => a.category === cat);
+    const portfolio = state.portfolio || {};
+    const catLabel = cat === 'doviz' ? 'DÖVİZ KURLARI' : cat === 'maden' ? 'KIYMETLİ MADENLER' : 'KRİPTO BORSA';
+    const spreadPct = (SPREAD[cat] * 100).toFixed(1);
+
+    c.innerHTML = `
+      <div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px;">
+        💡 <strong>${catLabel}</strong> · Alış/satış makası: <strong>%${spreadPct}</strong> · Fiyatlar her gün otomatik güncellenir
+      </div>
+      <div class="grid-2">
+        ${assets.map(([id, a]) => {
+          const hist = state.assetPriceHistory?.[id] || [];
+          const current = getCurrentAssetPrice(id);
+          const yesterday = hist.length >= 2 ? hist[hist.length - 2].price : a.initialPrice;
+          const change = current - yesterday;
+          const changePct = yesterday > 0 ? (change / yesterday) * 100 : 0;
+          const buy = getAssetBuyPrice(id);
+          const sell = getAssetSellPrice(id);
+          const have = portfolio[id] || 0;
+          const haveValue = have * sell;
+
+          // Mini sparkline son 14 gün
+          const recentHist = hist.slice(-14);
+          const minP = Math.min(...recentHist.map(h => h.price));
+          const maxP = Math.max(...recentHist.map(h => h.price));
+          const range = maxP - minP || 1;
+          const sparkPoints = recentHist.map((h, i) => {
+            const x = (i / (recentHist.length - 1 || 1)) * 100;
+            const y = 30 - ((h.price - minP) / range) * 28;
+            return `${x},${y}`;
+          }).join(' ');
+
+          return `<div class="card" style="border-left: 3px solid ${changePct >= 0 ? 'var(--green)' : 'var(--red)'};">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div>
+                <h3>${a.symbol} ${a.name}</h3>
+                <div style="font-size: 10px; color: var(--ink-dim);">${cat === 'doviz' ? 'Para birimi' : cat === 'maden' ? 'Kıymetli maden' : 'Kripto para'}</div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-family: 'Bebas Neue'; font-size: 22px;">${fmt(current)}</div>
+                <div style="font-size: 11px; color: ${changePct >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight: 700;">
+                  ${changePct >= 0 ? '▲' : '▼'} ${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}% (${changePct >= 0 ? '+' : ''}${fmt(change)})
+                </div>
+              </div>
+            </div>
+
+            <svg width="100%" height="32" viewBox="0 0 100 30" style="margin: 8px 0;">
+              <polyline points="${sparkPoints}" fill="none" stroke="${changePct >= 0 ? '#10b981' : '#ef4444'}" stroke-width="1.5"></polyline>
+            </svg>
+
+            <div style="display: flex; gap: 6px; font-size: 11px;">
+              <div style="flex: 1; padding: 6px; background: var(--panel-2); text-align: center;">
+                <div style="font-size: 9px; color: var(--ink-dim);">ALIŞ</div>
+                <div style="font-weight: 700; color: var(--red);">${fmt(buy)}</div>
+              </div>
+              <div style="flex: 1; padding: 6px; background: var(--panel-2); text-align: center;">
+                <div style="font-size: 9px; color: var(--ink-dim);">SATIŞ</div>
+                <div style="font-weight: 700; color: var(--green);">${fmt(sell)}</div>
+              </div>
+            </div>
+
+            ${have > 0 ? `<div style="margin-top: 8px; padding: 8px 10px; background: var(--panel-2); border-left: 2px solid var(--accent); font-size: 11px;">
+              📦 Elimde: <strong>${have.toFixed(a.decimals)}</strong> birim · Değer: <strong>${fmt(Math.round(haveValue))}</strong>
+            </div>` : ''}
+
+            <div style="display: flex; gap: 6px; margin-top: 10px;">
+              <button class="btn small primary" style="flex: 1;" onclick="openBuyAssetModal('${id}')">🛒 AL</button>
+              <button class="btn small" style="flex: 1; background: var(--green); color: #fff; border-color: var(--green);" onclick="openSellAssetModal('${id}')" ${have > 0 ? '' : 'disabled'}>💰 SAT</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+}
+
+// ----- YATIRIM MODALLARI -----
+
+function openDepositModal(type) {
+  const rate = DEPOSIT_RATES[type];
+  if (!rate) return;
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2 style="color: var(--blue);">🏦 ${rate.label}</h2>
+      <p style="font-size: 12px; line-height: 1.6; margin: 12px 0; color: var(--ink-dim);">${rate.desc}</p>
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--blue); margin-bottom: 14px; font-size: 12px;">
+        Yıllık faiz: <strong style="color: var(--green); font-size: 16px;">%${(rate.annualRate * 100).toFixed(0)}</strong> · Min: ${fmt(rate.minAmount)}<br>
+        Kasanda: <strong>${fmt(state.cash)}</strong>
+      </div>
+      <label style="font-size: 11px; color: var(--ink-dim); display: block; margin-bottom: 4px;">Yatırılacak Tutar (TL)</label>
+      <input type="number" id="deposit-amount" class="text-input" style="width: 100%; margin-bottom: 14px;" value="${rate.minAmount}" min="${rate.minAmount}" max="${state.cash}" step="10000">
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1;" onclick="confirmOpenDeposit('${type}')">✓ HESAP AÇ</button>
+        <button class="btn" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmOpenDeposit(type) {
+  const amount = parseInt(document.getElementById('deposit-amount').value);
+  if (isNaN(amount) || amount <= 0) { toast('Geçersiz tutar', 'error'); return; }
+  openDeposit(type, amount);
+}
+
+function closeDepositConfirm(depositId) {
+  const d = (state.deposits || []).find(x => x.id === depositId);
+  if (!d) return;
+  const rate = DEPOSIT_RATES[d.type];
+  let payout = d.amount + d.accruedInterest;
+  let penalty = 0;
+  if (d.type === 'monthly' && state.day < d.dueDay) {
+    penalty = Math.round(d.accruedInterest * 0.20);
+    payout -= penalty;
+  }
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2>🏦 Vadeli Hesabı Kapat</h2>
+      <table class="data-table" style="margin: 14px 0;">
+        <tbody>
+          <tr><td>Anapara</td><td class="num">${fmt(d.amount)}</td></tr>
+          <tr><td>Birikim faiz</td><td class="num" style="color: var(--green);">+${fmt(Math.round(d.accruedInterest))}</td></tr>
+          ${penalty > 0 ? `<tr><td style="color: var(--red);">Erken çekim cezası (%20)</td><td class="num" style="color: var(--red);">-${fmt(penalty)}</td></tr>` : ''}
+          <tr style="background: var(--panel-2); border-top: 2px solid var(--border);"><td><strong>NET ALACAK</strong></td><td class="num"><strong style="color: var(--green); font-size: 16px;">${fmt(Math.round(payout))}</strong></td></tr>
+        </tbody>
+      </table>
+      ${penalty > 0 ? `<div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 14px; font-size: 11px;">
+        ⚠️ Vade dolmadan kapatıyorsun (${d.dueDay - state.day} gün kaldı). Birikim faizinin %20'si ceza olarak kesilir.
+      </div>` : ''}
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1;" onclick="closeDeposit('${depositId}')">✓ PARAYI AL (${fmt(Math.round(payout))})</button>
+        <button class="btn" onclick="closeModal()">✕ VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function openBuyAssetModal(assetId) {
+  const a = INVESTMENT_ASSETS[assetId];
+  if (!a) return;
+  const buyPrice = getAssetBuyPrice(assetId);
+  const sellPrice = getAssetSellPrice(assetId);
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2>${a.symbol} ${a.name} AL</h2>
+      <table class="data-table" style="margin: 14px 0; font-size: 11px;">
+        <tbody>
+          <tr><td>Anlık piyasa</td><td class="num">${fmt(getCurrentAssetPrice(assetId))}</td></tr>
+          <tr><td>Alış fiyatı (spread dahil)</td><td class="num" style="color: var(--red);">${fmt(buyPrice)}</td></tr>
+          <tr><td>Satış fiyatı (anlık)</td><td class="num" style="color: var(--green);">${fmt(sellPrice)}</td></tr>
+          <tr><td>Kasandaki para</td><td class="num">${fmt(state.cash)}</td></tr>
+        </tbody>
+      </table>
+      <label style="font-size: 11px; color: var(--ink-dim); display: block; margin-bottom: 4px;">Yatırılacak Tutar (TL)</label>
+      <input type="number" id="buy-amount" class="text-input" style="width: 100%; margin-bottom: 8px;" value="10000" min="1000" max="${state.cash}" step="1000" oninput="updateBuyEstimate('${assetId}')">
+      <div id="buy-estimate" style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 11px;">
+        Yaklaşık: <strong id="buy-qty">—</strong> birim
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1;" onclick="confirmBuyAsset('${assetId}')">🛒 SATIN AL</button>
+        <button class="btn" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  updateBuyEstimate(assetId);
+}
+
+function updateBuyEstimate(assetId) {
+  const a = INVESTMENT_ASSETS[assetId];
+  const amount = parseFloat(document.getElementById('buy-amount').value) || 0;
+  const buyPrice = getAssetBuyPrice(assetId);
+  const qty = amount / buyPrice;
+  document.getElementById('buy-qty').textContent = qty.toFixed(a.decimals);
+}
+
+function confirmBuyAsset(assetId) {
+  const amount = parseFloat(document.getElementById('buy-amount').value);
+  if (isNaN(amount) || amount <= 0) { toast('Geçersiz tutar', 'error'); return; }
+  buyAsset(assetId, amount);
+}
+
+function openSellAssetModal(assetId) {
+  const a = INVESTMENT_ASSETS[assetId];
+  if (!a) return;
+  const have = (state.portfolio || {})[assetId] || 0;
+  if (have <= 0) { toast('Bu varlıktan elinde yok', 'error'); return; }
+  const sellPrice = getAssetSellPrice(assetId);
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2>${a.symbol} ${a.name} SAT</h2>
+      <table class="data-table" style="margin: 14px 0; font-size: 11px;">
+        <tbody>
+          <tr><td>Elindeki miktar</td><td class="num"><strong>${have.toFixed(a.decimals)}</strong></td></tr>
+          <tr><td>Satış fiyatı (birim)</td><td class="num" style="color: var(--green);">${fmt(sellPrice)}</td></tr>
+          <tr><td>Tam satış değeri</td><td class="num"><strong>${fmt(have * sellPrice)}</strong></td></tr>
+        </tbody>
+      </table>
+      <label style="font-size: 11px; color: var(--ink-dim); display: block; margin-bottom: 4px;">Satılacak Miktar (birim)</label>
+      <input type="number" id="sell-qty" class="text-input" style="width: 100%; margin-bottom: 8px;" value="${have.toFixed(a.decimals)}" min="0" max="${have}" step="${(have / 10).toFixed(a.decimals)}" oninput="updateSellEstimate('${assetId}')">
+      <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+        <button class="btn small" style="flex: 1;" onclick="setSellPercent('${assetId}', 0.25)">%25</button>
+        <button class="btn small" style="flex: 1;" onclick="setSellPercent('${assetId}', 0.50)">%50</button>
+        <button class="btn small" style="flex: 1;" onclick="setSellPercent('${assetId}', 0.75)">%75</button>
+        <button class="btn small" style="flex: 1;" onclick="setSellPercent('${assetId}', 1.00)">%100</button>
+      </div>
+      <div id="sell-estimate" style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--green); margin-bottom: 14px; font-size: 11px;">
+        Alacağın: <strong id="sell-tl">—</strong>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1; background: var(--green); color: #fff; border-color: var(--green);" onclick="confirmSellAsset('${assetId}')">💰 SAT</button>
+        <button class="btn" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  updateSellEstimate(assetId);
+}
+
+function setSellPercent(assetId, pct) {
+  const a = INVESTMENT_ASSETS[assetId];
+  const have = (state.portfolio || {})[assetId] || 0;
+  document.getElementById('sell-qty').value = (have * pct).toFixed(a.decimals);
+  updateSellEstimate(assetId);
+}
+
+function updateSellEstimate(assetId) {
+  const qty = parseFloat(document.getElementById('sell-qty').value) || 0;
+  const sellPrice = getAssetSellPrice(assetId);
+  document.getElementById('sell-tl').textContent = fmt(qty * sellPrice);
+}
+
+function confirmSellAsset(assetId) {
+  const qty = parseFloat(document.getElementById('sell-qty').value);
+  if (isNaN(qty) || qty <= 0) { toast('Geçersiz miktar', 'error'); return; }
+  sellAsset(assetId, qty);
+}
+
+// ============================================================
+// MUHASEBE SAYFASI
+// ============================================================
+
+// Filtreli K/Z dönemi (varsayılan 30 gün)
+let _accountingPeriod = 30;
+
+function renderAccounting() {
+  const c = $('center');
+
+  const accountantCount = (state.accountants || []).length;
+  const receipts = (state.receipts || []).slice().sort((a, b) => b.day - a.day);
+  const ledger = state.dailyLedger || [];
+
+  // Seçili dönem için günlük gruplama
+  const today = state.day;
+  const periodStart = today - _accountingPeriod + 1;
+  const periodLedger = ledger.filter(e => e.day >= periodStart);
+
+  // Günlük toplam tablosu
+  const dailyTotals = {}; // { day: { income, expense, net } }
+  for (let d = periodStart; d <= today; d++) {
+    dailyTotals[d] = { income: 0, expense: 0 };
+  }
+  periodLedger.forEach(e => {
+    if (!dailyTotals[e.day]) dailyTotals[e.day] = { income: 0, expense: 0 };
+    if (e.type === 'income') dailyTotals[e.day].income += e.amount;
+    else dailyTotals[e.day].expense += e.amount;
+  });
+
+  // Toplam istatistik (seçili dönem)
+  const totalIncome = periodLedger.filter(e => e.type === 'income').reduce((s, e) => s + e.amount, 0);
+  const totalExpense = periodLedger.filter(e => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
+  const netPL = totalIncome - totalExpense;
+
+  // Kategori dökümü
+  const categoryStats = {};
+  periodLedger.forEach(e => {
+    if (!categoryStats[e.category]) categoryStats[e.category] = { income: 0, expense: 0 };
+    categoryStats[e.category][e.type] += e.amount;
+  });
+
+  // Grafik için max değer (bar height oranı)
+  const maxAbs = Math.max(1, ...Object.values(dailyTotals).flatMap(d => [d.income, d.expense]));
+
+  // K/Z grafiği (basit SVG bar chart)
+  const days = Object.keys(dailyTotals).map(Number).sort((a, b) => a - b);
+  const chartWidth = Math.min(800, days.length * 28);
+  const chartHeight = 200;
+  const barWidth = Math.max(2, (chartWidth / days.length) - 4);
+
+  const chartBars = days.map((d, i) => {
+    const t = dailyTotals[d];
+    const incomeH = Math.round((t.income / maxAbs) * (chartHeight / 2 - 10));
+    const expenseH = Math.round((t.expense / maxAbs) * (chartHeight / 2 - 10));
+    const x = i * (barWidth + 4);
+    const midY = chartHeight / 2;
+    return `
+      <rect x="${x}" y="${midY - incomeH}" width="${barWidth}" height="${incomeH}" fill="#10b981" opacity="0.85"></rect>
+      <rect x="${x}" y="${midY}" width="${barWidth}" height="${expenseH}" fill="#ef4444" opacity="0.85"></rect>
+      ${days.length <= 30 ? `<text x="${x + barWidth/2}" y="${chartHeight - 2}" font-size="8" text-anchor="middle" fill="#888">G${d}</text>` : ''}
+    `;
+  }).join('');
+
+  // Kategori adı çevirisi
+  const CATEGORY_LABELS = {
+    'tahsilat': '💰 Tahsilat (Müşteri ödemesi)',
+    'malzeme': '🧱 Malzeme alımı',
+    'yakit': '⛽ Yakıt',
+    'maas': '💼 Personel maaş',
+    'ise-alim': '👋 İşe alım',
+    'arac-alim': '🚛 Araç alımı',
+    'arac-satis': '🏷 Araç satışı',
+    'arsa': '🏞 Arsa alımı',
+    'arsa-satis': '🏞 Arsa satışı',
+    'insaat': '🏗 İnşaat başlangıç',
+    'insaat-iscilik': '👷 İnşaat işçilik',
+    'yikim': '🏚 Yıkım',
+    'taseron': '🤝 Taşeron',
+    'dis-nakliye': '🚚 Dış nakliye',
+    'daire-satis': '🏠 Daire satışı',
+    'kira-geliri': '🏠 Kira geliri',
+    'kira-depozito': '🏠 Kira (depozito)',
+    'kredi-cekildi': '🏦 Kredi çekildi',
+    'kredi-odeme': '🏦 Kredi ödeme',
+    'kredi-faiz': '🏦 Kredi faiz',
+    'kart-aidat': '💳 Kredi kartı aidatı',
+    'kart-nakit': '💳 Kredi kartı nakit avans',
+    'kart-odeme': '💳 Kredi kartı borç ödeme',
+    'vadeli-acilis': '🏦 Vadeli hesap açılış',
+    'vadeli-kapanis': '🏦 Vadeli hesap kapanış',
+    'vadeli-faiz': '💰 Vadeli faiz geliri',
+    'doviz-alim': '💵 Döviz alımı',
+    'doviz-satis': '💵 Döviz satışı',
+    'maden-alim': '🥇 Kıymetli maden alımı',
+    'maden-satis': '🥇 Kıymetli maden satışı',
+    'kripto-alim': '₿ Kripto alımı',
+    'kripto-satis': '₿ Kripto satışı',
+    'diger': 'Diğer'
+  };
+
+  const categoryRows = Object.entries(categoryStats)
+    .sort((a, b) => (b[1].income + b[1].expense) - (a[1].income + a[1].expense))
+    .map(([cat, val]) => {
+      const label = CATEGORY_LABELS[cat] || cat;
+      const net = val.income - val.expense;
+      return `<tr>
+        <td>${label}</td>
+        <td class="num" style="color: var(--green);">${val.income > 0 ? '+' + fmt(val.income) : '—'}</td>
+        <td class="num" style="color: var(--red);">${val.expense > 0 ? '-' + fmt(val.expense) : '—'}</td>
+        <td class="num" style="color: ${net >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight: 700;">${net >= 0 ? '+' : ''}${fmt(net)}</td>
+      </tr>`;
+    }).join('');
+
+  // Son makbuzlar
+  const recentReceipts = receipts.slice(0, 50);
+
+  c.innerHTML = `<h2>📊 MUHASEBE</h2>
+    <div class="subtitle">Günlük kâr/zarar takibi · Tahsilat makbuzları · ${accountantCount > 0 ? `${accountantCount} muhasebeci aktif` : 'Muhasebeci yok'}</div>
+
+    ${accountantCount === 0 ? `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid #f59e0b; font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+      <div>💡 <strong>Muhasebeci yok</strong> — Personelden işe alırsan teslim edilmiş sözleşmeler her gün otomatik tahsil edilir, manuel uğraşmazsın.</div>
+      <button class="btn small primary" onclick="setView('hr'); switchHRTab('accountants');">PERSONELE GİT →</button>
+    </div>` : `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid #f59e0b; font-size: 11px;">
+      📊 <strong style="color: #f59e0b;">Aktif muhasebeci:</strong> ${(state.accountants || []).map(a => `${a.name} (Sv${a.level})`).join(', ')} · <strong>Tüm tahsilatlar her gün otomatik yapılır</strong>
+    </div>`}
+
+    <!-- DÖNEM SEÇİCİ -->
+    <div class="filter-chips" style="margin-bottom: 16px;">
+      <div class="filter-chip ${_accountingPeriod === 7 ? 'active' : ''}" onclick="changeAccPeriod(7)">Son 7 gün</div>
+      <div class="filter-chip ${_accountingPeriod === 30 ? 'active' : ''}" onclick="changeAccPeriod(30)">Son 30 gün</div>
+      <div class="filter-chip ${_accountingPeriod === 90 ? 'active' : ''}" onclick="changeAccPeriod(90)">Son 90 gün</div>
+      <div class="filter-chip ${_accountingPeriod === 365 ? 'active' : ''}" onclick="changeAccPeriod(365)">Son 1 yıl</div>
+    </div>
+
+    <!-- ÜST İSTATİSTİK -->
+    <div class="stat-grid" style="margin-bottom: 20px;">
+      <div class="stat-tile">
+        <div class="stat-label">💰 Gelir</div>
+        <div class="stat-val" style="color: var(--green); font-size: 17px;">${fmt(totalIncome)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">💸 Gider</div>
+        <div class="stat-val" style="color: var(--red); font-size: 17px;">${fmt(totalExpense)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">📊 Net K/Z</div>
+        <div class="stat-val" style="color: ${netPL >= 0 ? 'var(--green)' : 'var(--red)'}; font-size: 18px;">${netPL >= 0 ? '+' : ''}${fmt(netPL)}</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">📋 İşlem</div>
+        <div class="stat-val">${periodLedger.length}</div>
+      </div>
+    </div>
+
+    <!-- GÜNLÜK GRAFİK -->
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📈 GÜNLÜK KAR/ZARAR (Son ${_accountingPeriod} gün)</h3>
+    <div style="background: var(--panel); border: 1px solid var(--border); padding: 16px; margin-bottom: 20px; overflow-x: auto;">
+      <div style="display: flex; gap: 14px; margin-bottom: 8px; font-size: 11px;">
+        <span><span style="display: inline-block; width: 10px; height: 10px; background: #10b981; vertical-align: middle;"></span> Gelir</span>
+        <span><span style="display: inline-block; width: 10px; height: 10px; background: #ef4444; vertical-align: middle;"></span> Gider</span>
+      </div>
+      <svg width="${chartWidth}" height="${chartHeight}" viewBox="0 0 ${chartWidth} ${chartHeight}" style="display: block; max-width: 100%;">
+        <line x1="0" y1="${chartHeight/2}" x2="${chartWidth}" y2="${chartHeight/2}" stroke="var(--border)" stroke-width="1"></line>
+        ${chartBars}
+      </svg>
+    </div>
+
+    <!-- KATEGORİ DÖKÜMÜ -->
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📂 KATEGORİ DÖKÜMÜ</h3>
+    <div class="table-scroll" style="margin-bottom: 20px;">
+      <table class="data-table">
+        <thead><tr><th>Kategori</th><th class="num">Gelir</th><th class="num">Gider</th><th class="num">Net</th></tr></thead>
+        <tbody>${categoryRows || '<tr><td colspan="4" style="text-align: center; color: var(--ink-dim);">Bu dönemde işlem yok</td></tr>'}</tbody>
+      </table>
+    </div>
+
+    <!-- MAKBUZLAR -->
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">🧾 TAHSİLAT MAKBUZLARI (${receipts.length})</h3>
+    ${recentReceipts.length === 0 ? '<div class="empty">Henüz tahsil edilmiş sözleşme yok.</div>' : `<div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th>Belge No</th><th>Gün</th><th>Müşteri</th><th class="num">Tutar</th><th class="num">Net Kâr</th><th>Tahsilat</th><th></th></tr></thead>
+        <tbody>
+          ${recentReceipts.map(r => `<tr>
+            <td><strong>${r.receiptNo}</strong></td>
+            <td class="num">G${r.day}</td>
+            <td>${r.customerName} <span style="font-size: 10px; color: var(--ink-dim);">(${ILCELER[r.customerIlce]?.name || ''})</span></td>
+            <td class="num">${fmt(r.total)}</td>
+            <td class="num" style="color: ${r.profit >= 0 ? 'var(--green)' : 'var(--red)'};">${r.profit >= 0 ? '+' : ''}${fmt(r.profit)}</td>
+            <td style="font-size: 10px;">${r.collectedByAccountant ? `📊 ${r.accountantName || 'Muhasebe'}` : '👤 Manuel'}</td>
+            <td><button class="btn small" onclick="reopenReceipt('${r.receiptNo}')">📄 Görüntüle</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`}
+    ${receipts.length > 50 ? `<div style="text-align: center; margin-top: 10px; color: var(--ink-dim); font-size: 11px;">Son 50 makbuz gösteriliyor (toplam ${receipts.length})</div>` : ''}`;
+}
+
+function changeAccPeriod(days) {
+  _accountingPeriod = days;
+  renderAccounting();
+}
+
+// Eski makbuza geri dön
+function reopenReceipt(receiptNo) {
+  const r = (state.receipts || []).find(x => x.receiptNo === receiptNo);
+  if (!r) {
+    toast('Makbuz bulunamadı', 'error');
+    return;
+  }
+  // showReceiptModal sözleşme + müşteri bekliyor — receipts'teki veriden taklit oluştur
+  const cust = getCustomer(r.customerId) || {
+    name: r.customerName,
+    ilce: r.customerIlce,
+    id: r.customerId
+  };
+  const fakeCt = {
+    receiptNo: r.receiptNo,
+    id: r.contractId,
+    items: r.items,
+    unitPrices: r.unitPrices,
+    total: r.total,
+    materialsTotal: r.total - (r.shippingCost || 0),
+    shippingCost: r.shippingCost,
+    shippingType: r.shippingType,
+    estimatedCost: r.estimatedCost,
+    externalShippingTotal: r.externalShippingTotal,
+    externalShippingLog: r.externalShippingLog,
+    startedDay: r.startedDay,
+    collectedDay: r.collectedDay
+  };
+  showReceiptModal(fakeCt, cust);
 }
 
 function renderArchive() {
@@ -10545,7 +12369,7 @@ function nextDay() {
 
   // 5) Salaries - Maaşlar her 30 günde bir ödenir
   const nextPayrollDay = state.lastPayrollDay + 30;
-  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0) || (state.purchasers && state.purchasers.length > 0) || (state.dispatchers && state.dispatchers.length > 0))) {
+  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0) || (state.purchasers && state.purchasers.length > 0) || (state.dispatchers && state.dispatchers.length > 0) || (state.accountants && state.accountants.length > 0))) {
     let totalPayroll = 0;
     const breakdown = [];
 
@@ -10597,6 +12421,16 @@ function nextDay() {
       const pay = Math.round(r.salary * (daysWorked / 30));
       totalPayroll += pay;
       breakdown.push({ name: r.name, role: 'Sevkiyat', pay, daysWorked });
+    });
+
+    // Muhasebeciler
+    (state.accountants || []).forEach(r => {
+      const periodStart = state.lastPayrollDay;
+      const effectiveStart = Math.max(r.hireDay, periodStart);
+      const daysWorked = Math.min(30, state.day - effectiveStart);
+      const pay = Math.round(r.salary * (daysWorked / 30));
+      totalPayroll += pay;
+      breakdown.push({ name: r.name, role: 'Muhasebe', pay, daysWorked });
     });
 
     if (totalPayroll > 0) {
@@ -10701,6 +12535,148 @@ function nextDay() {
 
   // 7d) Sevkiyat sorumlusu artık mail atmıyor — sözleşmeler ekranında tek tık ile çalışır
   // (Eski blok v1.35'te kaldırıldı)
+
+  // 7e0) Yatırım piyasaları günlük güncelleme + vadeli faiz tahakkuku
+  updateMarketPrices();
+  if (state.deposits && state.deposits.length > 0) {
+    state.deposits.forEach(d => {
+      // Günlük faiz tahakkuku (annual rate / 365)
+      const dailyInterest = (d.amount + d.accruedInterest) * (d.annualRate / 365);
+      d.accruedInterest += dailyInterest;
+
+      // Günlük vadeli: her gün otomatik kasaya geçer (faiz cüzdana)
+      if (d.type === 'daily') {
+        // Günlük vadeli'de faiz cari hesaba otomatik geçer
+        const earned = Math.round(d.accruedInterest);
+        if (earned > 0) {
+          earn(earned, 'vadeli-faiz');
+          d.accruedInterest -= earned;
+        }
+      }
+    });
+
+    // Aylık vadelilerin vadesi geldiyse otomatik kapanır
+    state.deposits.filter(d => d.type === 'monthly' && state.day >= d.dueDay).forEach(d => {
+      const payout = d.amount + Math.round(d.accruedInterest);
+      earn(payout, 'vadeli-kapanis');
+      state.agenda.push(`💰 Vadeli hesap olgunlaştı: +${fmt(payout)} (faiz: ${fmt(Math.round(d.accruedInterest))})`);
+      toast(`💰 Aylık vadeli olgunlaştı: ${fmt(payout)}`, 'success');
+    });
+    state.deposits = state.deposits.filter(d => !(d.type === 'monthly' && state.day >= d.dueDay));
+  }
+
+  // 7e1) Kredi kartı işlemleri — ekstre kesimleri + faiz tahakkuku
+  if (state.creditCards && state.creditCards.length > 0) {
+    state.creditCards.forEach(card => {
+      // Ekstre kesim günü (30 günde bir)
+      if (state.day >= card.dueDay) {
+        if (card.balance > 0) {
+          // Faiz tahakkuk et: aylık faiz × kalan borç
+          const interest = Math.round(card.balance * card.monthlyRate);
+          card.balance += interest;
+
+          state.agenda.push(`💳 ${CREDIT_CARD_TIERS[card.tier].name}: Ekstre kesildi · Borç ${fmt(card.balance)} · Faiz ${fmt(interest)}`);
+          toast(`💳 ${CREDIT_CARD_TIERS[card.tier].name} ekstresi: Borç ${fmt(card.balance)} (faiz: ${fmt(interest)})`, 'info');
+        }
+
+        // Sonraki ekstre kesimi 30 gün sonra
+        card.lastStatementDay = state.day;
+        card.dueDay = state.day + 30;
+
+        // Yıllık aidat (her 365 günde bir) — kart açılış yıldönümünde
+        const daysSinceIssue = state.day - card.issuedDay;
+        if (daysSinceIssue > 0 && daysSinceIssue % 365 < 30 && daysSinceIssue >= 365) {
+          if (state.cash >= card.annualFee) {
+            spend(card.annualFee, 'kart-aidat');
+            state.agenda.push(`💳 ${CREDIT_CARD_TIERS[card.tier].name}: Yıllık aidat ${fmt(card.annualFee)} kesildi`);
+          } else {
+            // Aidat ödenmezse kart borcuna eklenir
+            card.balance += card.annualFee;
+            state.agenda.push(`⚠️ ${CREDIT_CARD_TIERS[card.tier].name}: Yıllık aidat (${fmt(card.annualFee)}) borca eklendi`);
+          }
+        }
+      }
+    });
+  }
+
+  // 7e) Muhasebeciler otomatik tahsilat yapar — teslim edilmiş ama ödenmemiş tüm sözleşmeleri toplar
+  const accountants = state.accountants || [];
+  if (accountants.length > 0) {
+    const pendingContracts = state.contracts.filter(c => c.delivered && !c.paid);
+
+    let collected = 0;
+    let totalAmount = 0;
+    const collectByAccountant = accountants.slice().sort((a, b) => b.level - a.level)[0]; // en kıdemli kayıt
+    const toCollect = pendingContracts.slice(); // hepsi
+
+    toCollect.forEach(ct => {
+      const idx = state.contracts.findIndex(c => c.id === ct.id);
+      if (idx < 0) return;
+      const cust = getCustomer(ct.customerId);
+      if (!cust) return;
+
+      earn(ct.total, 'tahsilat');
+      cust.balance -= ct.total;
+      cust.totalRevenue += ct.total;
+      // Seviye bonusu: Sv1 standart (+4), Sv2 +5% (+4.2), Sv3 +10% güven + ekstra itibar
+      const trustGain = 4 + (collectByAccountant.level === 2 ? 1 : collectByAccountant.level === 3 ? 2 : 0);
+      cust.trust = Math.min(100, cust.trust + trustGain);
+      const repGain = 2 + (collectByAccountant.level === 3 ? 1 : 0);
+      state.reputation = Math.min(100, state.reputation + repGain);
+      state.totalProfit += ct.total - ct.estimatedCost - (ct.externalShippingTotal || 0);
+      state.contractsCompleted++;
+      ct.paid = true;
+      ct.receiptNo = nextReceiptNumber();
+      ct.collectedDay = state.day;
+
+      state.archive.push({ ...ct, type: 'contract', status: 'completed', completedDay: state.day });
+
+      // Makbuz kaydet
+      if (!state.receipts) state.receipts = [];
+      const profit = ct.total - (ct.estimatedCost || 0) - (ct.externalShippingTotal || 0);
+      state.receipts.push({
+        receiptNo: ct.receiptNo,
+        day: state.day,
+        contractId: ct.id,
+        customerId: ct.customerId,
+        customerName: cust.name,
+        customerIlce: cust.ilce,
+        total: ct.total,
+        estimatedCost: ct.estimatedCost || 0,
+        externalShippingTotal: ct.externalShippingTotal || 0,
+        profit,
+        items: ct.items,
+        unitPrices: ct.unitPrices,
+        shippingCost: ct.shippingCost || 0,
+        shippingType: ct.shippingType,
+        externalShippingLog: ct.externalShippingLog || [],
+        startedDay: ct.startedDay,
+        collectedDay: state.day,
+        collectedByAccountant: true,
+        accountantName: collectByAccountant.name
+      });
+      if (state.receipts.length > 200) state.receipts = state.receipts.slice(-200);
+
+      state.contracts.splice(idx, 1);
+      collected++;
+      totalAmount += ct.total;
+    });
+
+    if (collected > 0) {
+      // XP ve istatistik en kıdemli muhasebeciye yazılır
+      collectByAccountant.totalCollected = (collectByAccountant.totalCollected || 0) + totalAmount;
+      collectByAccountant.totalCollectionCount = (collectByAccountant.totalCollectionCount || 0) + collected;
+      collectByAccountant.xp += 10 * collected;
+      const xpReq = 100 * collectByAccountant.level;
+      if (collectByAccountant.xp >= xpReq && collectByAccountant.level < 3) {
+        collectByAccountant.level++;
+        collectByAccountant.xp = 0;
+        toast(`⭐ ${collectByAccountant.name} Sv ${collectByAccountant.level}'e yükseldi!`, 'success');
+      }
+      state.agenda.push(`📊 ${collectByAccountant.name}: ${collected} sözleşme tahsil edildi (${fmt(totalAmount)})`);
+      toast(`📊 Muhasebe: ${collected} sözleşme tahsil edildi (${fmt(totalAmount)})`, 'success');
+    }
+  }
 
   // 8) Aylık rapor — her 30 günde bir
   const monthNumber = Math.floor(state.day / 30);
@@ -11387,10 +13363,60 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.36';
+const CURRENT_VERSION = 'v1.39';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.39',
+    date: '16 Mayıs 2026',
+    title: 'KREDİ KARTI SİSTEMİ',
+    items: [
+      { cat: 'major', text: '💳 <strong>3 kademe kredi kartı</strong> başvurusu: Klasik (₺50k limit, %4.5/ay) · Gold (₺250k, %3.8/ay) · Platinum (₺1M, %3.2/ay)' },
+      { cat: 'major', text: 'Banka sayfasında <strong>Kredi Kartları</strong> bölümü — limit, borç, kullanım grafiği' },
+      { cat: 'feature', text: 'Nakit avans: kart limitinden istediğin kadar çek, kasaya geçsin' },
+      { cat: 'feature', text: 'Borç ödeme modalı: asgari (%20), yarısı, tamamı hızlı butonları' },
+      { cat: 'feature', text: 'Ekstre kesimi otomatik (30 günde bir) — borç varsa faiz tahakkuk eder' },
+      { cat: 'feature', text: 'Yıllık aidat otomatik kesilir (kart açılışının her yıldönümünde)' },
+      { cat: 'feature', text: 'Kart iptal: tüm borç ödenmişse mümkün' },
+      { cat: 'feature', text: 'İtibar şartı: Klasik %10 · Gold %30 · Platinum %60' }
+    ]
+  },
+  {
+    version: 'v1.38',
+    date: '16 Mayıs 2026',
+    title: 'YATIRIM EKONOMİSİ + MALZEME TEDARİĞİ',
+    items: [
+      { cat: 'major', text: '💎 <strong>Yeni "Yatırım" menüsü</strong> — Vadeli + Döviz + Maden + Kripto' },
+      { cat: 'major', text: '🏦 <strong>Vadeli hesap</strong>: Günlük (%42/yıl) ve Aylık (%54/yıl) — vade dolmadan çekersen %20 ceza' },
+      { cat: 'major', text: '💵 <strong>Döviz</strong>: USD ₺38.50 · EUR ₺42.20 · GBP ₺49.30 (alış/satış makası %0.5)' },
+      { cat: 'major', text: '🥇 <strong>Kıymetli madenler</strong>: Altın ₺4.180/g · Gümüş ₺52/g · Platin ₺1.280/g (makas %1)' },
+      { cat: 'major', text: '₿ <strong>Kripto borsa</strong>: BTC ₺4.28M · ETH ₺142k · BNB ₺28.5k · SOL ₺9.8k · XRP ₺92 · DOGE ₺12.50' },
+      { cat: 'feature', text: 'Her varlığın 14 günlük mini grafik (sparkline) — yeşil/kırmızı yön gösterimi' },
+      { cat: 'feature', text: 'Hızlı yüzdelik satış (25/50/75/100%)' },
+      { cat: 'major', text: '🧱 <strong>Kentsel dönüşüm onayında malzeme listesi tablosu</strong> — hangi malzemeden kaç adet kullanılacak' },
+      { cat: 'major', text: 'Taşerona devirde de <strong>malzemeleri siz tedarik edersiniz</strong> — taşeron yalnızca işçilik' },
+      { cat: 'feature', text: 'Taşeron ücreti malzemesiz hesaplanır (sadece işçilik × %22 marj)' },
+      { cat: 'feature', text: 'Taşeron inşaatlar da stoktan günlük malzeme tüketir; eksikse "malzeme bekliyor" durur' }
+    ]
+  },
+  {
+    version: 'v1.37',
+    date: '16 Mayıs 2026',
+    title: 'MUHASEBE MODÜLÜ',
+    items: [
+      { cat: 'major', text: '📊 <strong>Yeni Personel: Muhasebeci</strong> — 3 seviye (Junior / Mali Müşavir / Mali İşler Müdürü)' },
+      { cat: 'major', text: 'Muhasebeci varsa <strong>TÜM tahsilatları otomatik yapar</strong> — manuel "Ödemeyi Tahsil Et" butonu gizlenir' },
+      { cat: 'major', text: 'Seviye bonusu: Sv1 standart · Sv2 +%5 güven · Sv3 +%10 güven + itibar bonusu' },
+      { cat: 'major', text: 'Sol menüde yeni <strong>📊 Muhasebe</strong> sayfası' },
+      { cat: 'feature', text: 'Günlük K/Z grafiği (SVG bar chart): yeşil gelir, kırmızı gider' },
+      { cat: 'feature', text: 'Dönem filtresi: Son 7/30/90/365 gün' },
+      { cat: 'feature', text: 'Kategori dökümü tablosu: tahsilat, malzeme, yakıt, maaş, kentsel dönüşüm vs.' },
+      { cat: 'feature', text: 'Tahsilat makbuzları arşivi — eski makbuzlara tek tıkla geri dönülür' },
+      { cat: 'feature', text: 'Her gelir/gider otomatik kategoriye yazılır (spend/earn fonksiyonları)' },
+      { cat: 'feature', text: 'Manuel vs muhasebeci tahsilatı makbuzda işaretlenir' }
+    ]
+  },
   {
     version: 'v1.36',
     date: '15 Mayıs 2026',

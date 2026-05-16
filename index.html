@@ -4034,9 +4034,12 @@ function generateUrbanRenewalProposal() {
   // Yıkım maliyeti — 2026 İstanbul piyasası (m² × ₺300, asbestli/eski binalarda artar)
   const demolitionCost = Math.round(oldM2 * 300);
 
-  // İnşaat süresi
-  const buildDays = calculateConstructionDays(newType, landM2);
-  const totalDays = buildDays + 10; // yıkım 10 gün (2026'da daha hızlı)
+  // İnşaat süresi — kentsel dönüşüm modern müteahhitler ile %40 daha hızlı
+  // (Deprem sonrası baskı + iş gücü yoğunlaştırma)
+  const URBAN_SPEED_FACTOR = 0.60;  // %40 indirim
+  const URBAN_DEMOLITION_DAYS = 6;  // yıkım 10 → 6 gün
+  const buildDays = Math.max(10, Math.ceil(calculateConstructionDays(newType, landM2) * URBAN_SPEED_FACTOR));
+  const totalDays = buildDays + URBAN_DEMOLITION_DAYS;
 
   // Tahmini inşaat maliyeti
   const materials = calculateConstructionMaterials(newType, landM2);
@@ -4100,7 +4103,7 @@ function approveUrbanRenewal(emailId) {
 
   const ilceData = ILCELER[e.ilce];
   const newType = BUILDING_TYPES[e.newType];
-  const buildDays = e.totalDays - 10;
+  const buildDays = e.buildDays || (e.totalDays - 6);
   const avgAptSize = newType.avgApartmentSize(e.landM2, e.newAptCount);
   const cashAfter = state.cash - e.demolitionCost;
   const ourShareValueRough = e.ourShare * avgAptSize * newType.pricePerSqm;
@@ -4183,7 +4186,7 @@ function approveUrbanRenewal(emailId) {
         <tbody>
           <tr>
             <td><strong>🏚 Yıkım</strong></td>
-            <td class="num">10 gün</td>
+            <td class="num">6 gün</td>
             <td class="num" style="color: var(--red); font-weight: 700;">${fmt(e.demolitionCost)}</td>
             <td style="font-size: 11px;">Hemen ödenir (onay sonrası)</td>
           </tr>
@@ -4275,9 +4278,9 @@ function confirmUrbanRenewal(emailId) {
     building: {
       id: state.buildingNextId++,
       type: e.newType,
-      startDay: state.day + 10,
+      startDay: state.day + 6,
       totalDays: e.buildDays,
-      daysPassed: -10,
+      daysPassed: -6,
       status: 'demolition',
       materialsNeeded: calculateConstructionMaterials(e.newType, e.landM2).map(m => ({ ...m, consumed: 0 })),
       totalCost: e.demolitionCost,
@@ -6443,7 +6446,7 @@ function renderUrbanRenewalDetail(e) {
           <div>Arsa: <strong>${e.landM2} m²</strong></div>
           <div>Toplam alan: <strong>${(e.landM2 * newType.floorMultiplier).toFixed(0)} m²</strong></div>
           <div>Daire sayısı: <strong>${e.newAptCount}</strong> · Ortalama: <strong>${avgAptSize} m²</strong></div>
-          <div>Süre: <strong>${e.totalDays} gün</strong> (yıkım 10 + inşaat ${e.buildDays})</div>
+          <div>Süre: <strong>${e.totalDays} gün</strong> (yıkım 6 + inşaat ${e.buildDays})</div>
         </div>
       </div>
     </div>
@@ -7635,7 +7638,9 @@ function renderMyFleet() {
             </select>
             <button class="btn small primary" onclick="assignDriver('${v.id}')">ATA</button>
           ` : ''}
-          ${!busy ? `<button class="btn small danger" onclick="sellVehicle('${v.id}')">SAT</button>` : ''}
+          ${!busy
+            ? `<button class="btn small" style="background: var(--red); color: #fff; border-color: var(--red); font-weight: 700;" onclick="sellVehicle('${v.id}')" title="Aracı sat — kasaya ${fmt(resaleValue)} eklenir">🏷 SAT (${fmt(resaleValue)})</button>`
+            : `<button class="btn small" disabled style="opacity: 0.5;" title="Araç sevkiyatta, dönünce satabilirsin">🏷 SAT (G${v.busyUntil} dönüş)</button>`}
         </div>
       </div>`;
     }).join('')}
@@ -7766,17 +7771,74 @@ function sellVehicle(vehicleId) {
     return;
   }
 
-  // Şoför atanmış mı?
   const driver = state.drivers.find(d => d.vehicleId === v.id);
   const resaleValue = vehicleResaleValue(v);
   const t = VEHICLE_TYPES[v.type];
+  const km = v.km || 0;
+  const ageDay = state.day - (v.purchaseDay || 1);
+  const kmCat = kmCategory(km);
+  const originalPrice = t.cost;
+  const valueLoss = originalPrice - resaleValue;
+  const valueLossPct = ((valueLoss / originalPrice) * 100).toFixed(1);
 
-  let warning = '';
-  if (driver) {
-    warning = `\n\nŞoför ${driver.name} bu araca atanmış. Satıştan sonra şoför boşa kalacak.`;
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 560px;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="font-family: 'Bebas Neue'; font-size: 24px; letter-spacing: 2px; color: var(--red);">🏷 ARAÇ SATIŞI</div>
+      </div>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 16px; font-size: 12px; line-height: 1.7;">
+        <strong style="color: var(--ink);">${v.name || t.name}</strong> · ${t.name} (${t.tonaj} ton kapasite)
+      </div>
+
+      <table class="data-table" style="margin-bottom: 16px;">
+        <tbody>
+          <tr><td>Sıfır fiyatı (galeride)</td><td class="num">${fmt(originalPrice)}</td></tr>
+          <tr><td>Mevcut KM</td><td class="num"><strong style="color: ${kmCat.color};">${km.toLocaleString('tr-TR')} km</strong> <span style="font-size: 10px; color: var(--ink-dim);">(${kmCat.label})</span></td></tr>
+          <tr><td>Yaş</td><td class="num">${ageDay} gün</td></tr>
+          <tr><td>Değer kaybı</td><td class="num" style="color: var(--red);">-${fmt(valueLoss)} (%${valueLossPct})</td></tr>
+          <tr style="background: var(--panel-2); border-top: 2px solid var(--border);">
+            <td><strong>SATIŞ DEĞERİ</strong></td>
+            <td class="num"><strong style="color: var(--green); font-size: 17px;">${fmt(resaleValue)}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+
+      ${driver ? `<div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 12px;">
+        ⚠️ <strong>Şoför ${driver.name}</strong> (Sv ${driver.level}) bu araca atanmış. Satıştan sonra şoför <strong>boşa kalacak</strong>, başka araca atayabilir veya işten çıkarabilirsin.
+      </div>` : ''}
+
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--ink-dim); margin-bottom: 16px; font-size: 11px; line-height: 1.6;">
+        💡 <strong>İpucu:</strong> Eski araçları satıp yenisini almak yıpranma maliyetini azaltır. Ya da daha küçük/büyük tonajlı araca geçebilirsin.
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1; padding: 12px; background: var(--green); color: #fff; border-color: var(--green); font-weight: 700;" onclick="confirmSellVehicle('${vehicleId}')">
+          ✓ SAT (+${fmt(resaleValue)})
+        </button>
+        <button class="btn" style="padding: 12px;" onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function confirmSellVehicle(vehicleId) {
+  const idx = state.vehicles.findIndex(v => v.id === vehicleId);
+  if (idx < 0) { closeModal(); return; }
+  const v = state.vehicles[idx];
+
+  // Tekrar busy kontrolü (modal açıkken sevkiyata gönderilmiş olabilir)
+  if (v.busyUntil > state.day || v.deliveringContractId) {
+    toast('Araç sevkiyata çıktı, satılamaz.', 'error');
+    closeModal();
+    return;
   }
 
-  if (!confirm(`${t.name} satılacak\nKM: ${v.km.toLocaleString('tr-TR')}\nSatış değeri: ${fmt(resaleValue)}${warning}\n\nDevam edilsin mi?`)) return;
+  const driver = state.drivers.find(d => d.vehicleId === v.id);
+  const resaleValue = vehicleResaleValue(v);
+  const t = VEHICLE_TYPES[v.type];
 
   // Şoförün vehicleId'sini temizle
   if (driver) {
@@ -7785,7 +7847,9 @@ function sellVehicle(vehicleId) {
 
   earn(resaleValue, 'arac-satis');
   state.vehicles.splice(idx, 1);
-  toast(`✓ ${t.name} satıldı: +${fmt(resaleValue)}`, 'success');
+
+  closeModal();
+  toast(`✓ ${v.name || t.name} satıldı: +${fmt(resaleValue)}${driver ? ' · ' + driver.name + ' boşa düştü' : ''}`, 'success');
   render();
 }
 
@@ -9218,9 +9282,9 @@ function renderMyLands() {
         </div>`;
         actions = `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
       } else if (b.status === 'demolition') {
-        // Yıkım fazı
+        // Yıkım fazı (kentsel dönüşüm — 6 gün)
         const demoDay = Math.abs(b.daysPassed);
-        const demoTotal = 10;
+        const demoTotal = 6;
         const pct = Math.round((demoDay / demoTotal) * 100);
         buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--red);">
           <strong style="color: var(--red);">🏚 YIKIM SÜRECİ</strong>
@@ -11886,6 +11950,84 @@ function serializeState() {
   delete copy.selectedEmail;
   delete copy.marketSearchFocused;
   delete copy.supplierSearchFocused;
+  delete copy._pendingPurchase;
+  delete copy._pendingUrbanRenewal;
+  delete copy._pendingRejectUrban;
+
+  // ARŞİV BUDAMA — Firebase 1MB sınırı için
+  // En fazla son 100 arşiv kaydı tutulur, eskiler düşürülür
+  if (Array.isArray(copy.archive) && copy.archive.length > 100) {
+    copy.archive = copy.archive.slice(-100);
+  }
+
+  // ARŞİVDEKİ İŞ DETAYLARINI BUDAMA — eski iş kayıtları büyük
+  // Her arşiv mailinin items/purchases/plan gibi ağır alanlarını sıkıştır
+  if (Array.isArray(copy.archive)) {
+    copy.archive = copy.archive.map(e => {
+      const slim = { ...e };
+      // Body, purchases, plan, items detaylarını arşivde tutmaya gerek yok (status + özet yeterli)
+      delete slim.body;
+      delete slim.purchases;
+      delete slim.plan;
+      delete slim.items;
+      delete slim.unitPrices;
+      return slim;
+    });
+  }
+
+  // INBOX BUDAMA — geçmişe takılı maillerin body alanlarını küçültme yok, hepsi okunmalı
+
+  // KAPALI SÖZLEŞMELER BUDAMA — paid + delivered olanlardan en fazla 30'u tutulur (en yeniler)
+  if (Array.isArray(copy.contracts)) {
+    const active = copy.contracts.filter(c => !c.paid);
+    const closed = copy.contracts.filter(c => c.paid).sort((a, b) => (b.startedDay || 0) - (a.startedDay || 0));
+    copy.contracts = active.concat(closed.slice(0, 30));
+
+    // Kapalı sözleşmelerin teslimat tablolarını budama (irsaliyeler içeriğini azalt)
+    copy.contracts.forEach(ct => {
+      if (ct.paid && Array.isArray(ct.deliveries) && ct.deliveries.length > 5) {
+        // Sadece son 5 teslimatın detaylarını tut
+        const lastDeliveries = ct.deliveries.slice(-5);
+        const olderCount = ct.deliveries.length - 5;
+        ct.deliveries = lastDeliveries;
+        ct._truncatedDeliveryCount = olderCount;
+      }
+    });
+  }
+
+  // PRICE HISTORY BUDAMA — eğer çok uzunsa son 60 günü tut
+  if (copy.priceHistory && typeof copy.priceHistory === 'object') {
+    Object.keys(copy.priceHistory).forEach(k => {
+      if (Array.isArray(copy.priceHistory[k]) && copy.priceHistory[k].length > 60) {
+        copy.priceHistory[k] = copy.priceHistory[k].slice(-60);
+      }
+    });
+  }
+
+  // BOYUT KONTROL — sınıra yaklaşıyorsa daha agresif buda
+  const FIRESTORE_LIMIT = 1000000; // 1 MB güvenli sınır
+  let estSize = JSON.stringify(copy).length;
+  if (estSize > FIRESTORE_LIMIT) {
+    console.warn(`[serializeState] Kayıt boyutu büyük (${(estSize / 1024).toFixed(0)} KB), agresif budama`);
+    // 1. Arşivi 30'a düşür
+    if (copy.archive && copy.archive.length > 30) copy.archive = copy.archive.slice(-30);
+    // 2. Kapalı sözleşmeleri 10'a düşür
+    if (copy.contracts) {
+      const active = copy.contracts.filter(c => !c.paid);
+      const closed = copy.contracts.filter(c => c.paid);
+      copy.contracts = active.concat(closed.slice(0, 10));
+    }
+    // 3. Agenda'yı son 20'ye düşür
+    if (Array.isArray(copy.agenda) && copy.agenda.length > 20) copy.agenda = copy.agenda.slice(-20);
+
+    estSize = JSON.stringify(copy).length;
+    if (estSize > FIRESTORE_LIMIT) {
+      // Son çare: arşivi tamamen sil
+      copy.archive = [];
+      console.warn(`[serializeState] Arşiv silindi, yeni boyut: ${(JSON.stringify(copy).length / 1024).toFixed(0)} KB`);
+    }
+  }
+
   return copy;
 }
 

@@ -4077,9 +4077,6 @@ function approveUrbanRenewal(emailId) {
     return;
   }
 
-  // State'e geçici sakla — confirm popup'taki butonlar bu id ile çağırır
-  state._pendingUrbanRenewal = emailId;
-
   const ilceData = ILCELER[e.ilce];
   const newType = BUILDING_TYPES[e.newType];
   const buildDays = e.totalDays - 10;
@@ -4087,7 +4084,7 @@ function approveUrbanRenewal(emailId) {
   const cashAfter = state.cash - e.demolitionCost;
   const ourShareValueRough = e.ourShare * avgAptSize * newType.pricePerSqm;
 
-  const html = `<div class="modal-bg" onclick="if(event.target===this) cancelUrbanRenewal()">
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
     <div class="modal" onclick="event.stopPropagation()" style="max-width: 720px; max-height: 90vh; overflow-y: auto;">
       <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
         <div style="font-family: 'Bebas Neue'; font-size: 26px; letter-spacing: 2px; color: var(--purple);">🏚 KENTSEL DÖNÜŞÜM ONAYI</div>
@@ -4208,10 +4205,10 @@ function approveUrbanRenewal(emailId) {
       </div>
 
       <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-        <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px; background: var(--purple); color: #fff; border-color: var(--purple); font-weight: 700;" onclick="confirmUrbanRenewal()">
+        <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px; background: var(--purple); color: #fff; border-color: var(--purple); font-weight: 700;" onclick="confirmUrbanRenewal(${emailId})">
           ✓ ONAYLA & YIKIMA BAŞLA (${fmt(e.demolitionCost)})
         </button>
-        <button class="btn" style="padding: 14px;" onclick="cancelUrbanRenewal()">
+        <button class="btn" style="padding: 14px;" onclick="closeModal()">
           ✕ İPTAL
         </button>
       </div>
@@ -4221,20 +4218,13 @@ function approveUrbanRenewal(emailId) {
   $('modals').innerHTML = html;
 }
 
-function cancelUrbanRenewal() {
-  state._pendingUrbanRenewal = null;
-  closeModal();
-}
-
-function confirmUrbanRenewal() {
-  const emailId = state._pendingUrbanRenewal;
-  if (!emailId) {
-    closeModal();
-    return;
-  }
+function confirmUrbanRenewal(emailId) {
+  console.log('[confirmUrbanRenewal] başladı, emailId:', emailId);
   const idx = state.inbox.findIndex(x => x.id === emailId);
   if (idx < 0) {
-    cancelUrbanRenewal();
+    console.warn('[confirmUrbanRenewal] mail bulunamadı:', emailId);
+    toast('Mail bulunamadı', 'error');
+    closeModal();
     return;
   }
   const e = state.inbox[idx];
@@ -4244,6 +4234,11 @@ function confirmUrbanRenewal() {
     return;
   }
 
+  // Defensive: state.lands / state.urbanProjects garanti olsun
+  if (!state.lands) state.lands = [];
+  if (!state.urbanProjects) state.urbanProjects = [];
+  if (!state.buildingNextId) state.buildingNextId = 1;
+
   spend(e.demolitionCost, 'yikim');
 
   // Sanal bir arsa oluştur (kentsel dönüşüm arazisi)
@@ -4252,17 +4247,17 @@ function confirmUrbanRenewal() {
     id: urbanLandId,
     ilce: e.ilce,
     m2: e.landM2,
-    purchasePrice: 0, // bizim arsa değil, müşterinin
+    purchasePrice: 0,
     purchaseDay: state.day,
     isUrbanRenewal: true,
-    urbanProjectId: null, // aşağıda dolduracağız
+    urbanProjectId: null,
     building: {
       id: state.buildingNextId++,
       type: e.newType,
-      startDay: state.day + 10, // yıkım sonrası (10 gün)
+      startDay: state.day + 10,
       totalDays: e.buildDays,
-      daysPassed: -10, // negative = yıkım fazında (10 gün)
-      status: 'demolition', // demolition | building | paused-warned | completed
+      daysPassed: -10,
+      status: 'demolition',
       materialsNeeded: calculateConstructionMaterials(e.newType, e.landM2).map(m => ({ ...m, consumed: 0 })),
       totalCost: e.demolitionCost,
       isUrbanRenewal: true
@@ -4294,7 +4289,6 @@ function confirmUrbanRenewal() {
   state.archive.push({ ...e, type: 'urban-renewal', status: 'approved', completedDay: state.day });
   state.inbox.splice(idx, 1);
   state.selectedEmail = null;
-  state._pendingUrbanRenewal = null;
 
   closeModal();
   toast(`✓ Kentsel dönüşüm projesi başladı! Yıkım: ${fmt(e.demolitionCost)}`, 'success');
@@ -4309,8 +4303,7 @@ function rejectUrbanRenewal(emailId) {
   const e = state.inbox[idx];
 
   // Reddetme onay modalı
-  state._pendingRejectUrban = emailId;
-  const html = `<div class="modal-bg" onclick="if(event.target===this) cancelRejectUrban()">
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
     <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
       <h2 style="color: var(--red);">🏚 KENTSEL DÖNÜŞÜM REDDİ</h2>
       <p style="font-size: 13px; line-height: 1.7; margin: 16px 0;">
@@ -4321,24 +4314,17 @@ function rejectUrbanRenewal(emailId) {
         Reddedilen teklif arşive gider, geri alınamaz.
       </div>
       <div style="display: flex; gap: 10px;">
-        <button class="btn danger" style="flex: 1; padding: 12px;" onclick="confirmRejectUrban()">✕ REDDET</button>
-        <button class="btn" style="padding: 12px;" onclick="cancelRejectUrban()">VAZGEÇ</button>
+        <button class="btn danger" style="flex: 1; padding: 12px;" onclick="confirmRejectUrban(${emailId})">✕ REDDET</button>
+        <button class="btn" style="padding: 12px;" onclick="closeModal()">VAZGEÇ</button>
       </div>
     </div>
   </div>`;
   $('modals').innerHTML = html;
 }
 
-function cancelRejectUrban() {
-  state._pendingRejectUrban = null;
-  closeModal();
-}
-
-function confirmRejectUrban() {
-  const emailId = state._pendingRejectUrban;
-  if (!emailId) { closeModal(); return; }
+function confirmRejectUrban(emailId) {
   const idx = state.inbox.findIndex(x => x.id === emailId);
-  if (idx < 0) { cancelRejectUrban(); return; }
+  if (idx < 0) { closeModal(); return; }
   const e = state.inbox[idx];
 
   // Güven biraz düşer
@@ -4349,7 +4335,6 @@ function confirmRejectUrban() {
   state.archive.push({ ...e, type: 'urban-renewal', status: 'rejected', completedDay: state.day });
   state.inbox.splice(idx, 1);
   state.selectedEmail = null;
-  state._pendingRejectUrban = null;
 
   closeModal();
   toast(`✕ Kentsel dönüşüm reddedildi. ${e.customerName} güveni biraz düştü.`, 'info');

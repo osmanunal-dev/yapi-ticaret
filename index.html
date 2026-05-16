@@ -4077,7 +4077,172 @@ function approveUrbanRenewal(emailId) {
     return;
   }
 
-  if (!confirm(`${e.customerName} kentsel dönüşüm projesi onaylanacak\n\n• Yıkım maliyeti: ${fmt(e.demolitionCost)} (hemen ödenir)\n• Yıkım süresi: 10 gün\n• Sonra ${e.totalDays - 10} gün inşaat\n• Bize ${e.ourShare} daire kalacak\n\nDevam edelim mi?`)) return;
+  // State'e geçici sakla — confirm popup'taki butonlar bu id ile çağırır
+  state._pendingUrbanRenewal = emailId;
+
+  const ilceData = ILCELER[e.ilce];
+  const newType = BUILDING_TYPES[e.newType];
+  const buildDays = e.totalDays - 10;
+  const avgAptSize = newType.avgApartmentSize(e.landM2, e.newAptCount);
+  const cashAfter = state.cash - e.demolitionCost;
+  const ourShareValueRough = e.ourShare * avgAptSize * newType.pricePerSqm;
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) cancelUrbanRenewal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 720px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="font-family: 'Bebas Neue'; font-size: 26px; letter-spacing: 2px; color: var(--purple);">🏚 KENTSEL DÖNÜŞÜM ONAYI</div>
+      </div>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
+        <strong style="color: var(--purple);">${e.customerName}</strong> · ${ilceData.name} (${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası)
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">PROJE ÖZETİ</h3>
+
+      <div class="grid-2" style="margin-bottom: 16px;">
+        <div class="card" style="border-left: 3px solid var(--red);">
+          <h3>🏚 Eski Bina (Yıkılacak)</h3>
+          <div style="font-size: 12px; line-height: 1.8;">
+            <div>Yaş: <strong>${e.buildingAge} yıl</strong></div>
+            <div>Alan: <strong>${e.oldM2} m²</strong></div>
+            <div>Daire sayısı: <strong>${e.oldApartmentCount}</strong></div>
+          </div>
+        </div>
+        <div class="card" style="border-left: 3px solid var(--green);">
+          <h3>${newType.icon} Yeni ${newType.name}</h3>
+          <div style="font-size: 12px; line-height: 1.8;">
+            <div>Arsa: <strong>${e.landM2} m²</strong></div>
+            <div>Toplam alan: <strong>${(e.landM2 * newType.floorMultiplier).toFixed(0)} m²</strong></div>
+            <div>Daire sayısı: <strong>${e.newAptCount}</strong> · Ortalama: <strong>${avgAptSize} m²</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">DAİRE PAYLAŞIMI</h3>
+
+      <table class="data-table" style="margin-bottom: 16px;">
+        <thead>
+          <tr>
+            <th>Taraf</th>
+            <th class="num">Daire Sayısı</th>
+            <th class="num">Pay (%)</th>
+            <th class="num">Tahmini Değer</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong style="color: var(--green);">🏗 Size (Müteahhit)</strong></td>
+            <td class="num"><strong style="color: var(--green); font-size: 16px;">${e.ourShare}</strong></td>
+            <td class="num">%${Math.round((1 - e.theirShareRatio) * 100)}</td>
+            <td class="num"><strong style="color: var(--green);">${fmt(ourShareValueRough)}</strong></td>
+          </tr>
+          <tr>
+            <td><strong style="color: var(--blue);">🏠 Müşteriye</strong></td>
+            <td class="num"><strong style="color: var(--blue); font-size: 16px;">${e.theirShare}</strong></td>
+            <td class="num">%${Math.round(e.theirShareRatio * 100)}</td>
+            <td class="num" style="color: var(--ink-dim);">—</td>
+          </tr>
+          <tr style="background: var(--panel-2); border-top: 2px solid var(--border);">
+            <td><strong>TOPLAM</strong></td>
+            <td class="num"><strong>${e.newAptCount}</strong></td>
+            <td class="num"><strong>%100</strong></td>
+            <td class="num">—</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">SÜREÇ & MALİYET</h3>
+
+      <table class="data-table" style="margin-bottom: 16px;">
+        <thead>
+          <tr>
+            <th>Aşama</th>
+            <th class="num">Süre</th>
+            <th class="num">Maliyet</th>
+            <th>Açıklama</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>🏚 Yıkım</strong></td>
+            <td class="num">10 gün</td>
+            <td class="num" style="color: var(--red); font-weight: 700;">${fmt(e.demolitionCost)}</td>
+            <td style="font-size: 11px;">Hemen ödenir (onay sonrası)</td>
+          </tr>
+          <tr>
+            <td><strong>🏗 İnşaat</strong></td>
+            <td class="num">${buildDays} gün</td>
+            <td class="num" style="color: var(--red);">${fmt(e.estMaterialCost + e.estLabor)}</td>
+            <td style="font-size: 11px;">Malzeme + işçilik (günlük)</td>
+          </tr>
+          <tr style="background: var(--panel-2); border-top: 2px solid var(--border);">
+            <td><strong>TOPLAM</strong></td>
+            <td class="num"><strong>${e.totalDays} gün</strong></td>
+            <td class="num"><strong style="color: var(--red);">${fmt(e.estTotalCost)}</strong></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="stat-grid" style="margin-bottom: 16px;">
+        <div class="stat-tile">
+          <div class="stat-label">Yıkım (peşin)</div>
+          <div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(e.demolitionCost)}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Kasandaki Para</div>
+          <div class="stat-val" style="color: ${state.cash >= e.demolitionCost ? 'var(--green)' : 'var(--red)'}; font-size: 14px;">${fmt(state.cash)}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Yıkımdan Sonra</div>
+          <div class="stat-val" style="color: ${cashAfter >= 0 ? 'var(--ink)' : 'var(--red)'}; font-size: 14px;">${fmt(cashAfter)}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Tahmini Net Kâr</div>
+          <div class="stat-val" style="color: ${e.estProfit >= 0 ? 'var(--green)' : 'var(--red)'}; font-size: 14px;">${e.estProfit >= 0 ? '+' : ''}${fmt(e.estProfit)}</div>
+        </div>
+      </div>
+
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 11px; line-height: 1.6;">
+        💡 <strong>Bonus:</strong> Onay sonrası müşteri güveni +5 · İnşaat tamamlanınca itibar +5 · Tamamlanma anında müşteri güveni +15
+      </div>
+
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px; background: var(--purple); color: #fff; border-color: var(--purple); font-weight: 700;" onclick="confirmUrbanRenewal()">
+          ✓ ONAYLA & YIKIMA BAŞLA (${fmt(e.demolitionCost)})
+        </button>
+        <button class="btn" style="padding: 14px;" onclick="cancelUrbanRenewal()">
+          ✕ İPTAL
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function cancelUrbanRenewal() {
+  state._pendingUrbanRenewal = null;
+  closeModal();
+}
+
+function confirmUrbanRenewal() {
+  const emailId = state._pendingUrbanRenewal;
+  if (!emailId) {
+    closeModal();
+    return;
+  }
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) {
+    cancelUrbanRenewal();
+    return;
+  }
+  const e = state.inbox[idx];
+
+  if (state.cash < e.demolitionCost) {
+    toast(`Yetersiz bakiye. Yıkım için ${fmt(e.demolitionCost)} gerekli.`, 'error');
+    return;
+  }
 
   spend(e.demolitionCost, 'yikim');
 
@@ -4129,7 +4294,9 @@ function approveUrbanRenewal(emailId) {
   state.archive.push({ ...e, type: 'urban-renewal', status: 'approved', completedDay: state.day });
   state.inbox.splice(idx, 1);
   state.selectedEmail = null;
+  state._pendingUrbanRenewal = null;
 
+  closeModal();
   toast(`✓ Kentsel dönüşüm projesi başladı! Yıkım: ${fmt(e.demolitionCost)}`, 'success');
   addXP(80, 'kentsel dönüşüm onayı');
   setView('lands');
@@ -4141,7 +4308,38 @@ function rejectUrbanRenewal(emailId) {
   if (idx < 0) return;
   const e = state.inbox[idx];
 
-  if (!confirm(`${e.customerName} kentsel dönüşüm teklifini reddetmek istiyor musun?`)) return;
+  // Reddetme onay modalı
+  state._pendingRejectUrban = emailId;
+  const html = `<div class="modal-bg" onclick="if(event.target===this) cancelRejectUrban()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2 style="color: var(--red);">🏚 KENTSEL DÖNÜŞÜM REDDİ</h2>
+      <p style="font-size: 13px; line-height: 1.7; margin: 16px 0;">
+        <strong>${e.customerName}</strong> kentsel dönüşüm teklifini reddetmek istediğinden emin misin?
+      </p>
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 16px; font-size: 12px;">
+        ⚠️ Müşteri güveni <strong style="color: var(--red);">-3 puan</strong> düşer.
+        Reddedilen teklif arşive gider, geri alınamaz.
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn danger" style="flex: 1; padding: 12px;" onclick="confirmRejectUrban()">✕ REDDET</button>
+        <button class="btn" style="padding: 12px;" onclick="cancelRejectUrban()">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function cancelRejectUrban() {
+  state._pendingRejectUrban = null;
+  closeModal();
+}
+
+function confirmRejectUrban() {
+  const emailId = state._pendingRejectUrban;
+  if (!emailId) { closeModal(); return; }
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) { cancelRejectUrban(); return; }
+  const e = state.inbox[idx];
 
   // Güven biraz düşer
   const cust = getCustomer(e.customerId);
@@ -4151,7 +4349,9 @@ function rejectUrbanRenewal(emailId) {
   state.archive.push({ ...e, type: 'urban-renewal', status: 'rejected', completedDay: state.day });
   state.inbox.splice(idx, 1);
   state.selectedEmail = null;
+  state._pendingRejectUrban = null;
 
+  closeModal();
   toast(`✕ Kentsel dönüşüm reddedildi. ${e.customerName} güveni biraz düştü.`, 'info');
   render();
 }
@@ -5714,18 +5914,122 @@ function autoPurchaseAll() {
     return;
   }
 
-  // Önizleme: kullanıcıya özet ver, onay al
-  const supplierLines = proposal.purchases.map(p => {
+  // Proposal'ı geçici olarak sakla, modal "TAMAM" butonu okuyacak
+  state._pendingPurchase = { proposal, repId: rep.id };
+
+  // Tedarikçi blokları (her biri kalem tablosuyla)
+  const supplierBlocks = proposal.purchases.map(p => {
     const loyalty = (state.supplierLoyalty || {})[p.supplier.id] || 0;
-    return `• ${p.supplier.name}: ${p.items.length} kalem · ${fmt(p.total)}${loyalty > 10 ? ` (bağ %${loyalty.toFixed(0)})` : ''}`;
-  }).join('\n');
+    const loyaltyInfo = loyaltyLabel(p.supplier.id);
+    const showLoyalty = loyalty >= 10;
+
+    const itemRows = p.items.map(it => {
+      const product = PRODUCTS[it.productId];
+      return `<tr>
+        <td>${product.name}</td>
+        <td class="num">${it.qty} ${product.unit}</td>
+        <td class="num">${fmt(it.unitPrice)}</td>
+        <td class="num"><strong>${fmt(it.lineTotal)}</strong></td>
+      </tr>`;
+    }).join('');
+
+    const savingsLine = p.savings > 0
+      ? `<div style="font-size: 11px; color: var(--green); margin-top: 4px;">İlişki indirimi: -${fmt(p.savings)}</div>`
+      : '';
+
+    return `<div style="background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 12px; margin-bottom: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+        <div>
+          <div style="font-family: 'Bebas Neue'; font-size: 16px; letter-spacing: 1px;">${p.supplier.name}</div>
+          <div style="font-size: 10px; color: var(--ink-dim);">${ILCELER[p.supplier.ilce].name}${showLoyalty ? ` · Bağ: <span style="color: ${loyaltyInfo.color}; font-weight: 700;">${loyaltyInfo.label} (${loyalty.toFixed(0)}/100)</span>` : ''}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-family: 'Bebas Neue'; font-size: 17px; color: var(--accent);">${fmt(p.total)}</div>
+          ${savingsLine}
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" style="font-size: 11px;">
+          <thead><tr><th>Malzeme</th><th class="num">Miktar</th><th class="num">Birim</th><th class="num">Tutar</th></tr></thead>
+          <tbody>${itemRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join('');
 
   const totalItemCount = proposal.purchases.reduce((s, p) => s + p.items.length, 0);
+  const enoughCash = state.cash >= proposal.totalCost;
 
-  const msg = `${rep.name} aşağıdaki alışı yapmak istiyor:\n\n${supplierLines}\n\nToplam: ${fmt(proposal.totalCost)}${proposal.totalSavings > 0 ? `\nİlişki indirimi: ${fmt(proposal.totalSavings)}` : ''}\nKasada: ${fmt(state.cash)}\n\n${totalItemCount} kalem ${proposal.purchases.length} tedarikçiden alınacak. Devam edelim mi?`;
+  const html = `<div class="modal-bg" onclick="if(event.target===this) cancelAutoPurchase()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 760px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="font-family: 'Bebas Neue'; font-size: 28px; letter-spacing: 2px;">🛒 SATIN ALMA ÖNERİSİ</div>
+      </div>
 
-  if (!confirm(msg)) return;
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
+        <strong style="color: var(--accent);">${rep.name}</strong> (${['Sv1 Tedarik Asistanı','Sv2 Satın Alma Uzmanı','Sv3 Satın Alma Müdürü'][rep.level - 1]})
+        sözleşme ihtiyaçlarını analiz etti ve aşağıdaki tedarikçilerden alış yapmak istiyor.
+      </div>
 
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">TEDARİKÇİLER (${proposal.purchases.length}) · ${totalItemCount} KALEM</h3>
+
+      ${supplierBlocks}
+
+      <div class="stat-grid" style="margin-top: 14px; margin-bottom: 14px;">
+        <div class="stat-tile">
+          <div class="stat-label">Toplam Alış</div>
+          <div class="stat-val" style="color: var(--red);">${fmt(proposal.totalCost)}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">İlişki Tasarrufu</div>
+          <div class="stat-val" style="color: var(--green); font-size: 14px;">${fmt(proposal.totalSavings)}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Kasandaki Para</div>
+          <div class="stat-val" style="color: ${enoughCash ? 'var(--green)' : 'var(--red)'}; font-size: 14px;">${fmt(state.cash)}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-label">Kalan (Alıştan Sonra)</div>
+          <div class="stat-val" style="color: ${enoughCash ? 'var(--ink)' : 'var(--red)'}; font-size: 14px;">${fmt(state.cash - proposal.totalCost)}</div>
+        </div>
+      </div>
+
+      ${!enoughCash ? `<div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 14px; font-size: 12px;">
+        <strong style="color: var(--red);">⚠️ Yetersiz bakiye</strong> — Bu alış için ${fmt(proposal.totalCost - state.cash)} eksiğin var. Krediye bak veya tahsilat yap.
+      </div>` : ''}
+
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button class="btn primary" style="flex: 1; min-width: 200px; padding: 14px; background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="confirmAutoPurchase()" ${enoughCash ? '' : 'disabled'}>
+          ✓ ${enoughCash ? `ONAYLA VE AL (${fmt(proposal.totalCost)})` : 'YETERSİZ BAKİYE'}
+        </button>
+        <button class="btn" style="padding: 14px;" onclick="cancelAutoPurchase()">
+          ✕ İPTAL
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function cancelAutoPurchase() {
+  state._pendingPurchase = null;
+  closeModal();
+}
+
+function confirmAutoPurchase() {
+  const pending = state._pendingPurchase;
+  if (!pending) {
+    closeModal();
+    return;
+  }
+  const { proposal, repId } = pending;
+  const rep = (state.purchasers || []).find(r => r.id === repId);
+  if (!rep) {
+    toast('Satın alma sorumlusu bulunamadı', 'error');
+    cancelAutoPurchase();
+    return;
+  }
   if (state.cash < proposal.totalCost) {
     toast(`Yetersiz bakiye. ${fmt(proposal.totalCost)} gerekli, kasada ${fmt(state.cash)} var.`, 'error');
     return;
@@ -5755,6 +6059,8 @@ function autoPurchaseAll() {
 
   addXP(8, 'satın alma');
   toast(`✓ ${rep.name}: ${fmt(proposal.totalCost)} alış tamamlandı (${proposal.purchases.length} tedarikçi${proposal.totalSavings > 0 ? `, ${fmt(proposal.totalSavings)} tasarruf` : ''})`, 'success');
+  state._pendingPurchase = null;
+  closeModal();
   render();
 }
 

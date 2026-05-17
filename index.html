@@ -856,19 +856,32 @@
 
   /* Avatar grid */
   .avatar-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    display: flex;
     gap: 10px;
     margin-top: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px 4px 14px 4px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
-  @media (max-width: 900px) {
-    .avatar-grid { grid-template-columns: repeat(5, 1fr); }
-    .profile-header { grid-template-columns: 1fr; text-align: center; }
-    .profile-avatar-big { margin: 0 auto; }
-    .profile-name-row { justify-content: center; }
+  .avatar-grid::-webkit-scrollbar {
+    height: 8px;
+  }
+  .avatar-grid::-webkit-scrollbar-track {
+    background: var(--panel-2);
+    border-radius: 4px;
+  }
+  .avatar-grid::-webkit-scrollbar-thumb {
+    background: var(--accent);
+    border-radius: 4px;
+    opacity: 0.7;
   }
   .avatar-option {
-    aspect-ratio: 1;
+    width: 72px;
+    height: 72px;
+    flex: 0 0 72px;
     border-radius: 50%;
     cursor: pointer;
     overflow: hidden;
@@ -879,6 +892,8 @@
     justify-content: center;
     background: var(--panel-2);
     -webkit-tap-highlight-color: transparent;
+    scroll-snap-align: start;
+    position: relative;
   }
   .avatar-option:hover {
     border-color: var(--accent);
@@ -898,6 +913,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    pointer-events: none;
   }
   .avatar-option.google-photo {
     background: var(--panel);
@@ -906,6 +922,19 @@
     font-family: 'Bebas Neue', sans-serif;
     font-size: 22px;
     color: var(--ink);
+  }
+  .avatar-section-label {
+    font-size: 11px;
+    color: var(--ink-dim);
+    margin-top: 6px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  @media (max-width: 900px) {
+    .profile-header { grid-template-columns: 1fr; text-align: center; }
+    .profile-avatar-big { margin: 0 auto; }
+    .profile-name-row { justify-content: center; }
   }
 
   /* Profile form */
@@ -12690,9 +12719,9 @@ function renderProfile() {
   }
   // Harf
   avatarOptions.push({ id: 'letter', type: 'letter', label: 'Baş Harf' });
-  // SVG'ler
+  // İnternet avatarları (DiceBear)
   Object.keys(AVATARS).forEach(id => {
-    avatarOptions.push({ id, type: 'svg', label: AVATARS[id].name });
+    avatarOptions.push({ id, type: 'img', label: AVATARS[id].seed, category: AVATARS[id].category, url: AVATARS[id].url });
   });
 
   const currentAvatarId = avatarId || (user.photo ? 'google' : 'letter');
@@ -12754,23 +12783,52 @@ function renderProfile() {
     <div class="profile-form">
       <h3>AVATAR SEÇ</h3>
       <div class="form-hint" style="margin-bottom: 8px;">
-        Üstüne tıkla, otomatik kaydedilir.
+        Yana kaydırarak göz at, üstüne tıkla, otomatik kaydedilir.
       </div>
-      <div class="avatar-grid" id="avatar-grid">
-        ${avatarOptions.map(opt => {
-          const selected = opt.id === currentAvatarId ? 'selected' : '';
-          let content;
-          if (opt.type === 'photo') {
-            content = `<img src="${user.photo}" alt="">`;
-          } else if (opt.type === 'letter') {
-            content = `<span style="font-family: 'Bebas Neue', sans-serif; font-size: 26px; color: var(--ink);">${displayName.charAt(0).toUpperCase()}</span>`;
-          } else {
-            content = AVATARS[opt.id].svg();
-          }
-          const cls = `avatar-option ${selected}${opt.type === 'photo' ? ' google-photo' : ''}${opt.type === 'letter' ? ' default-letter' : ''}`;
-          return `<div class="${cls}" onclick="selectAvatar('${opt.id}')" title="${opt.label}">${content}</div>`;
-        }).join('')}
-      </div>
+
+      ${(() => {
+        // Önce özel seçenekler (Google + Harf)
+        const special = avatarOptions.filter(o => o.type === 'photo' || o.type === 'letter');
+        const imgOpts = avatarOptions.filter(o => o.type === 'img');
+        // Kategoriye göre grupla
+        const grouped = {};
+        imgOpts.forEach(o => {
+          if (!grouped[o.category]) grouped[o.category] = [];
+          grouped[o.category].push(o);
+        });
+
+        let html = '';
+        // Özel
+        if (special.length > 0) {
+          html += `<div class="avatar-section-label">Özel</div>`;
+          html += `<div class="avatar-grid" id="avatar-grid">`;
+          special.forEach(opt => {
+            const selected = opt.id === currentAvatarId ? 'selected' : '';
+            let content;
+            if (opt.type === 'photo') {
+              content = `<img src="${user.photo}" alt="" loading="lazy">`;
+            } else if (opt.type === 'letter') {
+              content = `<span style="font-family: 'Bebas Neue', sans-serif; font-size: 26px; color: var(--ink);">${displayName.charAt(0).toUpperCase()}</span>`;
+            }
+            const cls = `avatar-option ${selected}${opt.type === 'photo' ? ' google-photo' : ''}${opt.type === 'letter' ? ' default-letter' : ''}`;
+            html += `<div class="${cls}" onclick="selectAvatar('${opt.id}')" title="${opt.label}">${content}</div>`;
+          });
+          html += `</div>`;
+        }
+
+        // Her kategori için ayrı kaydırılabilir liste
+        Object.entries(grouped).forEach(([catLabel, items]) => {
+          html += `<div class="avatar-section-label">${catLabel}</div>`;
+          html += `<div class="avatar-grid">`;
+          items.forEach(opt => {
+            const selected = opt.id === currentAvatarId ? 'selected' : '';
+            const cls = `avatar-option ${selected}`;
+            html += `<div class="${cls}" onclick="selectAvatar('${opt.id}')" title="${opt.label}"><img src="${opt.url}" alt="" loading="lazy"></div>`;
+          });
+          html += `</div>`;
+        });
+        return html;
+      })()}
     </div>
 
     ${renderAchievementsBlock()}
@@ -12878,9 +12936,10 @@ async function selectAvatar(avatarId) {
 
   // UI'ı hemen güncelle (optimistic)
   state.user.avatarId = avatarId;
-  document.querySelectorAll('#avatar-grid .avatar-option').forEach(el => el.classList.remove('selected'));
+  // Tüm avatar grid'lerdeki seçimleri temizle
+  document.querySelectorAll('.avatar-grid .avatar-option').forEach(el => el.classList.remove('selected'));
   // Tıklanan elementi bul
-  const clicked = [...document.querySelectorAll('#avatar-grid .avatar-option')].find(el =>
+  const clicked = [...document.querySelectorAll('.avatar-grid .avatar-option')].find(el =>
     el.getAttribute('onclick')?.includes(`'${avatarId}'`));
   if (clicked) clicked.classList.add('selected');
 
@@ -12893,7 +12952,7 @@ async function selectAvatar(avatarId) {
     } else if (avatarId === 'letter' || !avatarId) {
       big.innerHTML = displayName.charAt(0).toUpperCase();
     } else if (AVATARS[avatarId]) {
-      big.innerHTML = AVATARS[avatarId].svg();
+      big.innerHTML = `<img src="${AVATARS[avatarId].url}" alt="">`;
     }
   }
 
@@ -13074,9 +13133,9 @@ function renderLeaderboardContent(rows) {
 
           // Mini avatar
           const miniAv = (() => {
-            const avId = r.avatarId;
+            let avId = r.avatarId; if (avId && /^a\d{2}$/.test(avId)) avId = "av" + String(parseInt(avId.slice(1))).padStart(3, "0");
             if (avId && avId !== 'letter' && avId !== 'google' && AVATARS[avId]) {
-              return AVATARS[avId].svg();
+              return `<img src="${AVATARS[avId].url}" alt="" style="width:100%;height:100%;object-fit:cover;" loading="lazy">`;
             } else if (avId === 'google' && r.photoURL) {
               return `<img src="${r.photoURL}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
             } else if (r.photoURL && !avId) {
@@ -13240,9 +13299,10 @@ function renderAdminStats(users) {
 
           // Mini avatar
           const miniAv = (() => {
-            const avId = u.avatarId;
+            let avId = u.avatarId;
+            if (avId && /^a\d{2}$/.test(avId)) avId = 'av' + String(parseInt(avId.slice(1))).padStart(3, '0');
             if (avId && avId !== 'letter' && avId !== 'google' && AVATARS[avId]) {
-              return AVATARS[avId].svg();
+              return `<img src="${AVATARS[avId].url}" alt="" style="width:100%;height:100%;object-fit:cover;" loading="lazy">`;
             } else if (avId === 'google' && u.photoURL) {
               return `<img src="${u.photoURL}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
             } else if (u.photoURL && !avId) {
@@ -14797,74 +14857,109 @@ function isModeratorOrAdmin() {
 // ============================================================
 
 // 20 farklı SVG avatar (inşaat / iş temalı, parametrik renkler)
-const AVATARS = {
-  // İNŞAAT KARAKTERLERİ — gradient'li, modern karakter avatarları
-  a01: { name: 'Patron', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a01bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a1f2e"/><stop offset="1" stop-color="#3a4a6a"/></linearGradient><radialGradient id="a01face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#fde2c4"/><stop offset="1" stop-color="#e6b88a"/></radialGradient></defs><rect width="64" height="64" fill="url(#a01bg)"/><circle cx="32" cy="58" r="28" fill="#1a1f2e"/><circle cx="32" cy="26" r="11" fill="url(#a01face)"/><path d="M21 22 Q32 12 43 22 Q43 17 38 14 Q32 11 26 14 Q21 17 21 22 Z" fill="#2c1810"/><path d="M14 60 Q14 40 26 36 L38 36 Q50 40 50 60 Z" fill="#1a1f2e"/><path d="M28 36 L28 60 M36 36 L36 60" stroke="#0d1218" stroke-width="1"/><circle cx="28" cy="26" r="1.2" fill="#000"/><circle cx="36" cy="26" r="1.2" fill="#000"/><path d="M29 31 Q32 33 35 31" stroke="#8a4a2a" stroke-width="1" fill="none"/></svg>`, colors: [] },
+// ============================================================
+// AVATARLAR — DiceBear API üzerinden internet bazlı
+// ============================================================
+// DiceBear, ücretsiz açık kaynak avatar API'sıdır.
+// Her stilde "seed" parametresi farklı bir avatar üretir.
+// URL formatı: https://api.dicebear.com/9.x/{style}/svg?seed={seed}&...
+// Stiller: avataaars (insan), bottts (robot), thumbs (parmak), shapes (soyut),
+// fun-emoji, lorelei, micah, miniavs, notionists, personas
+const AVATAR_CATEGORIES = [
+  {
+    label: '🧑 Karakterler',
+    style: 'avataaars',
+    seeds: ['Patron','Mühendis','Usta','Mimar','Müteahhit','Şef','Lider','İşçi','Foreman','Architect','Builder','Boss']
+  },
+  {
+    label: '👤 Yüzler',
+    style: 'personas',
+    seeds: ['Ahmet','Mehmet','Ayşe','Fatma','Ali','Veli','Zeynep','Hakan','Burak','Selin','Murat','Deniz']
+  },
+  {
+    label: '😊 Eğlenceli',
+    style: 'fun-emoji',
+    seeds: ['mutlu','enerjik','sevimli','party','kazanan','şampiyon','keyifli','başarı','güzel','huzur']
+  },
+  {
+    label: '🤖 Robotlar',
+    style: 'bottts',
+    seeds: ['demir-bey','beton-bot','vinç-x','metal-1','çelik-2','altın-3','platin-bot','elmas-x','master','elite','prime']
+  },
+  {
+    label: '🎨 Modern',
+    style: 'lorelei',
+    seeds: ['Kerem','Eylül','Defne','Emir','Yağmur','Cem','Lara','Ege','Mira','Sera','Toprak']
+  },
+  {
+    label: '🔷 Soyut',
+    style: 'shapes',
+    seeds: ['inşaat','altın','elmas','rubin','zafer','prestij','güç','iz','mühür','damga','imza','simge']
+  }
+];
 
-  a02: { name: 'Mühendis Hanım', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a02bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9826e"/><stop offset="1" stop-color="#9a4a3a"/></linearGradient><radialGradient id="a02face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#ffdbb4"/><stop offset="1" stop-color="#e0b080"/></radialGradient></defs><rect width="64" height="64" fill="url(#a02bg)"/><circle cx="32" cy="60" r="30" fill="#9a4a3a"/><path d="M14 26 Q14 12 32 12 Q50 12 50 26 L50 36 Q44 32 32 32 Q20 32 14 36 Z" fill="#3a2418"/><circle cx="32" cy="28" r="11" fill="url(#a02face)"/><path d="M22 18 Q32 10 42 18 L42 22 Q38 18 32 18 Q26 18 22 22 Z" fill="#3a2418"/><path d="M16 60 Q18 42 28 38 L36 38 Q46 42 48 60 Z" fill="#d9826e"/><circle cx="28" cy="28" r="1.2" fill="#000"/><circle cx="36" cy="28" r="1.2" fill="#000"/><path d="M30 33 Q32 35 34 33" stroke="#c44060" stroke-width="1.2" fill="none"/><circle cx="22" cy="30" r="1.5" fill="#ffaaaa" opacity="0.6"/><circle cx="42" cy="30" r="1.5" fill="#ffaaaa" opacity="0.6"/></svg>`, colors: [] },
+// Düz avatar listesi oluştur (id, style, seed, label)
+const AVATARS = (function() {
+  const result = {};
+  let counter = 1;
+  AVATAR_CATEGORIES.forEach(cat => {
+    cat.seeds.forEach(seed => {
+      const id = 'av' + String(counter).padStart(3, '0');
+      result[id] = {
+        style: cat.style,
+        seed,
+        category: cat.label,
+        url: `https://api.dicebear.com/9.x/${cat.style}/svg?seed=${encodeURIComponent(seed)}&backgroundColor=transparent&backgroundType=gradientLinear&backgroundRotation=0,360`
+      };
+      counter++;
+    });
+  });
+  return result;
+})();
 
-  a03: { name: 'Baretli Usta', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a03bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4a020"/><stop offset="1" stop-color="#c44a1e"/></linearGradient><radialGradient id="a03face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#f5c896"/><stop offset="1" stop-color="#c89668"/></radialGradient><linearGradient id="a03hat" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd166"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><rect width="64" height="64" fill="url(#a03bg)"/><circle cx="32" cy="60" r="30" fill="#252830"/><circle cx="32" cy="30" r="11" fill="url(#a03face)"/><path d="M18 26 Q18 16 32 14 Q46 16 46 26 L48 26 L48 30 L16 30 L16 26 Z" fill="url(#a03hat)"/><rect x="29" y="14" width="6" height="6" rx="1" fill="#c08100"/><path d="M14 60 Q16 42 26 38 L38 38 Q48 42 50 60 Z" fill="#3a4a6a"/><circle cx="28" cy="30" r="1.2" fill="#000"/><circle cx="36" cy="30" r="1.2" fill="#000"/><path d="M22 30 Q24 32 26 30" stroke="#5a3020" stroke-width="0.8" fill="none"/><path d="M38 30 Q40 32 42 30" stroke="#5a3020" stroke-width="0.8" fill="none"/><path d="M29 35 Q32 37 35 35" stroke="#8a4a2a" stroke-width="1" fill="none"/></svg>`, colors: [] },
-
-  a04: { name: 'Sakallı Patron', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a04bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a6b8a"/><stop offset="1" stop-color="#2a3450"/></linearGradient><radialGradient id="a04face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#e8c8a0"/><stop offset="1" stop-color="#b89878"/></radialGradient></defs><rect width="64" height="64" fill="url(#a04bg)"/><circle cx="32" cy="60" r="30" fill="#1a2030"/><circle cx="32" cy="28" r="12" fill="url(#a04face)"/><path d="M20 22 Q32 14 44 22 L44 18 Q40 12 32 12 Q24 12 20 18 Z" fill="#3a2618"/><path d="M22 32 Q22 38 26 41 Q32 44 38 41 Q42 38 42 32 Q40 36 32 36 Q24 36 22 32 Z" fill="#3a2618"/><path d="M14 60 Q16 44 26 40 L38 40 Q48 44 50 60 Z" fill="#5a6b8a"/><rect x="26" y="42" width="12" height="18" fill="#fff"/><path d="M32 42 L32 50 L30 52 L34 52 Z" fill="#c44a1e"/><circle cx="28" cy="28" r="1.3" fill="#000"/><circle cx="36" cy="28" r="1.3" fill="#000"/><path d="M22 26 Q24 28 27 26" stroke="#3a2618" stroke-width="1" fill="none"/><path d="M37 26 Q40 28 42 26" stroke="#3a2618" stroke-width="1" fill="none"/></svg>`, colors: [] },
-
-  a05: { name: 'Şehir Silüeti', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a05bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a020"/><stop offset="0.5" stop-color="#d96c5e"/><stop offset="1" stop-color="#3a1f50"/></linearGradient></defs><rect width="64" height="64" fill="url(#a05bg)"/><circle cx="50" cy="14" r="6" fill="#fff0c0" opacity="0.8"/><circle cx="50" cy="14" r="3" fill="#ffd166"/><path d="M0 56 L6 56 L6 36 L12 36 L12 56 L18 56 L18 24 L24 24 L24 56 L30 56 L30 40 L36 40 L36 56 L42 56 L42 18 L50 18 L50 56 L58 56 L58 32 L64 32 L64 64 L0 64 Z" fill="#1a1f30"/><g fill="#ffd166" opacity="0.9"><rect x="20" y="28" width="2" height="2"/><rect x="20" y="34" width="2" height="2"/><rect x="20" y="40" width="2" height="2"/><rect x="20" y="46" width="2" height="2"/><rect x="44" y="22" width="2" height="2"/><rect x="44" y="28" width="2" height="2"/><rect x="44" y="34" width="2" height="2"/><rect x="44" y="40" width="2" height="2"/><rect x="60" y="36" width="2" height="2"/><rect x="60" y="42" width="2" height="2"/></g></svg>`, colors: [] },
-
-  a06: { name: 'Vinç Manzara', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a06bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5fc0d0"/><stop offset="1" stop-color="#1e5a7a"/></linearGradient></defs><rect width="64" height="64" fill="url(#a06bg)"/><circle cx="14" cy="14" r="5" fill="#ffd166" opacity="0.9"/><circle cx="14" cy="14" r="3" fill="#fff8c0"/><line x1="12" y1="60" x2="12" y2="8" stroke="#f4a020" stroke-width="2.5"/><line x1="12" y1="8" x2="56" y2="12" stroke="#f4a020" stroke-width="2.5"/><line x1="12" y1="8" x2="20" y2="16" stroke="#f4a020" stroke-width="2"/><line x1="46" y1="11" x2="46" y2="30" stroke="#ddd" stroke-width="0.8"/><rect x="42" y="30" width="8" height="6" fill="#666" stroke="#444"/><rect x="44" y="32" width="4" height="2" fill="#ffd166"/><g stroke="#f4a020" stroke-width="1" fill="none"><line x1="12" y1="20" x2="20" y2="8"/><line x1="12" y1="32" x2="20" y2="20"/><line x1="12" y1="44" x2="20" y2="32"/><line x1="12" y1="56" x2="20" y2="44"/></g><rect x="6" y="58" width="14" height="6" fill="#252830"/><path d="M0 60 L8 50 L18 56 L28 48 L40 54 L52 46 L64 54 L64 64 L0 64 Z" fill="#1a2030"/></svg>`, colors: [] },
-
-  a07: { name: 'Buldozer', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a07bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a8d860"/><stop offset="1" stop-color="#3a6a35"/></linearGradient><linearGradient id="a07yellow" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd166"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><rect width="64" height="64" fill="url(#a07bg)"/><path d="M0 50 Q16 46 32 48 Q48 50 64 46 L64 64 L0 64 Z" fill="#5a3a1a"/><rect x="8" y="32" width="32" height="16" rx="2" fill="url(#a07yellow)" stroke="#5a3a10"/><path d="M14 22 L34 22 L36 32 L12 32 Z" fill="#f4a020" stroke="#5a3a10"/><rect x="16" y="24" width="16" height="6" fill="#5fc0d0" opacity="0.8"/><path d="M42 36 L52 32 L54 48 L42 48 Z" fill="#252830"/><circle cx="18" cy="52" r="6" fill="#1a1f2e"/><circle cx="34" cy="52" r="6" fill="#1a1f2e"/><circle cx="18" cy="52" r="3" fill="#5a6070"/><circle cx="34" cy="52" r="3" fill="#5a6070"/><line x1="18" y1="48" x2="18" y2="56" stroke="#3a3a40" stroke-width="0.5"/><line x1="14" y1="52" x2="22" y2="52" stroke="#3a3a40" stroke-width="0.5"/><line x1="34" y1="48" x2="34" y2="56" stroke="#3a3a40" stroke-width="0.5"/><line x1="30" y1="52" x2="38" y2="52" stroke="#3a3a40" stroke-width="0.5"/><rect x="2" y="42" width="6" height="12" fill="#5a3a10"/></svg>`, colors: [] },
-
-  a08: { name: 'Çimento Karıştırıcı', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a08bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c4a8e0"/><stop offset="1" stop-color="#5a3a80"/></linearGradient><linearGradient id="a08drum" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8e4d4"/><stop offset="1" stop-color="#a09878"/></linearGradient></defs><rect width="64" height="64" fill="url(#a08bg)"/><path d="M0 50 L64 50 L64 64 L0 64 Z" fill="#3a3040"/><ellipse cx="32" cy="28" rx="20" ry="14" fill="url(#a08drum)" stroke="#5a5040"/><ellipse cx="32" cy="26" rx="15" ry="9" fill="#6a6855" opacity="0.5"/><g stroke="#5a5040" stroke-width="0.5"><path d="M14 22 L50 22 M14 28 L50 28 M14 34 L50 34"/></g><rect x="10" y="42" width="44" height="10" rx="2" fill="#1a1f2e"/><circle cx="20" cy="54" r="6" fill="#1a1f2e"/><circle cx="44" cy="54" r="6" fill="#1a1f2e"/><circle cx="20" cy="54" r="3" fill="#5a6070"/><circle cx="44" cy="54" r="3" fill="#5a6070"/><rect x="24" y="38" width="16" height="6" fill="#5fc0d0" opacity="0.6"/></svg>`, colors: [] },
-
-  a09: { name: 'Mühendis', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a09bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a8ca8"/><stop offset="1" stop-color="#1a3a58"/></linearGradient><radialGradient id="a09face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#fde2c4"/><stop offset="1" stop-color="#e6b88a"/></radialGradient></defs><rect width="64" height="64" fill="url(#a09bg)"/><circle cx="32" cy="60" r="30" fill="#1e3a5f"/><circle cx="32" cy="26" r="11" fill="url(#a09face)"/><path d="M20 14 Q20 8 32 8 Q44 8 44 14 L44 26 L40 24 Q32 22 24 24 L20 26 Z" fill="#2a2018"/><rect x="20" y="22" width="24" height="6" rx="1" fill="#1a1f2e"/><rect x="22" y="23" width="8" height="4" rx="1" fill="#5fc0d0" opacity="0.5"/><rect x="34" y="23" width="8" height="4" rx="1" fill="#5fc0d0" opacity="0.5"/><path d="M30 21 L34 21" stroke="#1a1f2e" stroke-width="1"/><path d="M14 60 Q16 42 26 38 L38 38 Q48 42 50 60 Z" fill="#5a8ca8"/><rect x="29" y="38" width="6" height="22" fill="#fff"/><path d="M32 38 L32 50 L29 52 L35 52 Z" fill="#f4a020"/><circle cx="32" cy="42" r="0.8" fill="#1a1f2e"/></svg>`, colors: [] },
-
-  a10: { name: 'Yapı Levhası', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a10bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d96c5e"/><stop offset="1" stop-color="#7a2a18"/></linearGradient></defs><rect width="64" height="64" fill="url(#a10bg)"/><rect x="6" y="14" width="52" height="40" rx="2" fill="#ffd166" stroke="#5a3a10" stroke-width="1"/><path d="M14 26 L18 24 L18 28 Z" fill="#1a1f2e"/><path d="M50 26 L46 24 L46 28 Z" fill="#1a1f2e"/><text x="32" y="32" text-anchor="middle" font-family="Bebas Neue, sans-serif" font-size="9" fill="#1a1f2e" font-weight="700">DİKKAT</text><text x="32" y="44" text-anchor="middle" font-family="Bebas Neue, sans-serif" font-size="9" fill="#1a1f2e" font-weight="700">İNŞAAT</text><g stroke="#1a1f2e" stroke-width="0.5"><line x1="6" y1="14" x2="58" y2="54"/><line x1="58" y1="14" x2="6" y2="54"/></g><rect x="28" y="54" width="8" height="8" fill="#1a1f2e"/></svg>`, colors: [] },
-
-  a11: { name: 'Mimari Plan', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a11bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e3a5f"/><stop offset="1" stop-color="#0a1a2e"/></linearGradient></defs><rect width="64" height="64" fill="url(#a11bg)"/><rect x="6" y="6" width="52" height="52" fill="#1a3a5e" stroke="#5fc0d0"/><g stroke="#5fc0d0" stroke-width="0.4" opacity="0.4"><line x1="6" y1="14" x2="58" y2="14"/><line x1="6" y1="22" x2="58" y2="22"/><line x1="6" y1="30" x2="58" y2="30"/><line x1="6" y1="38" x2="58" y2="38"/><line x1="6" y1="46" x2="58" y2="46"/><line x1="14" y1="6" x2="14" y2="58"/><line x1="22" y1="6" x2="22" y2="58"/><line x1="30" y1="6" x2="30" y2="58"/><line x1="38" y1="6" x2="38" y2="58"/><line x1="46" y1="6" x2="46" y2="58"/></g><g stroke="#5fc0d0" stroke-width="1.2" fill="none"><rect x="14" y="14" width="36" height="36"/><line x1="14" y1="32" x2="50" y2="32"/><line x1="32" y1="14" x2="32" y2="50"/><rect x="18" y="18" width="10" height="10" fill="none"/><rect x="36" y="18" width="10" height="10" fill="none"/><rect x="18" y="36" width="10" height="10" fill="none"/><rect x="36" y="36" width="10" height="10" fill="none"/></g><circle cx="32" cy="32" r="4" fill="#f4a020"/><circle cx="32" cy="32" r="2" fill="#ffd166"/></svg>`, colors: [] },
-
-  a12: { name: 'Altın Yığını', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a12bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fb069"/><stop offset="1" stop-color="#2a4a30"/></linearGradient><radialGradient id="a12coin" cx="0.5" cy="0.4"><stop offset="0" stop-color="#fff5b8"/><stop offset="0.6" stop-color="#ffd166"/><stop offset="1" stop-color="#a87000"/></radialGradient></defs><rect width="64" height="64" fill="url(#a12bg)"/><path d="M0 54 Q32 50 64 54 L64 64 L0 64 Z" fill="#3a2818"/><ellipse cx="32" cy="52" rx="24" ry="8" fill="#a87000" opacity="0.5"/><ellipse cx="20" cy="50" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><text x="20" y="53" text-anchor="middle" font-family="Bebas Neue" font-size="8" fill="#a87000">₺</text><ellipse cx="42" cy="50" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><text x="42" y="53" text-anchor="middle" font-family="Bebas Neue" font-size="8" fill="#a87000">$</text><ellipse cx="32" cy="42" rx="11" ry="7" fill="url(#a12coin)" stroke="#a87000"/><text x="32" y="46" text-anchor="middle" font-family="Bebas Neue" font-size="10" fill="#a87000">€</text><ellipse cx="26" cy="32" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><ellipse cx="38" cy="30" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><ellipse cx="32" cy="22" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><text x="32" y="25" text-anchor="middle" font-family="Bebas Neue" font-size="8" fill="#a87000">₺</text><circle cx="48" cy="18" r="1.5" fill="#fff" opacity="0.8"/><circle cx="16" cy="14" r="1" fill="#fff" opacity="0.6"/></svg>`, colors: [] },
-
-  a13: { name: 'Kobalt Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a13bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a8ee8"/><stop offset="1" stop-color="#0a3a8a"/></linearGradient><radialGradient id="a13c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#80c8ff"/><stop offset="1" stop-color="#0a3a8a"/></radialGradient></defs><rect width="64" height="64" fill="url(#a13bg)"/><polygon points="32,4 58,18 58,46 32,60 6,46 6,18" fill="url(#a13c)" stroke="#fff" stroke-width="0.5"/><polygon points="32,12 50,22 50,42 32,52 14,42 14,22" fill="#0a3a8a"/><polygon points="32,18 46,26 46,38 32,46 18,38 18,26" fill="#3a8ee8"/><circle cx="32" cy="32" r="6" fill="#ffd166"/><circle cx="32" cy="32" r="3" fill="#fff"/></svg>`, colors: [] },
-
-  a14: { name: 'Amber Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a14bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#ffd166"/><stop offset="0.5" stop-color="#f4a020"/><stop offset="1" stop-color="#7a3010"/></radialGradient><radialGradient id="a14c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#ffe888"/><stop offset="1" stop-color="#c4500c"/></radialGradient></defs><rect width="64" height="64" fill="url(#a14bg)"/><polygon points="32,4 60,32 32,60 4,32" fill="url(#a14c)" stroke="#fff" stroke-width="0.5"/><polygon points="32,16 48,32 32,48 16,32" fill="#a83a10"/><polygon points="32,24 40,32 32,40 24,32" fill="#ffe888"/><circle cx="32" cy="32" r="2" fill="#5a1a00"/></svg>`, colors: [] },
-
-  a15: { name: 'Yeşim Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a15bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#7fd66a"/><stop offset="1" stop-color="#0e3018"/></radialGradient><radialGradient id="a15c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#b0ec9c"/><stop offset="1" stop-color="#2a5a30"/></radialGradient></defs><rect width="64" height="64" fill="url(#a15bg)"/><circle cx="32" cy="32" r="26" fill="url(#a15c)" stroke="#fff" stroke-width="0.5"/><circle cx="32" cy="32" r="20" fill="#2a5a30"/><circle cx="32" cy="32" r="14" fill="#5aa050"/><circle cx="32" cy="32" r="8" fill="#1a3a20"/><circle cx="32" cy="32" r="3" fill="#ffd166"/><circle cx="26" cy="24" r="2" fill="#fff" opacity="0.6"/></svg>`, colors: [] },
-
-  a16: { name: 'Lavanta Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a16bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a87fd0"/><stop offset="1" stop-color="#2a0e50"/></linearGradient><radialGradient id="a16c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#d0a8e8"/><stop offset="1" stop-color="#3a1f50"/></radialGradient></defs><rect width="64" height="64" fill="url(#a16bg)"/><polygon points="32,4 60,32 32,60 4,32" fill="url(#a16c)" stroke="#fff" stroke-width="0.5"/><rect x="20" y="20" width="24" height="24" fill="#2a0e50" transform="rotate(45 32 32)"/><circle cx="32" cy="32" r="6" fill="#ffd166"/><circle cx="32" cy="32" r="3" fill="#fff"/></svg>`, colors: [] },
-
-  a17: { name: 'Kartal Amblemi', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a17bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c44a1e"/><stop offset="1" stop-color="#3a0a0a"/></linearGradient><linearGradient id="a17eagle" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a020"/><stop offset="1" stop-color="#a83410"/></linearGradient></defs><rect width="64" height="64" fill="url(#a17bg)"/><circle cx="32" cy="32" r="28" fill="#5a0a0a" stroke="#ffd166" stroke-width="0.8"/><path d="M32 14 L40 22 L52 22 L46 30 L52 38 L46 42 L40 48 L32 44 L24 48 L18 42 L12 38 L18 30 L12 22 L24 22 Z" fill="url(#a17eagle)"/><polygon points="28,28 36,28 32,36" fill="#3a0a0a"/><circle cx="29" cy="26" r="1.5" fill="#fff"/><circle cx="35" cy="26" r="1.5" fill="#fff"/><circle cx="29" cy="26" r="0.8" fill="#000"/><circle cx="35" cy="26" r="0.8" fill="#000"/><path d="M28 38 L32 42 L36 38" stroke="#ffd166" stroke-width="0.8" fill="none"/></svg>`, colors: [] },
-
-  a18: { name: 'Altın Yıldız', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a18bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#3a2a10"/><stop offset="1" stop-color="#0a0a18"/></radialGradient><radialGradient id="a18star" cx="0.4" cy="0.3"><stop offset="0" stop-color="#ffffff"/><stop offset="0.3" stop-color="#ffe888"/><stop offset="0.7" stop-color="#ffd166"/><stop offset="1" stop-color="#a87000"/></radialGradient></defs><rect width="64" height="64" fill="url(#a18bg)"/><g fill="#ffd166" opacity="0.5"><circle cx="10" cy="14" r="0.8"/><circle cx="54" cy="20" r="1"/><circle cx="14" cy="50" r="0.8"/><circle cx="58" cy="52" r="1.2"/><circle cx="6" cy="32" r="0.6"/><circle cx="58" cy="38" r="0.8"/></g><polygon points="32,6 38,24 58,24 42,36 48,56 32,46 16,56 22,36 6,24 26,24" fill="url(#a18star)" stroke="#a87000" stroke-width="0.5"/><polygon points="32,14 36,26 48,26 38,34 42,46 32,40 22,46 26,34 16,26 28,26" fill="none" stroke="#fff" stroke-width="0.3" opacity="0.6"/></svg>`, colors: [] },
-
-  a19: { name: 'Elmas', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a19bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#1a3a4a"/><stop offset="1" stop-color="#02101e"/></radialGradient></defs><rect width="64" height="64" fill="url(#a19bg)"/><g fill="#5fc0d0" opacity="0.3"><circle cx="12" cy="14" r="0.8"/><circle cx="50" cy="18" r="1"/><circle cx="58" cy="42" r="0.8"/><circle cx="10" cy="48" r="1.2"/></g><polygon points="20,14 44,14 56,28 32,58 8,28" fill="#5fc0d0" stroke="#fff" stroke-width="0.5"/><polygon points="20,14 44,14 32,28" fill="#c0e8f0" opacity="0.9"/><polygon points="8,28 20,14 32,28" fill="#3a8da0"/><polygon points="44,14 56,28 32,28" fill="#3a8da0"/><polygon points="8,28 32,28 32,58" fill="#5fc0d0"/><polygon points="32,28 56,28 32,58" fill="#4a9faf"/><polygon points="20,14 26,18 22,22 16,18" fill="#fff" opacity="0.6"/></svg>`, colors: [] },
-
-  a20: { name: 'Şirket Binası', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a20bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4a6a"/><stop offset="1" stop-color="#0a1018"/></linearGradient><linearGradient id="a20glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5fc0d0"/><stop offset="1" stop-color="#1a4a6a"/></linearGradient></defs><rect width="64" height="64" fill="url(#a20bg)"/><circle cx="50" cy="14" r="4" fill="#ffd166" opacity="0.8"/><circle cx="50" cy="14" r="2" fill="#fff8c0"/><path d="M0 56 L64 56 L64 64 L0 64 Z" fill="#1a1f2e"/><rect x="12" y="20" width="40" height="36" fill="#252830" stroke="#1a1f2e"/><rect x="14" y="22" width="36" height="32" fill="url(#a20glass)"/><g fill="#1a1f2e"><line x1="14" y1="28" x2="50" y2="28" stroke="#1a1f2e" stroke-width="0.5"/><line x1="14" y1="34" x2="50" y2="34" stroke="#1a1f2e" stroke-width="0.5"/><line x1="14" y1="40" x2="50" y2="40" stroke="#1a1f2e" stroke-width="0.5"/><line x1="14" y1="46" x2="50" y2="46" stroke="#1a1f2e" stroke-width="0.5"/><line x1="20" y1="22" x2="20" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="26" y1="22" x2="26" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="32" y1="22" x2="32" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="38" y1="22" x2="38" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="44" y1="22" x2="44" y2="54" stroke="#1a1f2e" stroke-width="0.5"/></g><g fill="#ffd166" opacity="0.8"><rect x="22" y="24" width="2" height="2"/><rect x="28" y="30" width="2" height="2"/><rect x="40" y="24" width="2" height="2"/><rect x="34" y="36" width="2" height="2"/><rect x="46" y="42" width="2" height="2"/><rect x="22" y="42" width="2" height="2"/><rect x="40" y="48" width="2" height="2"/></g><rect x="28" y="50" width="8" height="6" fill="#f4a020"/></svg>`, colors: [] }
-};
-
-// Avatar HTML üretir. avatarId: 'a01'-'a20' veya 'google' veya 'letter' veya null
+// Avatar HTML üretir. avatarId: 'av001'-'avXXX' veya 'google' veya 'letter' veya null
+// Geriye uyumluluk: eski 'a01'-'a20' avatarları varsayılan ilk DiceBear avataralarına dönüştürülür
 function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
   if (!avatarId || avatarId === 'letter') {
     return `<span style="font-family: 'Bebas Neue', sans-serif; font-weight: 700;">${(fallbackLetter || '?').charAt(0).toUpperCase()}</span>`;
   }
   if (avatarId === 'google' && googlePhotoURL) {
-    return `<img src="${googlePhotoURL}" alt="">`;
+    return `<img src="${googlePhotoURL}" alt="" loading="lazy">`;
   }
   if (avatarId === 'google' && !googlePhotoURL) {
-    // Google foto yoksa harf
     return `<span style="font-family: 'Bebas Neue', sans-serif; font-weight: 700;">${(fallbackLetter || '?').charAt(0).toUpperCase()}</span>`;
   }
+  // Eski format (a01..a20) → av001..av020'ye eşle
+  if (/^a\d{2}$/.test(avatarId)) {
+    const num = parseInt(avatarId.slice(1));
+    avatarId = 'av' + String(num).padStart(3, '0');
+  }
   const av = AVATARS[avatarId];
-  if (!av) return `<span>?</span>`;
-  return av.svg(...(av.colors || []));
+  if (!av) return `<span style="font-family: 'Bebas Neue', sans-serif; font-weight: 700;">${(fallbackLetter || '?').charAt(0).toUpperCase()}</span>`;
+  return `<img src="${av.url}" alt="" loading="lazy">`;
 }
 
 // ============================================================
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.46';
+const CURRENT_VERSION = 'v1.47';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.47',
+    date: '17 Mayıs 2026',
+    title: 'AVATARLAR İNTERNETTEN — DİCEBEAR',
+    items: [
+      { cat: 'major', text: '🎨 <strong>Tüm avatarlar internetten geliyor</strong> — DiceBear ücretsiz API (66+ ilgi çekici avatar)' },
+      { cat: 'major', text: '↔️ <strong>Yatay kaydırılabilir liste</strong> — yer kaplamıyor, parmakla kaydırılır' },
+      { cat: 'feature', text: '6 stil kategorisi: 🧑 Karakterler · 👤 Yüzler · 😊 Eğlenceli · 🤖 Robotlar · 🎨 Modern · 🔷 Soyut' },
+      { cat: 'feature', text: 'Her kategori ayrı kaydırılabilir satır, dokunmatik destekli' },
+      { cat: 'feature', text: 'Mobil/masaüstü dostu — özel scrollbar tasarımı' },
+      { cat: 'feature', text: 'Eski a01-a20 avatarları otomatik yeni formata dönüşür (geriye uyumluluk)' }
+    ]
+  },
   {
     version: 'v1.46',
     date: '17 Mayıs 2026',

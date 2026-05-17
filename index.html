@@ -5297,6 +5297,31 @@ function createInternalConstructionContract(land) {
     if (cheapest) estTotal += cheapest.price * it.qty;
   });
 
+  // Geriye uyumluluk: mevcut consumed'leri tek bir delivery olarak yansıt
+  // Böylece sözleşme tablosunda "Teslim" sütunu doğru görünür ve "Kalan" eksik kısımı gösterir
+  const deliveries = [];
+  const alreadyConsumed = b.materialsNeeded.filter(m => (m.consumed || 0) > 0)
+    .map(m => ({ productId: m.productId, qty: m.consumed }));
+  if (alreadyConsumed.length > 0) {
+    let totalWeight = 0;
+    alreadyConsumed.forEach(it => {
+      const p = PRODUCTS[it.productId];
+      if (p) totalWeight += (p.weight * it.qty) / 1000;
+    });
+    deliveries.push({
+      no: 'IR-' + state.day + '-INIT-STK',
+      day: b.startDay || state.day,
+      arrivalDay: b.startDay || state.day,
+      vehicleId: null,
+      driverId: null,
+      internalSource: 'stok',
+      items: alreadyConsumed,
+      weight: totalWeight,
+      fuelCost: 0,
+      externalCost: 0
+    });
+  }
+
   state.contracts.push({
     id: contractId,
     customerId: ourCompanyId,
@@ -5305,10 +5330,10 @@ function createInternalConstructionContract(land) {
     total: estTotal,
     estimatedCost: estTotal,
     createdDay: state.day,
-    dueDay: state.day + b.totalDays,
+    dueDay: state.day + Math.max(1, b.totalDays - b.daysPassed),
     delivered: false,
     paid: false,
-    deliveries: [],
+    deliveries,
     isInternalConstruction: true,
     isUrbanRenewal: isUrban,
     constructionLandId: land.id
@@ -15115,10 +15140,21 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.50';
+const CURRENT_VERSION = 'v1.51';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.51',
+    date: '17 Mayıs 2026',
+    title: 'ESKİ İNŞAATLAR İÇİN İÇ SÖZLEŞME OLUŞTURMA',
+    items: [
+      { cat: 'major', text: '🏗 <strong>v1.45 öncesi başlatılan inşaatlar için iç şantiye sözleşmesi otomatik oluşur</strong>' },
+      { cat: 'feature', text: 'Yükleme sırasında devam eden tüm projeler kontrol edilir' },
+      { cat: 'feature', text: 'İç sözleşme yoksa otomatik eklenir — eksik malzemeler artık sözleşmeler sayfasında STOKTAN/FABRİKADAN sevk butonlarıyla görünür' },
+      { cat: 'feature', text: 'Mevcut tüketilmiş malzeme miktarı tek bir delivery olarak yansıtılır — Teslim/Kalan sütunları doğru görünür' }
+    ]
+  },
   {
     version: 'v1.50',
     date: '17 Mayıs 2026',
@@ -16128,6 +16164,25 @@ function sanitizeLoadedState() {
     if (state.portfolio && typeof state.portfolio === 'object') {
       Object.keys(state.portfolio).forEach(aid => {
         if (!INVESTMENT_ASSETS[aid]) delete state.portfolio[aid];
+      });
+    }
+
+    // 7) Mevcut inşaat ve KD projeleri için iç sözleşme yoksa oluştur (geriye uyumluluk)
+    if (state.lands && Array.isArray(state.lands)) {
+      state.lands.forEach(land => {
+        if (!land.building) return;
+        if (land.building.status !== 'building' && land.building.status !== 'paused-warned') return;
+        // Bu arsa için iç sözleşme var mı?
+        const hasInternal = (state.contracts || []).some(c =>
+          c.isInternalConstruction && c.constructionLandId === land.id && !c.delivered
+        );
+        if (!hasInternal) {
+          try {
+            createInternalConstructionContract(land);
+          } catch (e) {
+            console.warn('Eski bina için iç sözleşme oluşturulamadı:', e);
+          }
+        }
       });
     }
   } catch (e) {

@@ -8424,7 +8424,10 @@ function renderDispatchPlanDetail(e) {
   const planRows = e.plan.map(p => {
     const daysToDeadline = p.deadline - state.day;
     const urgent = daysToDeadline <= 2;
-    const itemsList = p.items.map(it => `${PRODUCTS[it.productId].name} (${it.qty} ${PRODUCTS[it.productId].unit})`).join(', ');
+    const itemsList = p.items.map(it => {
+      const prod = PRODUCTS[it.productId];
+      return prod ? `${prod.name} (${it.qty} ${prod.unit})` : `${it.qty} ?`;
+    }).join(', ');
     return `<tr style="${urgent ? 'background: rgba(239, 68, 68, 0.08);' : ''}">
       <td>
         <strong>${p.customerName}</strong>
@@ -8772,8 +8775,8 @@ function renderEmailDetail() {
       : `<span style="color: var(--ink-dim);">—</span>`;
 
     return `<tr id="row-${e.id}-${idx}">
-      <td>${PRODUCTS[it.productId].name}</td>
-      <td>${it.qty} ${PRODUCTS[it.productId].unit}</td>
+      <td>${PRODUCTS[it.productId]?.name || 'Bilinmiyor'}</td>
+      <td>${it.qty} ${PRODUCTS[it.productId]?.unit || ''}</td>
       <td class="${ok ? 'have' : 'miss'}">${have}</td>
       <td style="color: var(--ink-dim); font-size: 11px;">${weightStr}</td>
       <td>${minPriceCell}</td>
@@ -9558,13 +9561,16 @@ function renderContractCard(ct, dispatcherCount, isInternal) {
             s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
           const remaining = it.qty - delivered;
           const p = PRODUCTS[it.productId];
+          if (!p) return ''; // ürün bilinmiyorsa satırı atla
           const dealership = (state.dealerships || []).find(d => d.productId === it.productId);
           let actionCell = '—';
           if (remaining > 0 && dealership) {
             const remainingTons = (p.weight * remaining) / 1000;
             if (remainingTons >= 5) {
               const b = BRANDS[dealership.brandId];
-              actionCell = `<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-size: 10px; padding: 4px 8px;" onclick="quickFactoryDispatch('${ct.id}','${dealership.brandId}','${it.productId}')" title="${b.name} fabrikasından ${remaining} ${p.unit} direkt ${isInternal ? 'şantiyene' : 'müşteriye'} gönder">🏭 FABRİKADAN SEVK</button>`;
+              if (b) {
+                actionCell = `<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-size: 10px; padding: 4px 8px;" onclick="quickFactoryDispatch('${ct.id}','${dealership.brandId}','${it.productId}')" title="${b.name} fabrikasından ${remaining} ${p.unit} direkt ${isInternal ? 'şantiyene' : 'müşteriye'} gönder">🏭 FABRİKADAN SEVK</button>`;
+              }
             } else {
               actionCell = `<span style="font-size: 10px; color: var(--ink-dim);" title="Fabrika sevki min 5 ton">⚠️ <5 ton</span>`;
             }
@@ -9741,9 +9747,10 @@ function showReceiptModal(ct, cust) {
             ${ct.items.map((it, i) => {
               const unit = ct.unitPrices[i] || 0;
               const line = unit * it.qty;
+              const prod = PRODUCTS[it.productId];
               return `<tr>
-                <td><span class="r-product">${PRODUCTS[it.productId].name}</span></td>
-                <td class="num">${it.qty} ${PRODUCTS[it.productId].unit}</td>
+                <td><span class="r-product">${prod?.name || 'Bilinmiyor'}</span></td>
+                <td class="num">${it.qty} ${prod?.unit || ''}</td>
                 <td class="num">${fmt(unit)}</td>
                 <td class="num">${fmt(line)}</td>
               </tr>`;
@@ -10761,12 +10768,15 @@ function showIrsaliye(ctId, delivery) {
         <table>
           <thead><tr><th>S.No</th><th>Malzeme</th><th>Miktar</th><th>Birim</th></tr></thead>
           <tbody>
-            ${delivery.items.map((it, i) => `<tr>
+            ${delivery.items.map((it, i) => {
+              const prod = PRODUCTS[it.productId];
+              return `<tr>
               <td>${i + 1}</td>
-              <td>${PRODUCTS[it.productId].name}</td>
+              <td>${prod?.name || 'Bilinmiyor'}</td>
               <td>${it.qty}</td>
-              <td>${PRODUCTS[it.productId].unit}</td>
-            </tr>`).join('')}
+              <td>${prod?.unit || ''}</td>
+            </tr>`;
+            }).join('')}
             <tr style="font-weight: 700;"><td colspan="2">TOPLAM AĞIRLIK</td><td colspan="2">${delivery.weight.toFixed(2)} ton</td></tr>
           </tbody>
         </table>
@@ -12312,6 +12322,7 @@ function renderDealerships() {
           const b = BRANDS[d.brandId];
           if (!b) return '';
           const p = PRODUCTS[b.productId];
+          if (!p) return ''; // ürün artık yoksa atla
           const cheapest = cheapestSupplier(b.productId);
           const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[b.productId] || 0);
           const factoryPrice = brandFactoryPrice(d.brandId);
@@ -14943,10 +14954,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.47';
+const CURRENT_VERSION = 'v1.48';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.48',
+    date: '17 Mayıs 2026',
+    title: 'YÜKLEME HATASI DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '🛡️ <strong>"Cannot read properties of undefined" yükleme hatası giderildi</strong>' },
+      { cat: 'feature', text: 'Bulutdan yüklenen state otomatik temizleniyor (sanitize)' },
+      { cat: 'feature', text: 'Geçersiz bayilik referansları yükleme sırasında temizlenir' },
+      { cat: 'feature', text: 'Sözleşme/mail item\'larındaki silinmiş ürünler atlanır' },
+      { cat: 'feature', text: 'Bina malzeme listesi, stok, portföy alanları korunur' },
+      { cat: 'feature', text: 'Render katmanlarına null-safe kontroller eklendi (ürün/marka null ise satır atlanır)' }
+    ]
+  },
   {
     version: 'v1.47',
     date: '17 Mayıs 2026',
@@ -15849,6 +15873,75 @@ function deserializeState(data) {
   state.user = user;
   state.selectedEmail = null;
   state.cloudSaving = false;
+
+  // SANİTASYON — eski/silinmiş referansları temizle
+  sanitizeLoadedState();
+}
+
+// Yüklenen state'teki olası referans sorunlarını temizler
+function sanitizeLoadedState() {
+  try {
+    // 1) Bayilikler: BRANDS objesinde olmayan markaları temizle
+    if (state.dealerships && Array.isArray(state.dealerships)) {
+      const before = state.dealerships.length;
+      state.dealerships = state.dealerships.filter(d => BRANDS[d.brandId] && PRODUCTS[d.productId]);
+      const removed = before - state.dealerships.length;
+      if (removed > 0) console.warn(`Sanitize: ${removed} geçersiz bayilik temizlendi`);
+    }
+
+    // 2) Sözleşmeler: items içindeki geçersiz product'ları temizle, boş kalan sözleşmeleri arşivle
+    if (state.contracts && Array.isArray(state.contracts)) {
+      state.contracts.forEach(c => {
+        if (!c.items) c.items = [];
+        c.items = c.items.filter(it => PRODUCTS[it.productId]);
+        if (!c.deliveries) c.deliveries = [];
+        c.deliveries.forEach(d => {
+          if (d.items) d.items = d.items.filter(it => PRODUCTS[it.productId]);
+        });
+      });
+      // İçinde hiç item kalmayan sözleşmeleri sil
+      state.contracts = state.contracts.filter(c => c.items.length > 0);
+    }
+
+    // 3) Mailbox: items içindeki geçersiz product'ları temizle
+    if (state.inbox && Array.isArray(state.inbox)) {
+      state.inbox.forEach(e => {
+        if (e.items) e.items = e.items.filter(it => PRODUCTS[it.productId]);
+        if (e.plan) {
+          e.plan.forEach(p => {
+            if (p.items) p.items = p.items.filter(it => PRODUCTS[it.productId]);
+          });
+          e.plan = e.plan.filter(p => p.items && p.items.length > 0);
+        }
+        if (e.materials) e.materials = e.materials.filter(m => PRODUCTS[m.productId]);
+      });
+    }
+
+    // 4) Bina malzemeleri: geçersiz productId'leri temizle
+    if (state.lands && Array.isArray(state.lands)) {
+      state.lands.forEach(l => {
+        if (l.building?.materialsNeeded) {
+          l.building.materialsNeeded = l.building.materialsNeeded.filter(m => PRODUCTS[m.productId]);
+        }
+      });
+    }
+
+    // 5) Stok: geçersiz product anahtarlarını temizle
+    if (state.inventory && typeof state.inventory === 'object') {
+      Object.keys(state.inventory).forEach(pid => {
+        if (!PRODUCTS[pid]) delete state.inventory[pid];
+      });
+    }
+
+    // 6) Portföy: geçersiz varlık anahtarlarını temizle
+    if (state.portfolio && typeof state.portfolio === 'object') {
+      Object.keys(state.portfolio).forEach(aid => {
+        if (!INVESTMENT_ASSETS[aid]) delete state.portfolio[aid];
+      });
+    }
+  } catch (e) {
+    console.error('Sanitize hatası (önemsiz):', e);
+  }
 }
 
 function openSaveSlotModal(mode) {

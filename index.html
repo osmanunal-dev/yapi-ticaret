@@ -4786,25 +4786,30 @@ function sellLand(landId) {
     return;
   }
 
-  // Hızlı satış fiyatı (alıcı bulma kolaylığı için %8 indirim)
+  // Zaten piyasada listeli mi?
+  if (land.forSale) {
+    toast('Bu arsa zaten piyasada satılık olarak listeli.', 'info');
+    return;
+  }
+
   const marketValue = landCurrentValue(land);
-  const sellPrice = Math.round(marketValue * 0.92);
-  const profit = sellPrice - land.purchasePrice;
-  const profitPct = land.purchasePrice > 0 ? ((profit / land.purchasePrice) * 100).toFixed(1) : '—';
+  const emlakciPrice = Math.round(marketValue * 0.92);  // %8 indirim
+  const normalPrice = marketValue;                       // tam fiyat
+  const emlakciProfit = emlakciPrice - land.purchasePrice;
+  const normalProfit = normalPrice - land.purchasePrice;
   const ilceData = ILCELER[land.ilce];
-  const m2SellPrice = Math.round(sellPrice / land.m2);
   const heldDays = state.day - (land.purchaseDay || state.day);
   const companyName = state.company?.name || 'YAPI TİCARET';
 
   const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
     <div class="receipt-modal" onclick="event.stopPropagation()">
       <div class="receipt-header">
-        <div class="r-company">📜 ARSA SATIŞ SÖZLEŞMESİ</div>
-        <div class="r-tagline">Gayrimenkul Devir İşlemi · İstanbul</div>
+        <div class="r-company">📜 ARSA SATIŞ KARARI</div>
+        <div class="r-tagline">Gayrimenkul Satış Yöntemi · ${ilceData.name}</div>
       </div>
 
       <div class="receipt-title-bar">
-        <div class="r-title">SATIŞ TAPU TASLAĞI</div>
+        <div class="r-title">SATIŞ KANALI SEÇİMİ</div>
         <div class="r-number">
           <div>Belge No: <strong>SAT-${state.day}-${landId.slice(-4).toUpperCase()}</strong></div>
           <div>Gün: <strong>${state.day}</strong></div>
@@ -4819,65 +4824,56 @@ function sellLand(landId) {
           </div>
         </div>
         <div class="ri-section">
-          <div class="ri-label">Satılan Mülk</div>
+          <div class="ri-label">Mülk</div>
           <div class="ri-val">${ilceData.name}, İstanbul<br>
             <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${land.m2} m² · ${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası</span>
           </div>
         </div>
       </div>
 
-      <div class="receipt-items">
-        <table class="receipt-table">
-          <thead>
-            <tr><th>Açıklama</th><th class="num">Birim</th><th class="num">Tutar</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="r-product">Alış Bedeli</span><br><span style="font-size: 10px; color: #5a5048;">G${land.purchaseDay} tarihinde alındı</span></td>
-              <td class="num">—</td>
-              <td class="num">${fmt(land.purchasePrice)}</td>
-            </tr>
-            <tr>
-              <td><span class="r-product">Güncel Piyasa</span><br><span style="font-size: 10px; color: #5a5048;">${fmt(ilceData.m2Price)}/m²</span></td>
-              <td class="num">—</td>
-              <td class="num">${fmt(marketValue)}</td>
-            </tr>
-            <tr class="r-shipping">
-              <td><em>🏷 Hızlı Satış İndirimi (-%8)</em></td>
-              <td class="num">—</td>
-              <td class="num">-${fmt(marketValue - sellPrice)}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div style="padding: 12px 14px; background: #fff8e7; margin: 12px 0; font-size: 11px; line-height: 1.7; color: #3a3024;">
+        <strong style="color: #5a3a10;">İki satış kanalın var:</strong> Hızlı ama indirimli emlakçı satışı, ya da daha sabırlı ama tam fiyatlı piyasa listelemesi.
       </div>
 
-      <div class="receipt-totals">
-        <div class="rt-row grand">
-          <span>SATIŞ FİYATI</span>
-          <span>${fmt(sellPrice)}</span>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0;">
+        <!-- EMLAKÇI -->
+        <div style="border: 2px solid #d4a017; border-radius: 4px; padding: 14px; background: #fffdf5;">
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1.5px; color: #8a5a10; margin-bottom: 8px;">🏢 EMLAKÇIYA VER</div>
+          <div style="font-size: 11px; line-height: 1.6; color: #3a3024;">
+            <div>Süre: <strong>Anında satılır</strong></div>
+            <div>Fiyat: <strong style="color: #b00020;">${fmt(emlakciPrice)}</strong> (%8 indirim)</div>
+            <div>${emlakciProfit >= 0 ? 'Kâr' : 'Zarar'}: <strong style="color: ${emlakciProfit >= 0 ? '#0d7c46' : '#b00020'};">${emlakciProfit >= 0 ? '+' : ''}${fmt(emlakciProfit)}</strong></div>
+            <div style="font-size: 10px; color: #5a5048; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #c4a090;">Emlakçı komisyonu fiyata dahildir. Anında ödeme alınır.</div>
+          </div>
+          <button class="primary" style="width: 100%; margin-top: 10px; padding: 10px;" onclick="confirmSellLand('${landId}','emlakci')">
+            ✓ EMLAKÇIYA VER
+          </button>
         </div>
-        <div class="rt-row vat" style="color: ${profit >= 0 ? '#0d7c46' : '#b00020'};">
-          <span>${profit >= 0 ? 'NET KÂR' : 'NET ZARAR'} ${profitPct !== '—' ? `(%${profitPct})` : ''}</span>
-          <span>${profit >= 0 ? '+' : ''}${fmt(profit)}</span>
-        </div>
-        <div class="rt-row subtotal">
-          <span>Kasa Bakiyesi (Sonrası)</span>
-          <span>${fmt(state.cash + sellPrice)}</span>
+
+        <!-- NORMAL PIYASA -->
+        <div style="border: 2px solid #5fc0d0; border-radius: 4px; padding: 14px; background: #f5fcfd;">
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1.5px; color: #1a5a70; margin-bottom: 8px;">🏘 PİYASAYA ÇIKAR</div>
+          <div style="font-size: 11px; line-height: 1.6; color: #3a3024;">
+            <div>Süre: <strong>3-30 gün</strong> (alıcı bulunca)</div>
+            <div>Fiyat: <strong style="color: #0d7c46;">${fmt(normalPrice)}</strong> (tam piyasa)</div>
+            <div>${normalProfit >= 0 ? 'Kâr' : 'Zarar'}: <strong style="color: ${normalProfit >= 0 ? '#0d7c46' : '#b00020'};">${normalProfit >= 0 ? '+' : ''}${fmt(normalProfit)}</strong></div>
+            <div style="font-size: 10px; color: #5a5048; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #5fc0d0;">Müşteri bulunması şansa bağlı. İlandan istediğin an çekebilirsin.</div>
+          </div>
+          <button class="primary" style="width: 100%; margin-top: 10px; padding: 10px; background: #1a5a70; border-color: #1a5a70;" onclick="confirmSellLand('${landId}','normal')">
+            🏘 İLANA ÇIKAR
+          </button>
         </div>
       </div>
 
       <div class="receipt-actions">
-        <button class="primary" onclick="confirmSellLand('${landId}')">
-          ✓ ARSAYI SAT (+${fmt(sellPrice)})
-        </button>
-        <button onclick="closeModal()">✕ İPTAL</button>
+        <button onclick="closeModal()">✕ VAZGEÇ</button>
       </div>
     </div>
   </div>`;
   $('modals').innerHTML = html;
 }
 
-function confirmSellLand(landId) {
+function confirmSellLand(landId, method) {
   const idx = state.lands.findIndex(l => l.id === landId);
   if (idx < 0) { closeModal(); return; }
   const land = state.lands[idx];
@@ -4886,14 +4882,36 @@ function confirmSellLand(landId) {
     return;
   }
   const marketValue = landCurrentValue(land);
-  const sellPrice = Math.round(marketValue * 0.92);
-  const profit = sellPrice - land.purchasePrice;
 
-  earn(sellPrice, 'arsa-satis');
-  state.lands.splice(idx, 1);
-  closeModal();
-  toast(`✓ Arsa satıldı: +${fmt(sellPrice)} ${profit >= 0 ? '(kâr: ' + fmt(profit) + ')' : '(zarar: ' + fmt(profit) + ')'}`, profit >= 0 ? 'success' : 'info');
-  addXP(10, 'arsa satışı');
+  if (method === 'emlakci') {
+    // Anlık satış, %8 indirim
+    const sellPrice = Math.round(marketValue * 0.92);
+    const profit = sellPrice - land.purchasePrice;
+    earn(sellPrice, 'arsa-satis');
+    state.lands.splice(idx, 1);
+    closeModal();
+    toast(`✓ Emlakçı sattı: +${fmt(sellPrice)} ${profit >= 0 ? '(kâr: ' + fmt(profit) + ')' : '(zarar: ' + fmt(profit) + ')'}`, profit >= 0 ? 'success' : 'info');
+    addXP(10, 'arsa satışı');
+  } else if (method === 'normal') {
+    // Piyasaya listele (henüz satış yok)
+    land.forSale = true;
+    land.forSaleDay = state.day;
+    land.forSalePrice = marketValue;
+    closeModal();
+    toast(`🏘 ${ILCELER[land.ilce].name}'daki arsa piyasaya çıkarıldı. Alıcı bulunması bekleniyor...`, 'success');
+    addXP(5, 'arsa listeleme');
+  }
+  render();
+}
+
+// Piyasaya çıkarılan arsayı geri çek
+function unlistLand(landId) {
+  const land = (state.lands || []).find(l => l.id === landId);
+  if (!land || !land.forSale) return;
+  land.forSale = false;
+  land.forSaleDay = null;
+  land.forSalePrice = null;
+  toast(`${ILCELER[land.ilce].name} arsası satıştan çekildi.`, 'info');
   render();
 }
 
@@ -5580,6 +5598,7 @@ function openApartmentsModal(landId) {
   const rows = b.apartments.map(a => {
     const statusBadge = a.status === 'unsold' ? '<span style="color: var(--accent);">SATILIK</span>'
       : a.status === 'sold' ? '<span style="color: var(--green);">SATILDI</span>'
+      : a.status === 'listed' ? `<span style="color: #1a5a70;">🏘 PİYASADA (${state.day - (a.listedDay || state.day)} gün)</span>`
       : a.status === 'delivered-to-customer' ? '<span style="color: var(--purple);">MÜŞTERİDE</span>'
       : a.status === 'delivered-to-subcontractor' ? '<span style="color: var(--red);">TAŞERONDA</span>'
       : `<span style="color: var(--blue);">KİRADA (${a.tenantName || '?'})</span>`;
@@ -5590,6 +5609,8 @@ function openApartmentsModal(landId) {
         <button class="btn small primary" onclick="sellApartment('${land.id}', '${a.id}')">SAT</button>
         <button class="btn small" onclick="rentApartment('${land.id}', '${a.id}')">KİRAYA VER</button>
       `;
+    } else if (a.status === 'listed') {
+      action = `<button class="btn small danger" onclick="unlistApartment('${land.id}', '${a.id}')">SATIŞTAN ÇEK</button>`;
     } else if (a.status === 'rented') {
       action = `<button class="btn small danger" onclick="terminateRent('${land.id}', '${a.id}')">FESH ET</button>`;
     } else {
@@ -5610,6 +5631,7 @@ function openApartmentsModal(landId) {
   // İstatistik
   const totalApts = b.apartments.length;
   const unsold = b.apartments.filter(a => a.status === 'unsold').length;
+  const listed = b.apartments.filter(a => a.status === 'listed').length;
   const sold = b.apartments.filter(a => a.status === 'sold').length;
   const rented = b.apartments.filter(a => a.status === 'rented').length;
   const toSubcontractor = b.apartments.filter(a => a.status === 'delivered-to-subcontractor').length;
@@ -5626,6 +5648,7 @@ function openApartmentsModal(landId) {
       <div class="stat-grid" style="margin-bottom: 12px;">
         <div class="stat-tile"><div class="stat-label">Toplam</div><div class="stat-val">${totalApts}</div></div>
         <div class="stat-tile"><div class="stat-label">Satılık</div><div class="stat-val" style="color: var(--accent);">${unsold}</div></div>
+        ${listed > 0 ? `<div class="stat-tile"><div class="stat-label">Piyasada</div><div class="stat-val" style="color: #1a5a70;">${listed}</div></div>` : ''}
         <div class="stat-tile"><div class="stat-label">Satılan</div><div class="stat-val" style="color: var(--green);">${sold}</div></div>
         <div class="stat-tile"><div class="stat-label">Kirada</div><div class="stat-val" style="color: var(--blue);">${rented}</div></div>
         ${toCustomer > 0 ? `<div class="stat-tile"><div class="stat-label">Müşteride</div><div class="stat-val" style="color: var(--purple);">${toCustomer}</div></div>` : ''}
@@ -5670,19 +5693,21 @@ function sellApartment(landId, aptId) {
 
   const t = BUILDING_TYPES[land.building.type];
   const ilceData = ILCELER[land.ilce];
-  const m2Price = Math.round(apt.salePrice / apt.m2);
-  const buyerName = fullName();
+  const emlakciPrice = Math.round(apt.salePrice * 0.92); // %8 emlakçı komisyonu
+  const normalPrice = apt.salePrice;
+  const m2EmlakciPrice = Math.round(emlakciPrice / apt.m2);
+  const m2NormalPrice = Math.round(normalPrice / apt.m2);
   const companyName = state.company?.name || 'YAPI TİCARET';
 
   const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
     <div class="receipt-modal" onclick="event.stopPropagation()">
       <div class="receipt-header">
-        <div class="r-company">📜 KONUT SATIŞ SÖZLEŞMESİ</div>
-        <div class="r-tagline">Daire Tapu Devri · ${ilceData.name}</div>
+        <div class="r-company">📜 KONUT SATIŞ KARARI</div>
+        <div class="r-tagline">Daire Satış Yöntemi · ${ilceData.name}</div>
       </div>
 
       <div class="receipt-title-bar">
-        <div class="r-title">SATIŞ SENEDİ</div>
+        <div class="r-title">SATIŞ KANALI SEÇİMİ</div>
         <div class="r-number">
           <div>Belge No: <strong>DS-${state.day}-${aptId.slice(-4).toUpperCase()}</strong></div>
           <div>Gün: <strong>${state.day}</strong></div>
@@ -5697,66 +5722,93 @@ function sellApartment(landId, aptId) {
           </div>
         </div>
         <div class="ri-section">
-          <div class="ri-label">Alıcı</div>
-          <div class="ri-val">${buyerName}<br>
-            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">Bireysel müşteri · Banka havalesi</span>
+          <div class="ri-label">Daire</div>
+          <div class="ri-val">${t.icon} #${apt.number} (${apt.floor}. kat)<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${apt.m2} m² · ${ilceData.name}</span>
           </div>
         </div>
       </div>
 
-      <div class="receipt-items">
-        <table class="receipt-table">
-          <thead>
-            <tr><th>Açıklama</th><th class="num">m²</th><th class="num">m² Fiyatı</th><th class="num">Tutar</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>
-                <span class="r-product">${t.icon} ${t.name} - Daire #${apt.number}</span><br>
-                <span style="font-size: 10px; color: #5a5048;">${apt.floor}. kat · ${apt.m2} m² · ${ilceData.name}</span>
-              </td>
-              <td class="num">${apt.m2}</td>
-              <td class="num">${fmt(m2Price)}</td>
-              <td class="num">${fmt(apt.salePrice)}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div style="padding: 12px 14px; background: #fff8e7; margin: 12px 0; font-size: 11px; line-height: 1.7; color: #3a3024;">
+        <strong style="color: #5a3a10;">İki satış kanalın var:</strong> Hızlı ama indirimli emlakçı satışı, ya da daha sabırlı ama tam fiyatlı piyasa listelemesi.
       </div>
 
-      <div class="receipt-totals">
-        <div class="rt-row grand">
-          <span>SATIŞ FİYATI</span>
-          <span>${fmt(apt.salePrice)}</span>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0;">
+        <!-- EMLAKÇI -->
+        <div style="border: 2px solid #d4a017; border-radius: 4px; padding: 14px; background: #fffdf5;">
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1.5px; color: #8a5a10; margin-bottom: 8px;">🏢 EMLAKÇIYA VER</div>
+          <div style="font-size: 11px; line-height: 1.6; color: #3a3024;">
+            <div>Süre: <strong>Anında satılır</strong></div>
+            <div>Fiyat: <strong style="color: #b00020;">${fmt(emlakciPrice)}</strong></div>
+            <div style="font-size: 10px; color: #5a5048;">m² fiyatı: ${fmt(m2EmlakciPrice)} (%8 komisyon)</div>
+            <div style="font-size: 10px; color: #5a5048; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #c4a090;">Emlakçının müşteri portföyü hemen alıcı bulur. Anında ödeme.</div>
+          </div>
+          <button class="primary" style="width: 100%; margin-top: 10px; padding: 10px;" onclick="confirmSellApartment('${landId}','${aptId}','emlakci')">
+            ✓ EMLAKÇIYA VER
+          </button>
         </div>
-        <div class="rt-row subtotal">
-          <span>Kasa Bakiyesi (Sonrası)</span>
-          <span>${fmt(state.cash + apt.salePrice)}</span>
+
+        <!-- NORMAL PIYASA -->
+        <div style="border: 2px solid #5fc0d0; border-radius: 4px; padding: 14px; background: #f5fcfd;">
+          <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1.5px; color: #1a5a70; margin-bottom: 8px;">🏘 PİYASAYA ÇIKAR</div>
+          <div style="font-size: 11px; line-height: 1.6; color: #3a3024;">
+            <div>Süre: <strong>5-45 gün</strong> (alıcı bulunca)</div>
+            <div>Fiyat: <strong style="color: #0d7c46;">${fmt(normalPrice)}</strong> (tam piyasa)</div>
+            <div style="font-size: 10px; color: #5a5048;">m² fiyatı: ${fmt(m2NormalPrice)}</div>
+            <div style="font-size: 10px; color: #5a5048; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #5fc0d0;">İlandan istediğin an çekebilirsin. Müşteri bulunması şansa bağlı.</div>
+          </div>
+          <button class="primary" style="width: 100%; margin-top: 10px; padding: 10px; background: #1a5a70; border-color: #1a5a70;" onclick="confirmSellApartment('${landId}','${aptId}','normal')">
+            🏘 İLANA ÇIKAR
+          </button>
         </div>
       </div>
 
       <div class="receipt-actions">
-        <button class="primary" onclick="confirmSellApartment('${landId}', '${aptId}')">
-          ✓ DAİREYİ SAT (+${fmt(apt.salePrice)})
-        </button>
-        <button onclick="closeModal()">✕ İPTAL</button>
+        <button onclick="closeModal()">✕ VAZGEÇ</button>
       </div>
     </div>
   </div>`;
   $('modals').innerHTML = html;
 }
 
-function confirmSellApartment(landId, aptId) {
+function confirmSellApartment(landId, aptId, method) {
   const land = state.lands.find(l => l.id === landId);
   if (!land || !land.building) { closeModal(); return; }
   const apt = land.building.apartments.find(a => a.id === aptId);
   if (!apt || apt.status !== 'unsold') { closeModal(); return; }
 
-  earn(apt.salePrice, 'daire-satis');
-  apt.status = 'sold';
-  apt.soldDay = state.day;
-  closeModal();
-  toast(`✓ Daire #${apt.number} satıldı: +${fmt(apt.salePrice)}`, 'success');
-  addXP(30 + Math.round(apt.salePrice / 100000), 'daire satışı');
+  if (method === 'emlakci') {
+    // Anlık satış, %8 emlakçı komisyonu
+    const emlakciPrice = Math.round(apt.salePrice * 0.92);
+    earn(emlakciPrice, 'daire-satis');
+    apt.status = 'sold';
+    apt.soldDay = state.day;
+    apt.actualSalePrice = emlakciPrice;
+    closeModal();
+    toast(`✓ Emlakçı Daire #${apt.number}'i sattı: +${fmt(emlakciPrice)} (%8 komisyon)`, 'success');
+    addXP(30 + Math.round(emlakciPrice / 100000), 'daire satışı');
+  } else if (method === 'normal') {
+    // Piyasaya çıkar — bekleyecek
+    apt.status = 'listed';
+    apt.listedDay = state.day;
+    apt.listedPrice = apt.salePrice;
+    closeModal();
+    toast(`🏘 Daire #${apt.number} piyasaya çıkarıldı. Alıcı bulunması bekleniyor...`, 'success');
+    addXP(5, 'daire listeleme');
+  }
+  openApartmentsModal(landId);
+}
+
+// Piyasaya çıkarılan daireyi geri çek
+function unlistApartment(landId, aptId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  const apt = land.building.apartments.find(a => a.id === aptId);
+  if (!apt || apt.status !== 'listed') return;
+  apt.status = 'unsold';
+  apt.listedDay = null;
+  apt.listedPrice = null;
+  toast(`Daire #${apt.number} satıştan çekildi.`, 'info');
   openApartmentsModal(landId);
 }
 
@@ -11637,12 +11689,22 @@ function renderLandCard(l) {
   let buildingInfo = '';
   let actions = '';
   if (!b) {
-    // Boş arsa — inşaat butonu (uygun tipleri öner)
-    const eligibleTypes = Object.keys(BUILDING_TYPES).filter(bt => canBuild(bt, l.m2));
-    actions = `
-      ${eligibleTypes.length > 0 ? `<button class="btn small primary" onclick="openBuildModal('${l.id}')">🏗 İNŞAAT BAŞLAT</button>` : `<button class="btn small" disabled title="Bu arsa boyutu uygun değil">🏗 İNŞAAT</button>`}
-      ${!l.isUrbanRenewal ? `<button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>` : ''}
-    `;
+    // Boş arsa — listelenmişse farklı görünüm
+    if (l.forSale) {
+      const daysListed = state.day - (l.forSaleDay || state.day);
+      buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid #1a5a70;">
+        <strong style="color: #1a5a70;">🏘 PİYASADA SATILIK</strong><br>
+        <span style="font-size: 10px; color: var(--ink-dim);">Liste fiyatı: ${fmt(l.forSalePrice)} · ${daysListed} gündür listede</span>
+      </div>`;
+      actions = `<button class="btn small danger" onclick="unlistLand('${l.id}')">SATIŞTAN ÇEK</button>`;
+    } else {
+      // Boş arsa — inşaat butonu (uygun tipleri öner)
+      const eligibleTypes = Object.keys(BUILDING_TYPES).filter(bt => canBuild(bt, l.m2));
+      actions = `
+        ${eligibleTypes.length > 0 ? `<button class="btn small primary" onclick="openBuildModal('${l.id}')">🏗 İNŞAAT BAŞLAT</button>` : `<button class="btn small" disabled title="Bu arsa boyutu uygun değil">🏗 İNŞAAT</button>`}
+        ${!l.isUrbanRenewal ? `<button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>` : ''}
+      `;
+    }
   } else if (b.status === 'completed') {
     // Tamamlanmış bina
     const isUrban = l.isUrbanRenewal;
@@ -14045,6 +14107,52 @@ function nextDay() {
     }
   }
 
+  // 7y) Piyasaya çıkarılan arsa/daire satışları — şansa bağlı alıcı bulma
+  // Arsa için: 3-30 gün arası, her gün şans %3.3-5
+  (state.lands || []).forEach(l => {
+    if (!l.forSale || l.building) return;
+    const daysListed = state.day - (l.forSaleDay || state.day);
+    // İlk 3 gün hiç şans yok (kayıt süreci)
+    if (daysListed < 3) return;
+    // 3-30 gün arası şans: zaman geçtikçe artar
+    let chance = 0.04 + (daysListed - 3) * 0.005; // %4 → %17.5
+    if (daysListed >= 30) chance = 1.0; // 30. günde garantili satar
+    if (Math.random() < chance) {
+      const price = l.forSalePrice || landCurrentValue(l);
+      const profit = price - l.purchasePrice;
+      earn(price, 'arsa-satis');
+      const ilceName = ILCELER[l.ilce].name;
+      state.agenda.push(`🏘 ${ilceName} arsası satıldı: +${fmt(price)} (${daysListed} gün sonra alıcı buldu)`);
+      toast(`🏘 ${ilceName} arsası alıcı buldu! +${fmt(price)}`, 'success');
+      addXP(15, 'arsa satış (piyasa)');
+      const idx = state.lands.findIndex(x => x.id === l.id);
+      if (idx >= 0) state.lands.splice(idx, 1);
+    }
+  });
+
+  // Daire için: 5-45 gün arası
+  (state.lands || []).forEach(l => {
+    if (!l.building || !l.building.apartments) return;
+    l.building.apartments.forEach(apt => {
+      if (apt.status !== 'listed') return;
+      const daysListed = state.day - (apt.listedDay || state.day);
+      if (daysListed < 5) return; // ilk 5 gün hiç şans yok
+      let chance = 0.025 + (daysListed - 5) * 0.0035; // %2.5 → %16.5
+      if (daysListed >= 45) chance = 1.0;
+      if (Math.random() < chance) {
+        const price = apt.listedPrice || apt.salePrice;
+        earn(price, 'daire-satis');
+        apt.status = 'sold';
+        apt.soldDay = state.day;
+        apt.actualSalePrice = price;
+        const ilceName = ILCELER[l.ilce].name;
+        state.agenda.push(`🏠 ${ilceName} Daire #${apt.number} satıldı: +${fmt(price)} (${daysListed} gün sonra)`);
+        toast(`🏠 Daire #${apt.number} alıcı buldu! +${fmt(price)}`, 'success');
+        addXP(30 + Math.round(price / 100000), 'daire satış (piyasa)');
+      }
+    });
+  });
+
   // 7z) Başarım kontrolü — günlük olarak yeni kazanılan başarımları tara
   checkAchievements();
 
@@ -14753,10 +14861,24 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.45';
+const CURRENT_VERSION = 'v1.46';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.46',
+    date: '17 Mayıs 2026',
+    title: 'EMLAKÇI VE PİYASA SATIŞI',
+    items: [
+      { cat: 'major', text: '🏢 <strong>Arsa ve daire satışında iki seçenek</strong>: Emlakçı (anında, %8 indirim) veya Piyasaya çıkar (sabırlı, tam fiyat)' },
+      { cat: 'major', text: '🏘 Piyasaya çıkarılan mülk gerçek müşteri arıyor — şansa bağlı satılır' },
+      { cat: 'feature', text: 'Arsa piyasa satışı: ilk 3 gün şans yok, sonra %4 → %17.5 artar, 30. gün garantili' },
+      { cat: 'feature', text: 'Daire piyasa satışı: ilk 5 gün şans yok, sonra %2.5 → %16.5 artar, 45. gün garantili' },
+      { cat: 'feature', text: 'Listede durum: arsa kartında "PİYASADA SATILIK" rozeti, daire tablosunda "🏘 PİYASADA (X gün)"' },
+      { cat: 'feature', text: 'İlandan istediğin an çekebilirsin (SATIŞTAN ÇEK butonu)' },
+      { cat: 'feature', text: 'Daire yönetim panelinde "Piyasada" istatistik tile\'ı (listede daire varsa)' }
+    ]
+  },
   {
     version: 'v1.45',
     date: '17 Mayıs 2026',

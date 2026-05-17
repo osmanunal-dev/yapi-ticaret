@@ -5338,30 +5338,42 @@ function progressConstruction(land) {
     let canProgressSub = true;
     const totalDaysSub = b.totalDays;
     const consumptionTodaySub = [];
+    const missingForSub = [];
 
     for (const m of b.materialsNeeded) {
+      if (typeof m.consumed !== 'number') m.consumed = 0;
       const remaining = m.qty - m.consumed;
       if (remaining <= 0) continue;
       const remainingDaysSub = Math.max(1, totalDaysSub - b.daysPassed);
-      const todayNeed = Math.ceil(remaining / remainingDaysSub);
+      const todayNeed = Math.max(1, Math.ceil(remaining / remainingDaysSub));
       const have = state.inventory[m.productId] || 0;
 
       if (have < todayNeed) {
         canProgressSub = false;
-        break;
+        missingForSub.push({ productId: m.productId, need: todayNeed, have, short: todayNeed - have });
+      } else {
+        consumptionTodaySub.push({ productId: m.productId, qty: todayNeed });
       }
-      consumptionTodaySub.push({ productId: m.productId, qty: todayNeed });
     }
 
     if (!canProgressSub) {
+      // Eksik listesini kaydet (UI'da göstermek için)
+      b.missingMaterials = missingForSub;
       if (b.status !== 'paused-warned') {
         b.status = 'paused-warned';
-        state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} (TAŞERON) inşaatı malzeme yetmediği için durdu — siz tedarik etmelisiniz`);
-        toast(`⚠️ Taşeron inşaatı malzeme bekliyor! Tedarikçilerden alın.`, 'error');
+        const detail = missingForSub.slice(0, 3).map(x => {
+          const pn = PRODUCTS[x.productId]?.name || x.productId;
+          const pu = PRODUCTS[x.productId]?.unit || '';
+          return `${pn} (${x.short} ${pu} eksik)`;
+        }).join(', ');
+        state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} (TAŞERON) inşaatı malzeme bekliyor: ${detail}`);
+        toast(`⚠️ Taşeron inşaatı malzeme bekliyor: ${detail}`, 'error');
       }
       return;
     }
 
+    // Tüm malzemeler yeterli — eksik listesini temizle
+    b.missingMaterials = null;
     if (b.status === 'paused-warned') b.status = 'building';
 
     // Malzeme tüket (stoktan) + iç sözleşmeye delivery yaz
@@ -5386,30 +5398,40 @@ function progressConstruction(land) {
   let canProgress = true;
   const totalDays = b.totalDays;
   const consumptionToday = [];
+  const missingForNormal = [];
 
   for (const m of b.materialsNeeded) {
+    if (typeof m.consumed !== 'number') m.consumed = 0;
     const remaining = m.qty - m.consumed;
     if (remaining <= 0) continue;
     const remainingDays = Math.max(1, totalDays - b.daysPassed);
-    const todayNeed = Math.ceil(remaining / remainingDays);
+    const todayNeed = Math.max(1, Math.ceil(remaining / remainingDays));
     const have = state.inventory[m.productId] || 0;
 
     if (have < todayNeed) {
       canProgress = false;
-      break;
+      missingForNormal.push({ productId: m.productId, need: todayNeed, have, short: todayNeed - have });
+    } else {
+      consumptionToday.push({ productId: m.productId, qty: todayNeed });
     }
-    consumptionToday.push({ productId: m.productId, qty: todayNeed });
   }
 
   if (!canProgress) {
+    b.missingMaterials = missingForNormal;
     if (b.status !== 'paused-warned') {
       b.status = 'paused-warned';
-      state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaatı malzeme yetmediği için durdu`);
-      toast(`⚠️ ${BUILDING_TYPES[b.type].name} inşaatı malzeme yetmediği için duruyor!`, 'error');
+      const detail = missingForNormal.slice(0, 3).map(x => {
+        const pn = PRODUCTS[x.productId]?.name || x.productId;
+        const pu = PRODUCTS[x.productId]?.unit || '';
+        return `${pn} (${x.short} ${pu} eksik)`;
+      }).join(', ');
+      state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaatı malzeme bekliyor: ${detail}`);
+      toast(`⚠️ ${BUILDING_TYPES[b.type].name} inşaatı duruyor: ${detail}`, 'error');
     }
     return;
   }
 
+  b.missingMaterials = null;
   if (b.status === 'paused-warned') {
     b.status = 'building';
   }
@@ -11884,12 +11906,39 @@ function renderLandCard(l) {
     const paused = b.status === 'paused-warned';
     const isUrban = l.isUrbanRenewal;
     const isSub = b.isSubcontracted;
+
+    // Eğer durdu ama missingMaterials yoksa, anında hesapla (eski state geriye uyumluluk)
+    if (paused && (!b.missingMaterials || b.missingMaterials.length === 0)) {
+      const calc = [];
+      for (const m of (b.materialsNeeded || [])) {
+        if (typeof m.consumed !== 'number') m.consumed = 0;
+        const rem = m.qty - m.consumed;
+        if (rem <= 0) continue;
+        const rDays = Math.max(1, b.totalDays - b.daysPassed);
+        const need = Math.max(1, Math.ceil(rem / rDays));
+        const have = state.inventory[m.productId] || 0;
+        if (have < need) calc.push({ productId: m.productId, need, have, short: need - have });
+      }
+      if (calc.length > 0) b.missingMaterials = calc;
+    }
+
+    // Eksik malzeme detayı (varsa)
+    let missingDetail = '';
+    if (paused && b.missingMaterials && b.missingMaterials.length > 0) {
+      const items = b.missingMaterials.slice(0, 4).map(x => {
+        const p = PRODUCTS[x.productId];
+        return p ? `• <strong>${p.name}</strong>: ${x.short} ${p.unit} eksik (stokta ${x.have})` : '';
+      }).filter(Boolean).join('<br>');
+      missingDetail = `<div style="margin-top: 6px; padding: 6px 8px; background: rgba(239, 68, 68, 0.08); border-left: 2px solid var(--red); font-size: 10px; color: var(--red); line-height: 1.5;">${items}</div>`;
+    }
+
     buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">
       <strong style="color: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">${paused ? '⚠️' : '🏗'} ${BUILDING_TYPES[b.type].name} ${paused ? '(DURDU)' : (isSub ? '(TAŞERONDA)' : 'inşa ediliyor')}${isUrban ? ' · Kentsel Dönüşüm' : ''}</strong>
       <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};"></div></div>
       <span style="font-size: 10px; color: var(--ink-dim);">${b.daysPassed}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
-      ${paused ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
+      ${paused && (!b.missingMaterials || b.missingMaterials.length === 0) ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
       ${isSub ? '<br><span style="font-size: 10px; color: var(--purple);">Taşeron firma bitiriyor</span>' : ''}
+      ${missingDetail}
     </div>`;
     actions = `
       ${!b.isSubcontracted ? `<button class="btn small" style="background: var(--purple); color: #fff; border-color: var(--purple);" onclick="subcontractBuilding('${l.id}')">🤝 TAŞERONA VER</button>` : ''}
@@ -15066,10 +15115,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.49';
+const CURRENT_VERSION = 'v1.50';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.50',
+    date: '17 Mayıs 2026',
+    title: 'İNŞAAT DURMA NEDENİ GÖRÜNÜR',
+    items: [
+      { cat: 'major', text: '⚠️ <strong>İnşaat durduğunda hangi malzemenin eksik olduğu gösteriliyor</strong>' },
+      { cat: 'feature', text: 'Arsa kartında durmuş bina için kırmızı bir liste: "Çimento: 12 çuval eksik (stokta 5)"' },
+      { cat: 'feature', text: 'Toast bildirimi de hangi malzemelerin eksik olduğunu gösterir' },
+      { cat: 'feature', text: 'm.consumed undefined olunca otomatik 0 atanır (eski state korumalı)' },
+      { cat: 'feature', text: 'todayNeed minimum 1 — küçük miktarlı malzemeler de doğru hesaplanır' },
+      { cat: 'feature', text: 'Eski durmuş binalar için kart açılışında anında eksik hesaplanır' }
+    ]
+  },
   {
     version: 'v1.49',
     date: '17 Mayıs 2026',

@@ -3454,6 +3454,82 @@ function updateFactoryBuyEstimate(brandId) {
   document.getElementById('factory-total').textContent = fmt(Math.round(total));
 }
 
+// Sözleşme detayından tek tıkla fabrika sevkiyatı (kalanın tamamı, onay modal'sız)
+function quickFactoryDispatch(contractId, brandId, productId) {
+  const ct = state.contracts.find(c => c.id === contractId);
+  if (!ct) { toast('Sözleşme bulunamadı', 'error'); return; }
+  const b = BRANDS[brandId];
+  if (!b) return;
+  const dealership = (state.dealerships || []).find(d => d.brandId === brandId);
+  if (!dealership) { toast('Bu markadan bayiliğin yok', 'error'); return; }
+
+  // Kalan miktar
+  const it = ct.items.find(x => x.productId === productId);
+  if (!it) { toast('Bu malzeme sözleşmede yok', 'error'); return; }
+  const delivered = (ct.deliveries || []).reduce((s, d) =>
+    s + (d.items.find(x => x.productId === productId)?.qty || 0), 0);
+  const remaining = it.qty - delivered;
+  if (remaining <= 0) { toast('Bu malzeme zaten teslim edilmiş', 'info'); return; }
+
+  // 5 ton minimum kontrolü
+  const p = PRODUCTS[productId];
+  const tons = (p.weight * remaining) / 1000;
+  if (tons < 5) {
+    toast(`Min 5 ton sevk şartı. Kalan: ${tons.toFixed(2)} ton (${remaining} ${p.unit})`, 'error');
+    return;
+  }
+
+  // Fiyat ve nakit kontrolü
+  const factoryPrice = brandFactoryPrice(brandId);
+  const total = remaining * factoryPrice;
+  if (state.cash < total) {
+    toast(`Yetersiz bakiye: ${fmt(total)} gerekli, kasada ${fmt(state.cash)} var`, 'error');
+    return;
+  }
+
+  // Sevkiyatı yap
+  const cust = getCustomer(ct.customerId);
+  if (!cust) return;
+  spend(total, 'fabrika-alim');
+  dealership.totalPurchased += remaining;
+  const cheapest = cheapestSupplier(productId);
+  const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[productId] || 0);
+  dealership.totalSavings += remaining * (marketPrice - factoryPrice);
+
+  const tripDays = 1 + Math.floor(Math.random() * 3);
+  const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase() + '-FAB';
+  ct.deliveries.push({
+    no: irNo,
+    day: state.day,
+    arrivalDay: state.day + tripDays,
+    vehicleId: null,
+    driverId: null,
+    factoryBrand: b.name,
+    factoryBrandId: brandId,
+    items: [{ productId, qty: remaining }],
+    weight: tons,
+    fuelCost: 0,
+    externalCost: 0
+  });
+
+  // Tüm teslim oldu mu?
+  const allDelivered = ct.items.every(itm => {
+    const tot = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === itm.productId)?.qty || 0), 0);
+    return tot >= itm.qty;
+  });
+  if (allDelivered) {
+    ct.delivered = true;
+    cust.balance += ct.total;
+    toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Cari: ${fmt(ct.total)}`, 'success');
+    addXP(15, 'tüm sevkiyatlar tamam');
+  }
+
+  toast(`✓ ${remaining} ${p.unit} ${b.name} fabrikadan ${cust.name}'a gönderildi (${tripDays} gün) · ${fmt(total)}`, 'success');
+  addXP(8, 'fabrika sevkiyatı');
+  render();
+}
+
 function confirmFactoryBuy(brandId) {
   const b = BRANDS[brandId];
   if (!b) return;
@@ -9135,17 +9211,34 @@ function renderContractsView() {
           <div class="subject">${ILCELER[cust.ilce].name} · ${fmt(ct.total)} · ${ct.delivered ? '✓ Teslim Tamam' : ct.paid ? 'Ödendi' : 'Sevkiyat sürüyor'}</div>
           <div class="table-scroll">
           <table class="data-table" style="margin: 10px 0;">
-            <thead><tr><th>Malzeme</th><th>Sözleşme</th><th>Teslim</th><th>Kalan</th></tr></thead>
+            <thead><tr><th>Malzeme</th><th>Sözleşme</th><th>Teslim</th><th>Kalan</th><th>Eylem</th></tr></thead>
             <tbody>
               ${ct.items.map(it => {
                 const delivered = ct.deliveries.reduce((s, d) =>
                   s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
                 const remaining = it.qty - delivered;
+                const p = PRODUCTS[it.productId];
+
+                // Bu malzeme için bayiliğimiz var mı?
+                const dealership = (state.dealerships || []).find(d => d.productId === it.productId);
+                let actionCell = '—';
+                if (remaining > 0 && dealership) {
+                  // 5 ton sınırı kontrolü — kalan tonajı hesapla
+                  const remainingTons = (p.weight * remaining) / 1000;
+                  if (remainingTons >= 5) {
+                    const b = BRANDS[dealership.brandId];
+                    actionCell = `<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-size: 10px; padding: 4px 8px;" onclick="quickFactoryDispatch('${ct.id}','${dealership.brandId}','${it.productId}')" title="${b.name} fabrikasından ${remaining} ${p.unit} direkt müşteriye gönder">🏭 FABRİKADAN SEVK</button>`;
+                  } else {
+                    actionCell = `<span style="font-size: 10px; color: var(--ink-dim);" title="Fabrika sevki min 5 ton">⚠️ <5 ton</span>`;
+                  }
+                }
+
                 return `<tr>
-                  <td>${PRODUCTS[it.productId].name}</td>
-                  <td>${it.qty} ${PRODUCTS[it.productId].unit}</td>
+                  <td>${p.name}${dealership ? ` <span style="font-size: 9px; color: #a855f7;">🏭</span>` : ''}</td>
+                  <td>${it.qty} ${p.unit}</td>
                   <td class="${delivered >= it.qty ? 'have' : ''}">${delivered}</td>
                   <td class="${remaining > 0 ? 'miss' : 'have'}">${remaining}</td>
+                  <td>${actionCell}</td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -11202,7 +11295,12 @@ function renderLands() {
   const lands = state.lands || [];
   const market = state.landMarket || [];
 
-  // Genel özet
+  // Kategorize et
+  const myLands = lands.filter(l => !l.isUrbanRenewal && (!l.building || l.building.status === 'completed'));
+  const activeProjects = lands.filter(l => !l.isUrbanRenewal && l.building && ['demolition', 'building', 'paused-warned'].includes(l.building.status));
+  const urbanRenewals = lands.filter(l => l.isUrbanRenewal);
+
+  // Genel özet — sadece "Arsalarım" alanına dahil olanların değeri
   const totalLandValue = lands.reduce((s, l) => s + landCurrentValue(l), 0);
   const totalInvested = lands.reduce((s, l) => s + l.purchasePrice, 0);
   const totalProfit = totalLandValue - totalInvested;
@@ -11211,14 +11309,16 @@ function renderLands() {
     <div class="subtitle">İstanbul arsa piyasası · Yatırım ve inşaat için arsa alın · Sahip olunan: ${lands.length}</div>
 
     <div class="stat-grid">
-      <div class="stat-tile"><div class="stat-label">Arsa Sayısı</div><div class="stat-val" style="color: var(--blue)">${lands.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Arsa</div><div class="stat-val" style="color: var(--blue)">${lands.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Yatırılan</div><div class="stat-val">${fmt(totalInvested)}</div></div>
       <div class="stat-tile"><div class="stat-label">Güncel Değer</div><div class="stat-val" style="color: var(--green)">${fmt(totalLandValue)}</div></div>
       <div class="stat-tile"><div class="stat-label">Net K/Z</div><div class="stat-val" style="color: ${totalProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${totalProfit >= 0 ? '+' : ''}${fmt(totalProfit)}</div></div>
     </div>
 
     <div class="filter-chips" style="margin-bottom: 18px;">
-      <div class="filter-chip ${_landTab === 'mine' ? 'active' : ''}" onclick="changeLandTab('mine')">📌 Arsalarım (${lands.length})</div>
+      <div class="filter-chip ${_landTab === 'mine' ? 'active' : ''}" onclick="changeLandTab('mine')">📌 Arsalarım (${myLands.length})</div>
+      <div class="filter-chip ${_landTab === 'projects' ? 'active' : ''}" onclick="changeLandTab('projects')">🏗 Devam Eden Projeler (${activeProjects.length})</div>
+      <div class="filter-chip ${_landTab === 'urban' ? 'active' : ''}" onclick="changeLandTab('urban')">🏚 Kentsel Dönüşüm (${urbanRenewals.length})</div>
       <div class="filter-chip ${_landTab === 'market' ? 'active' : ''}" onclick="changeLandTab('market')">🏬 Piyasa (${market.length})</div>
     </div>
 
@@ -11237,94 +11337,117 @@ function renderLandContent() {
   if (!c) return;
 
   if (_landTab === 'mine') {
-    c.innerHTML = renderMyLands();
+    c.innerHTML = renderMyLandsFiltered('mine');
+  } else if (_landTab === 'projects') {
+    c.innerHTML = renderMyLandsFiltered('projects');
+  } else if (_landTab === 'urban') {
+    c.innerHTML = renderMyLandsFiltered('urban');
   } else if (_landTab === 'market') {
     c.innerHTML = renderLandMarket();
   }
 }
 
-function renderMyLands() {
-  const lands = state.lands || [];
-  if (lands.length === 0) {
-    return '<div class="empty">Henüz arsan yok. "Piyasa" sekmesinden İstanbul ilçelerinden arsa al — yatırım veya inşaat için.</div>';
+// Sekmeye göre arsa filtreleyip render et
+function renderMyLandsFiltered(filter) {
+  const allLands = state.lands || [];
+  let lands;
+  let emptyMsg;
+  if (filter === 'mine') {
+    lands = allLands.filter(l => !l.isUrbanRenewal && (!l.building || l.building.status === 'completed'));
+    emptyMsg = 'Henüz boş arsan yok. "Piyasa" sekmesinden arsa al ya da inşaatlarının bitmesini bekle.';
+  } else if (filter === 'projects') {
+    lands = allLands.filter(l => !l.isUrbanRenewal && l.building && ['demolition', 'building', 'paused-warned'].includes(l.building.status));
+    emptyMsg = 'Devam eden projen yok. Bir arsana inşaat başlatabilirsin.';
+  } else if (filter === 'urban') {
+    lands = allLands.filter(l => l.isUrbanRenewal);
+    emptyMsg = 'Henüz kentsel dönüşüm projen yok. Mailden gelen tekliflere bak.';
   }
 
-  return `<div class="grid-2">
-    ${lands.map(l => {
-      const ilceData = ILCELER[l.ilce];
-      const currentVal = landCurrentValue(l);
-      const profit = currentVal - l.purchasePrice;
-      const profitPct = ((profit / l.purchasePrice) * 100).toFixed(1);
-      const ageDay = state.day - l.purchaseDay;
-      const b = l.building;
+  if (!lands || lands.length === 0) {
+    return `<div class="empty">${emptyMsg}</div>`;
+  }
 
-      // İnşaat detayları
-      let buildingInfo = '';
-      let actions = '';
-      if (!b) {
-        // Boş arsa — inşaat butonu (uygun tipleri öner)
-        const eligibleTypes = Object.keys(BUILDING_TYPES).filter(bt => canBuild(bt, l.m2));
-        actions = `
-          ${eligibleTypes.length > 0 ? `<button class="btn small primary" onclick="openBuildModal('${l.id}')">🏗 İNŞAAT BAŞLAT</button>` : `<button class="btn small" disabled title="Bu arsa boyutu uygun değil">🏗 İNŞAAT</button>`}
-          ${!l.isUrbanRenewal ? `<button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>` : ''}
-        `;
-      } else if (b.status === 'completed') {
-        // Tamamlanmış bina
-        const isUrban = l.isUrbanRenewal;
-        const unsold = b.apartments.filter(a => a.status === 'unsold').length;
-        const sold = b.apartments.filter(a => a.status === 'sold').length;
-        const rented = b.apartments.filter(a => a.status === 'rented').length;
-        const customerDelivered = b.apartments.filter(a => a.status === 'delivered-to-customer').length;
-        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--green);">
-          <strong style="color: var(--green);">✅ ${BUILDING_TYPES[b.type].name} tamamlandı${isUrban ? ' (Kentsel Dönüşüm)' : ''}</strong><br>
-          <span style="font-size: 10px; color: var(--ink-dim);">${b.apartments.length} daire · ${unsold} satılık · ${sold} satılmış · ${rented} kirada${customerDelivered > 0 ? ' · ' + customerDelivered + ' müşteride' : ''}</span>
-        </div>`;
-        actions = `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
-      } else if (b.status === 'demolition') {
-        // Yıkım fazı (kentsel dönüşüm — 6 gün)
-        const demoDay = Math.abs(b.daysPassed);
-        const demoTotal = 6;
-        const pct = Math.round((demoDay / demoTotal) * 100);
-        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--red);">
-          <strong style="color: var(--red);">🏚 YIKIM SÜRECİ</strong>
-          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: var(--red);"></div></div>
-          <span style="font-size: 10px; color: var(--ink-dim);">${demoDay}/${demoTotal} gün · %${pct} · Kentsel dönüşüm</span>
-        </div>`;
-        actions = `<button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>`;
-      } else if (b.status === 'building' || b.status === 'paused-warned') {
-        const pct = Math.round((b.daysPassed / b.totalDays) * 100);
-        const remaining = b.totalDays - b.daysPassed;
-        const paused = b.status === 'paused-warned';
-        const isUrban = l.isUrbanRenewal;
-        const isSub = b.isSubcontracted;
-        buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">
-          <strong style="color: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">${paused ? '⚠️' : '🏗'} ${BUILDING_TYPES[b.type].name} ${paused ? '(DURDU)' : (isSub ? '(TAŞERONDA)' : 'inşa ediliyor')}${isUrban ? ' · Kentsel Dönüşüm' : ''}</strong>
-          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};"></div></div>
-          <span style="font-size: 10px; color: var(--ink-dim);">${b.daysPassed}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
-          ${paused ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
-          ${isSub ? '<br><span style="font-size: 10px; color: var(--purple);">Taşeron firma bitiriyor</span>' : ''}
-        </div>`;
-        actions = `
-          ${!b.isSubcontracted ? `<button class="btn small" style="background: var(--purple); color: #fff; border-color: var(--purple);" onclick="subcontractBuilding('${l.id}')">🤝 TAŞERONA VER</button>` : ''}
-          <button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>
-        `;
-      }
+  return `<div class="grid-2">${lands.map(l => renderLandCard(l)).join('')}</div>`;
+}
 
-      return `<div class="card">
-        <h3>${ilceData.name} · ${l.m2} m²</h3>
-        <div class="loc">${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası · ${ilceData.km} km</div>
-        <div style="font-size: 11px; line-height: 1.7; margin-top: 8px;">
-          <div>m² fiyatı: <strong>${fmt(ilceData.m2Price)}</strong></div>
-          <div>Alış fiyatı: ${fmt(l.purchasePrice)} <span style="color: var(--ink-dim); font-size: 10px;">(G${l.purchaseDay})</span></div>
-          <div>Güncel arsa değeri: <strong style="color: var(--green);">${fmt(currentVal)}</strong></div>
-          <div>Arsa K/Z: <strong style="color: ${profit >= 0 ? 'var(--green)' : 'var(--red)'};">${profit >= 0 ? '+' : ''}${fmt(profit)} (${profit >= 0 ? '+' : ''}%${profitPct})</strong></div>
-          ${ageDay > 0 ? `<div style="font-size: 10px; color: var(--ink-dim);">${ageDay} gündür sahipsin</div>` : ''}
-        </div>
-        ${buildingInfo}
-        <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">${actions}</div>
-      </div>`;
-    }).join('')}
+// Tek bir arsa kartını render et
+function renderLandCard(l) {
+  const ilceData = ILCELER[l.ilce];
+  const currentVal = landCurrentValue(l);
+  const profit = currentVal - l.purchasePrice;
+  const profitPct = l.purchasePrice > 0 ? ((profit / l.purchasePrice) * 100).toFixed(1) : '0';
+  const ageDay = state.day - l.purchaseDay;
+  const b = l.building;
+
+  // İnşaat detayları
+  let buildingInfo = '';
+  let actions = '';
+  if (!b) {
+    // Boş arsa — inşaat butonu (uygun tipleri öner)
+    const eligibleTypes = Object.keys(BUILDING_TYPES).filter(bt => canBuild(bt, l.m2));
+    actions = `
+      ${eligibleTypes.length > 0 ? `<button class="btn small primary" onclick="openBuildModal('${l.id}')">🏗 İNŞAAT BAŞLAT</button>` : `<button class="btn small" disabled title="Bu arsa boyutu uygun değil">🏗 İNŞAAT</button>`}
+      ${!l.isUrbanRenewal ? `<button class="btn small danger" onclick="sellLand('${l.id}')">SAT</button>` : ''}
+    `;
+  } else if (b.status === 'completed') {
+    // Tamamlanmış bina
+    const isUrban = l.isUrbanRenewal;
+    const unsold = b.apartments.filter(a => a.status === 'unsold').length;
+    const sold = b.apartments.filter(a => a.status === 'sold').length;
+    const rented = b.apartments.filter(a => a.status === 'rented').length;
+    const customerDelivered = b.apartments.filter(a => a.status === 'delivered-to-customer').length;
+    buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--green);">
+      <strong style="color: var(--green);">✅ ${BUILDING_TYPES[b.type].name} tamamlandı${isUrban ? ' (Kentsel Dönüşüm)' : ''}</strong><br>
+      <span style="font-size: 10px; color: var(--ink-dim);">${b.apartments.length} daire · ${unsold} satılık · ${sold} satılmış · ${rented} kirada${customerDelivered > 0 ? ' · ' + customerDelivered + ' müşteride' : ''}</span>
+    </div>`;
+    actions = `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
+  } else if (b.status === 'demolition') {
+    const demoDay = Math.abs(b.daysPassed);
+    const demoTotal = 6;
+    const pct = Math.round((demoDay / demoTotal) * 100);
+    buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--red);">
+      <strong style="color: var(--red);">🏚 YIKIM SÜRECİ</strong>
+      <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: var(--red);"></div></div>
+      <span style="font-size: 10px; color: var(--ink-dim);">${demoDay}/${demoTotal} gün · %${pct} · Kentsel dönüşüm</span>
+    </div>`;
+    actions = `<button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>`;
+  } else if (b.status === 'building' || b.status === 'paused-warned') {
+    const pct = Math.round((b.daysPassed / b.totalDays) * 100);
+    const remaining = b.totalDays - b.daysPassed;
+    const paused = b.status === 'paused-warned';
+    const isUrban = l.isUrbanRenewal;
+    const isSub = b.isSubcontracted;
+    buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">
+      <strong style="color: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">${paused ? '⚠️' : '🏗'} ${BUILDING_TYPES[b.type].name} ${paused ? '(DURDU)' : (isSub ? '(TAŞERONDA)' : 'inşa ediliyor')}${isUrban ? ' · Kentsel Dönüşüm' : ''}</strong>
+      <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};"></div></div>
+      <span style="font-size: 10px; color: var(--ink-dim);">${b.daysPassed}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
+      ${paused ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
+      ${isSub ? '<br><span style="font-size: 10px; color: var(--purple);">Taşeron firma bitiriyor</span>' : ''}
+    </div>`;
+    actions = `
+      ${!b.isSubcontracted ? `<button class="btn small" style="background: var(--purple); color: #fff; border-color: var(--purple);" onclick="subcontractBuilding('${l.id}')">🤝 TAŞERONA VER</button>` : ''}
+      <button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>
+    `;
+  }
+
+  return `<div class="card">
+    <h3>${ilceData.name} · ${l.m2} m²${l.isUrbanRenewal ? ' <span style="font-size: 10px; color: #ec4899;">🏚 KD</span>' : ''}</h3>
+    <div class="loc">${ilceData.side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası · ${ilceData.km} km</div>
+    <div style="font-size: 11px; line-height: 1.7; margin-top: 8px;">
+      <div>m² fiyatı: <strong>${fmt(ilceData.m2Price)}</strong></div>
+      <div>Alış fiyatı: ${fmt(l.purchasePrice)} <span style="color: var(--ink-dim); font-size: 10px;">(G${l.purchaseDay})</span></div>
+      <div>Güncel arsa değeri: <strong style="color: var(--green);">${fmt(currentVal)}</strong></div>
+      <div>Arsa K/Z: <strong style="color: ${profit >= 0 ? 'var(--green)' : 'var(--red)'};">${profit >= 0 ? '+' : ''}${fmt(profit)} (${profit >= 0 ? '+' : ''}%${profitPct})</strong></div>
+      ${ageDay > 0 ? `<div style="font-size: 10px; color: var(--ink-dim);">${ageDay} gündür sahipsin</div>` : ''}
+    </div>
+    ${buildingInfo}
+    <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">${actions}</div>
   </div>`;
+}
+
+// Eski fonksiyon (geriye dönük uyumluluk için bırak)
+function renderMyLands() {
+  return renderMyLandsFiltered('mine');
 }
 
 function renderLandMarket() {
@@ -14313,26 +14436,46 @@ function isModeratorOrAdmin() {
 
 // 20 farklı SVG avatar (inşaat / iş temalı, parametrik renkler)
 const AVATARS = {
-  a01: { name: 'Sarı Baret', svg: (c1, c2) => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="${c1}"/><circle cx="32" cy="26" r="9" fill="#ffd166"/><path d="M16 50 L20 36 L44 36 L48 50 Z" fill="#ffd166"/><rect x="13" y="48" width="38" height="4" rx="1" fill="#e8a900"/><rect x="29" y="20" width="6" height="3" fill="#e8a900"/></svg>`, colors: ['#2a4858', '#f4a020'] },
-  a02: { name: 'Mavi Tulum', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#1e3a5f"/><circle cx="32" cy="22" r="8" fill="#f4c896"/><path d="M16 60 L18 38 Q32 32 46 38 L48 60 Z" fill="#3a6fa0"/><rect x="29" y="40" width="6" height="20" fill="#234060"/><circle cx="24" cy="44" r="1.5" fill="#fff"/><circle cx="40" cy="44" r="1.5" fill="#fff"/></svg>`, colors: [] },
-  a03: { name: 'Çekiç', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#c44a1e"/><rect x="14" y="20" width="36" height="14" fill="#444"/><rect x="38" y="18" width="10" height="18" fill="#666"/><rect x="29" y="32" width="6" height="28" fill="#8b5a2b"/></svg>`, colors: [] },
-  a04: { name: 'Tuğla Duvar', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#8b4513"/><g fill="#a0522d" stroke="#5d2906" stroke-width="0.5"><rect x="0" y="0" width="20" height="10"/><rect x="22" y="0" width="20" height="10"/><rect x="44" y="0" width="20" height="10"/><rect x="-10" y="12" width="20" height="10"/><rect x="12" y="12" width="20" height="10"/><rect x="34" y="12" width="20" height="10"/><rect x="56" y="12" width="20" height="10"/><rect x="0" y="24" width="20" height="10"/><rect x="22" y="24" width="20" height="10"/><rect x="44" y="24" width="20" height="10"/><rect x="-10" y="36" width="20" height="10"/><rect x="12" y="36" width="20" height="10"/><rect x="34" y="36" width="20" height="10"/><rect x="56" y="36" width="20" height="10"/><rect x="0" y="48" width="20" height="10"/><rect x="22" y="48" width="20" height="10"/><rect x="44" y="48" width="20" height="10"/></g></svg>`, colors: [] },
-  a05: { name: 'İskele', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#252830"/><g stroke="#f4a020" stroke-width="2" fill="none"><line x1="10" y1="10" x2="10" y2="54"/><line x1="32" y1="10" x2="32" y2="54"/><line x1="54" y1="10" x2="54" y2="54"/><line x1="10" y1="20" x2="54" y2="20"/><line x1="10" y1="35" x2="54" y2="35"/><line x1="10" y1="50" x2="54" y2="50"/><line x1="10" y1="20" x2="32" y2="35"/><line x1="32" y1="20" x2="54" y2="35"/><line x1="10" y1="35" x2="32" y2="50"/><line x1="32" y1="35" x2="54" y2="50"/></g></svg>`, colors: [] },
-  a06: { name: 'Vinç', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#5a8ca8"/><line x1="10" y1="58" x2="10" y2="10" stroke="#f4a020" stroke-width="3"/><line x1="10" y1="10" x2="54" y2="14" stroke="#f4a020" stroke-width="3"/><line x1="10" y1="10" x2="20" y2="20" stroke="#f4a020" stroke-width="2"/><line x1="42" y1="13" x2="42" y2="28" stroke="#ddd" stroke-width="1"/><rect x="38" y="28" width="8" height="6" fill="#777"/><rect x="6" y="56" width="10" height="6" fill="#333"/></svg>`, colors: [] },
-  a07: { name: 'Buldozer', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#7fb069"/><rect x="10" y="34" width="34" height="14" fill="#f4a020"/><rect x="14" y="24" width="20" height="12" fill="#d97706"/><rect x="44" y="36" width="8" height="14" fill="#444"/><circle cx="18" cy="52" r="6" fill="#222"/><circle cx="36" cy="52" r="6" fill="#222"/><circle cx="18" cy="52" r="2" fill="#999"/><circle cx="36" cy="52" r="2" fill="#999"/></svg>`, colors: [] },
-  a08: { name: 'Çimento Karıştırıcı', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#9a7fb0"/><ellipse cx="32" cy="28" rx="18" ry="14" fill="#d4d0c0"/><ellipse cx="32" cy="26" rx="14" ry="10" fill="#8a8775"/><rect x="12" y="40" width="40" height="10" fill="#444"/><circle cx="20" cy="54" r="5" fill="#222"/><circle cx="44" cy="54" r="5" fill="#222"/></svg>`, colors: [] },
-  a09: { name: 'Mühendis', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#2c3e50"/><circle cx="32" cy="22" r="9" fill="#f4c896"/><rect x="20" y="16" width="24" height="8" rx="2" fill="#222"/><path d="M18 60 L20 40 Q32 35 44 40 L46 60 Z" fill="#5a8ca8"/><rect x="29" y="38" width="6" height="22" fill="#fff"/><rect x="30" y="45" width="4" height="12" fill="#2c3e50"/></svg>`, colors: [] },
-  a10: { name: 'Tornavida & Anahtar', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#d96c5e"/><g transform="rotate(-30 32 32)"><rect x="14" y="30" width="36" height="4" fill="#888"/><rect x="42" y="26" width="10" height="12" fill="#aaa"/><polygon points="42,28 38,32 42,36" fill="#666"/></g><g transform="rotate(45 32 32)"><rect x="14" y="30" width="36" height="4" fill="#bbb"/><circle cx="46" cy="32" r="8" fill="#888"/><circle cx="46" cy="32" r="4" fill="#d96c5e"/></g></svg>`, colors: [] },
-  a11: { name: 'Plan / Pusula', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#f4a020"/><rect x="10" y="12" width="44" height="40" fill="#fff8e7" stroke="#5a3a10" stroke-width="1"/><g stroke="#5a3a10" stroke-width="0.5" fill="none"><line x1="15" y1="20" x2="49" y2="20"/><line x1="15" y1="28" x2="49" y2="28"/><line x1="15" y1="36" x2="49" y2="36"/><line x1="15" y1="44" x2="49" y2="44"/><line x1="20" y1="15" x2="20" y2="49"/><line x1="32" y1="15" x2="32" y2="49"/><line x1="44" y1="15" x2="44" y2="49"/></g><circle cx="32" cy="32" r="8" fill="none" stroke="#c44a1e" stroke-width="1.5"/></svg>`, colors: [] },
-  a12: { name: 'Para Yığını', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#7fb069"/><ellipse cx="32" cy="48" rx="22" ry="6" fill="#d4af37"/><ellipse cx="32" cy="42" rx="22" ry="6" fill="#e6c853"/><ellipse cx="32" cy="36" rx="22" ry="6" fill="#d4af37"/><ellipse cx="32" cy="30" rx="22" ry="6" fill="#e6c853"/><ellipse cx="32" cy="24" rx="22" ry="6" fill="#d4af37"/><text x="32" y="28" text-anchor="middle" font-family="Bebas Neue, sans-serif" font-size="10" fill="#5a3a10">₺</text></svg>`, colors: [] },
-  a13: { name: 'Geometrik Mavi', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#1e3a5f"/><polygon points="32,8 56,24 56,48 32,56 8,48 8,24" fill="#5a8ca8"/><polygon points="32,18 46,28 46,44 32,50 18,44 18,28" fill="#1e3a5f"/><circle cx="32" cy="34" r="6" fill="#f4a020"/></svg>`, colors: [] },
-  a14: { name: 'Geometrik Turuncu', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#c44a1e"/><polygon points="32,4 60,32 32,60 4,32" fill="#f4a020"/><polygon points="32,16 48,32 32,48 16,32" fill="#c44a1e"/><polygon points="32,24 40,32 32,40 24,32" fill="#ffcb52"/></svg>`, colors: [] },
-  a15: { name: 'Geometrik Yeşil', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#1a3a2a"/><circle cx="32" cy="32" r="22" fill="#7fb069"/><circle cx="32" cy="32" r="16" fill="#5a9050"/><circle cx="32" cy="32" r="10" fill="#3a6a35"/><circle cx="32" cy="32" r="4" fill="#1a3a2a"/></svg>`, colors: [] },
-  a16: { name: 'Geometrik Mor', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#3a1f50"/><polygon points="32,8 56,32 32,56 8,32" fill="#9a7fb0"/><rect x="22" y="22" width="20" height="20" fill="#3a1f50" transform="rotate(45 32 32)"/><circle cx="32" cy="32" r="6" fill="#e2c044"/></svg>`, colors: [] },
-  a17: { name: 'Kırmızı Şahin', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#4a0e0e"/><path d="M32 14 L48 30 L42 36 L48 50 L32 44 L16 50 L22 36 L16 30 Z" fill="#d96c5e"/><circle cx="32" cy="30" r="3" fill="#fff"/><polygon points="30,32 34,32 32,38" fill="#4a0e0e"/></svg>`, colors: [] },
-  a18: { name: 'Altın Yıldız', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="g18"><stop offset="0%" stop-color="#ffd166"/><stop offset="100%" stop-color="#d97706"/></radialGradient></defs><rect width="64" height="64" fill="#2a1a05"/><polygon points="32,8 38,26 56,26 42,38 48,56 32,46 16,56 22,38 8,26 26,26" fill="url(#g18)"/></svg>`, colors: [] },
-  a19: { name: 'Elmas', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#0a2530"/><polygon points="20,16 44,16 56,28 32,56 8,28" fill="#5fc0d0"/><polygon points="20,16 44,16 32,28" fill="#b8e6f0"/><polygon points="8,28 20,16 32,28" fill="#3a8da0"/><polygon points="44,16 56,28 32,28" fill="#3a8da0"/><polygon points="8,28 32,28 32,56" fill="#5fc0d0"/><polygon points="32,28 56,28 32,56" fill="#4a9faf"/></svg>`, colors: [] },
-  a20: { name: 'Şirket Logosu', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="#252830"/><rect x="14" y="20" width="36" height="32" fill="#f4a020"/><rect x="18" y="26" width="6" height="6" fill="#252830"/><rect x="29" y="26" width="6" height="6" fill="#252830"/><rect x="40" y="26" width="6" height="6" fill="#252830"/><rect x="18" y="36" width="6" height="6" fill="#252830"/><rect x="29" y="36" width="6" height="6" fill="#252830"/><rect x="40" y="36" width="6" height="6" fill="#252830"/><rect x="20" y="46" width="24" height="6" fill="#c44a1e"/></svg>`, colors: [] }
+  // İNŞAAT KARAKTERLERİ — gradient'li, modern karakter avatarları
+  a01: { name: 'Patron', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a01bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a1f2e"/><stop offset="1" stop-color="#3a4a6a"/></linearGradient><radialGradient id="a01face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#fde2c4"/><stop offset="1" stop-color="#e6b88a"/></radialGradient></defs><rect width="64" height="64" fill="url(#a01bg)"/><circle cx="32" cy="58" r="28" fill="#1a1f2e"/><circle cx="32" cy="26" r="11" fill="url(#a01face)"/><path d="M21 22 Q32 12 43 22 Q43 17 38 14 Q32 11 26 14 Q21 17 21 22 Z" fill="#2c1810"/><path d="M14 60 Q14 40 26 36 L38 36 Q50 40 50 60 Z" fill="#1a1f2e"/><path d="M28 36 L28 60 M36 36 L36 60" stroke="#0d1218" stroke-width="1"/><circle cx="28" cy="26" r="1.2" fill="#000"/><circle cx="36" cy="26" r="1.2" fill="#000"/><path d="M29 31 Q32 33 35 31" stroke="#8a4a2a" stroke-width="1" fill="none"/></svg>`, colors: [] },
+
+  a02: { name: 'Mühendis Hanım', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a02bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9826e"/><stop offset="1" stop-color="#9a4a3a"/></linearGradient><radialGradient id="a02face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#ffdbb4"/><stop offset="1" stop-color="#e0b080"/></radialGradient></defs><rect width="64" height="64" fill="url(#a02bg)"/><circle cx="32" cy="60" r="30" fill="#9a4a3a"/><path d="M14 26 Q14 12 32 12 Q50 12 50 26 L50 36 Q44 32 32 32 Q20 32 14 36 Z" fill="#3a2418"/><circle cx="32" cy="28" r="11" fill="url(#a02face)"/><path d="M22 18 Q32 10 42 18 L42 22 Q38 18 32 18 Q26 18 22 22 Z" fill="#3a2418"/><path d="M16 60 Q18 42 28 38 L36 38 Q46 42 48 60 Z" fill="#d9826e"/><circle cx="28" cy="28" r="1.2" fill="#000"/><circle cx="36" cy="28" r="1.2" fill="#000"/><path d="M30 33 Q32 35 34 33" stroke="#c44060" stroke-width="1.2" fill="none"/><circle cx="22" cy="30" r="1.5" fill="#ffaaaa" opacity="0.6"/><circle cx="42" cy="30" r="1.5" fill="#ffaaaa" opacity="0.6"/></svg>`, colors: [] },
+
+  a03: { name: 'Baretli Usta', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a03bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4a020"/><stop offset="1" stop-color="#c44a1e"/></linearGradient><radialGradient id="a03face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#f5c896"/><stop offset="1" stop-color="#c89668"/></radialGradient><linearGradient id="a03hat" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd166"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><rect width="64" height="64" fill="url(#a03bg)"/><circle cx="32" cy="60" r="30" fill="#252830"/><circle cx="32" cy="30" r="11" fill="url(#a03face)"/><path d="M18 26 Q18 16 32 14 Q46 16 46 26 L48 26 L48 30 L16 30 L16 26 Z" fill="url(#a03hat)"/><rect x="29" y="14" width="6" height="6" rx="1" fill="#c08100"/><path d="M14 60 Q16 42 26 38 L38 38 Q48 42 50 60 Z" fill="#3a4a6a"/><circle cx="28" cy="30" r="1.2" fill="#000"/><circle cx="36" cy="30" r="1.2" fill="#000"/><path d="M22 30 Q24 32 26 30" stroke="#5a3020" stroke-width="0.8" fill="none"/><path d="M38 30 Q40 32 42 30" stroke="#5a3020" stroke-width="0.8" fill="none"/><path d="M29 35 Q32 37 35 35" stroke="#8a4a2a" stroke-width="1" fill="none"/></svg>`, colors: [] },
+
+  a04: { name: 'Sakallı Patron', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a04bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a6b8a"/><stop offset="1" stop-color="#2a3450"/></linearGradient><radialGradient id="a04face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#e8c8a0"/><stop offset="1" stop-color="#b89878"/></radialGradient></defs><rect width="64" height="64" fill="url(#a04bg)"/><circle cx="32" cy="60" r="30" fill="#1a2030"/><circle cx="32" cy="28" r="12" fill="url(#a04face)"/><path d="M20 22 Q32 14 44 22 L44 18 Q40 12 32 12 Q24 12 20 18 Z" fill="#3a2618"/><path d="M22 32 Q22 38 26 41 Q32 44 38 41 Q42 38 42 32 Q40 36 32 36 Q24 36 22 32 Z" fill="#3a2618"/><path d="M14 60 Q16 44 26 40 L38 40 Q48 44 50 60 Z" fill="#5a6b8a"/><rect x="26" y="42" width="12" height="18" fill="#fff"/><path d="M32 42 L32 50 L30 52 L34 52 Z" fill="#c44a1e"/><circle cx="28" cy="28" r="1.3" fill="#000"/><circle cx="36" cy="28" r="1.3" fill="#000"/><path d="M22 26 Q24 28 27 26" stroke="#3a2618" stroke-width="1" fill="none"/><path d="M37 26 Q40 28 42 26" stroke="#3a2618" stroke-width="1" fill="none"/></svg>`, colors: [] },
+
+  a05: { name: 'Şehir Silüeti', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a05bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a020"/><stop offset="0.5" stop-color="#d96c5e"/><stop offset="1" stop-color="#3a1f50"/></linearGradient></defs><rect width="64" height="64" fill="url(#a05bg)"/><circle cx="50" cy="14" r="6" fill="#fff0c0" opacity="0.8"/><circle cx="50" cy="14" r="3" fill="#ffd166"/><path d="M0 56 L6 56 L6 36 L12 36 L12 56 L18 56 L18 24 L24 24 L24 56 L30 56 L30 40 L36 40 L36 56 L42 56 L42 18 L50 18 L50 56 L58 56 L58 32 L64 32 L64 64 L0 64 Z" fill="#1a1f30"/><g fill="#ffd166" opacity="0.9"><rect x="20" y="28" width="2" height="2"/><rect x="20" y="34" width="2" height="2"/><rect x="20" y="40" width="2" height="2"/><rect x="20" y="46" width="2" height="2"/><rect x="44" y="22" width="2" height="2"/><rect x="44" y="28" width="2" height="2"/><rect x="44" y="34" width="2" height="2"/><rect x="44" y="40" width="2" height="2"/><rect x="60" y="36" width="2" height="2"/><rect x="60" y="42" width="2" height="2"/></g></svg>`, colors: [] },
+
+  a06: { name: 'Vinç Manzara', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a06bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5fc0d0"/><stop offset="1" stop-color="#1e5a7a"/></linearGradient></defs><rect width="64" height="64" fill="url(#a06bg)"/><circle cx="14" cy="14" r="5" fill="#ffd166" opacity="0.9"/><circle cx="14" cy="14" r="3" fill="#fff8c0"/><line x1="12" y1="60" x2="12" y2="8" stroke="#f4a020" stroke-width="2.5"/><line x1="12" y1="8" x2="56" y2="12" stroke="#f4a020" stroke-width="2.5"/><line x1="12" y1="8" x2="20" y2="16" stroke="#f4a020" stroke-width="2"/><line x1="46" y1="11" x2="46" y2="30" stroke="#ddd" stroke-width="0.8"/><rect x="42" y="30" width="8" height="6" fill="#666" stroke="#444"/><rect x="44" y="32" width="4" height="2" fill="#ffd166"/><g stroke="#f4a020" stroke-width="1" fill="none"><line x1="12" y1="20" x2="20" y2="8"/><line x1="12" y1="32" x2="20" y2="20"/><line x1="12" y1="44" x2="20" y2="32"/><line x1="12" y1="56" x2="20" y2="44"/></g><rect x="6" y="58" width="14" height="6" fill="#252830"/><path d="M0 60 L8 50 L18 56 L28 48 L40 54 L52 46 L64 54 L64 64 L0 64 Z" fill="#1a2030"/></svg>`, colors: [] },
+
+  a07: { name: 'Buldozer', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a07bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a8d860"/><stop offset="1" stop-color="#3a6a35"/></linearGradient><linearGradient id="a07yellow" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd166"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><rect width="64" height="64" fill="url(#a07bg)"/><path d="M0 50 Q16 46 32 48 Q48 50 64 46 L64 64 L0 64 Z" fill="#5a3a1a"/><rect x="8" y="32" width="32" height="16" rx="2" fill="url(#a07yellow)" stroke="#5a3a10"/><path d="M14 22 L34 22 L36 32 L12 32 Z" fill="#f4a020" stroke="#5a3a10"/><rect x="16" y="24" width="16" height="6" fill="#5fc0d0" opacity="0.8"/><path d="M42 36 L52 32 L54 48 L42 48 Z" fill="#252830"/><circle cx="18" cy="52" r="6" fill="#1a1f2e"/><circle cx="34" cy="52" r="6" fill="#1a1f2e"/><circle cx="18" cy="52" r="3" fill="#5a6070"/><circle cx="34" cy="52" r="3" fill="#5a6070"/><line x1="18" y1="48" x2="18" y2="56" stroke="#3a3a40" stroke-width="0.5"/><line x1="14" y1="52" x2="22" y2="52" stroke="#3a3a40" stroke-width="0.5"/><line x1="34" y1="48" x2="34" y2="56" stroke="#3a3a40" stroke-width="0.5"/><line x1="30" y1="52" x2="38" y2="52" stroke="#3a3a40" stroke-width="0.5"/><rect x="2" y="42" width="6" height="12" fill="#5a3a10"/></svg>`, colors: [] },
+
+  a08: { name: 'Çimento Karıştırıcı', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a08bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c4a8e0"/><stop offset="1" stop-color="#5a3a80"/></linearGradient><linearGradient id="a08drum" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8e4d4"/><stop offset="1" stop-color="#a09878"/></linearGradient></defs><rect width="64" height="64" fill="url(#a08bg)"/><path d="M0 50 L64 50 L64 64 L0 64 Z" fill="#3a3040"/><ellipse cx="32" cy="28" rx="20" ry="14" fill="url(#a08drum)" stroke="#5a5040"/><ellipse cx="32" cy="26" rx="15" ry="9" fill="#6a6855" opacity="0.5"/><g stroke="#5a5040" stroke-width="0.5"><path d="M14 22 L50 22 M14 28 L50 28 M14 34 L50 34"/></g><rect x="10" y="42" width="44" height="10" rx="2" fill="#1a1f2e"/><circle cx="20" cy="54" r="6" fill="#1a1f2e"/><circle cx="44" cy="54" r="6" fill="#1a1f2e"/><circle cx="20" cy="54" r="3" fill="#5a6070"/><circle cx="44" cy="54" r="3" fill="#5a6070"/><rect x="24" y="38" width="16" height="6" fill="#5fc0d0" opacity="0.6"/></svg>`, colors: [] },
+
+  a09: { name: 'Mühendis', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a09bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a8ca8"/><stop offset="1" stop-color="#1a3a58"/></linearGradient><radialGradient id="a09face" cx="0.5" cy="0.4"><stop offset="0" stop-color="#fde2c4"/><stop offset="1" stop-color="#e6b88a"/></radialGradient></defs><rect width="64" height="64" fill="url(#a09bg)"/><circle cx="32" cy="60" r="30" fill="#1e3a5f"/><circle cx="32" cy="26" r="11" fill="url(#a09face)"/><path d="M20 14 Q20 8 32 8 Q44 8 44 14 L44 26 L40 24 Q32 22 24 24 L20 26 Z" fill="#2a2018"/><rect x="20" y="22" width="24" height="6" rx="1" fill="#1a1f2e"/><rect x="22" y="23" width="8" height="4" rx="1" fill="#5fc0d0" opacity="0.5"/><rect x="34" y="23" width="8" height="4" rx="1" fill="#5fc0d0" opacity="0.5"/><path d="M30 21 L34 21" stroke="#1a1f2e" stroke-width="1"/><path d="M14 60 Q16 42 26 38 L38 38 Q48 42 50 60 Z" fill="#5a8ca8"/><rect x="29" y="38" width="6" height="22" fill="#fff"/><path d="M32 38 L32 50 L29 52 L35 52 Z" fill="#f4a020"/><circle cx="32" cy="42" r="0.8" fill="#1a1f2e"/></svg>`, colors: [] },
+
+  a10: { name: 'Yapı Levhası', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a10bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d96c5e"/><stop offset="1" stop-color="#7a2a18"/></linearGradient></defs><rect width="64" height="64" fill="url(#a10bg)"/><rect x="6" y="14" width="52" height="40" rx="2" fill="#ffd166" stroke="#5a3a10" stroke-width="1"/><path d="M14 26 L18 24 L18 28 Z" fill="#1a1f2e"/><path d="M50 26 L46 24 L46 28 Z" fill="#1a1f2e"/><text x="32" y="32" text-anchor="middle" font-family="Bebas Neue, sans-serif" font-size="9" fill="#1a1f2e" font-weight="700">DİKKAT</text><text x="32" y="44" text-anchor="middle" font-family="Bebas Neue, sans-serif" font-size="9" fill="#1a1f2e" font-weight="700">İNŞAAT</text><g stroke="#1a1f2e" stroke-width="0.5"><line x1="6" y1="14" x2="58" y2="54"/><line x1="58" y1="14" x2="6" y2="54"/></g><rect x="28" y="54" width="8" height="8" fill="#1a1f2e"/></svg>`, colors: [] },
+
+  a11: { name: 'Mimari Plan', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a11bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e3a5f"/><stop offset="1" stop-color="#0a1a2e"/></linearGradient></defs><rect width="64" height="64" fill="url(#a11bg)"/><rect x="6" y="6" width="52" height="52" fill="#1a3a5e" stroke="#5fc0d0"/><g stroke="#5fc0d0" stroke-width="0.4" opacity="0.4"><line x1="6" y1="14" x2="58" y2="14"/><line x1="6" y1="22" x2="58" y2="22"/><line x1="6" y1="30" x2="58" y2="30"/><line x1="6" y1="38" x2="58" y2="38"/><line x1="6" y1="46" x2="58" y2="46"/><line x1="14" y1="6" x2="14" y2="58"/><line x1="22" y1="6" x2="22" y2="58"/><line x1="30" y1="6" x2="30" y2="58"/><line x1="38" y1="6" x2="38" y2="58"/><line x1="46" y1="6" x2="46" y2="58"/></g><g stroke="#5fc0d0" stroke-width="1.2" fill="none"><rect x="14" y="14" width="36" height="36"/><line x1="14" y1="32" x2="50" y2="32"/><line x1="32" y1="14" x2="32" y2="50"/><rect x="18" y="18" width="10" height="10" fill="none"/><rect x="36" y="18" width="10" height="10" fill="none"/><rect x="18" y="36" width="10" height="10" fill="none"/><rect x="36" y="36" width="10" height="10" fill="none"/></g><circle cx="32" cy="32" r="4" fill="#f4a020"/><circle cx="32" cy="32" r="2" fill="#ffd166"/></svg>`, colors: [] },
+
+  a12: { name: 'Altın Yığını', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a12bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fb069"/><stop offset="1" stop-color="#2a4a30"/></linearGradient><radialGradient id="a12coin" cx="0.5" cy="0.4"><stop offset="0" stop-color="#fff5b8"/><stop offset="0.6" stop-color="#ffd166"/><stop offset="1" stop-color="#a87000"/></radialGradient></defs><rect width="64" height="64" fill="url(#a12bg)"/><path d="M0 54 Q32 50 64 54 L64 64 L0 64 Z" fill="#3a2818"/><ellipse cx="32" cy="52" rx="24" ry="8" fill="#a87000" opacity="0.5"/><ellipse cx="20" cy="50" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><text x="20" y="53" text-anchor="middle" font-family="Bebas Neue" font-size="8" fill="#a87000">₺</text><ellipse cx="42" cy="50" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><text x="42" y="53" text-anchor="middle" font-family="Bebas Neue" font-size="8" fill="#a87000">$</text><ellipse cx="32" cy="42" rx="11" ry="7" fill="url(#a12coin)" stroke="#a87000"/><text x="32" y="46" text-anchor="middle" font-family="Bebas Neue" font-size="10" fill="#a87000">€</text><ellipse cx="26" cy="32" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><ellipse cx="38" cy="30" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><ellipse cx="32" cy="22" rx="9" ry="6" fill="url(#a12coin)" stroke="#a87000"/><text x="32" y="25" text-anchor="middle" font-family="Bebas Neue" font-size="8" fill="#a87000">₺</text><circle cx="48" cy="18" r="1.5" fill="#fff" opacity="0.8"/><circle cx="16" cy="14" r="1" fill="#fff" opacity="0.6"/></svg>`, colors: [] },
+
+  a13: { name: 'Kobalt Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a13bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a8ee8"/><stop offset="1" stop-color="#0a3a8a"/></linearGradient><radialGradient id="a13c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#80c8ff"/><stop offset="1" stop-color="#0a3a8a"/></radialGradient></defs><rect width="64" height="64" fill="url(#a13bg)"/><polygon points="32,4 58,18 58,46 32,60 6,46 6,18" fill="url(#a13c)" stroke="#fff" stroke-width="0.5"/><polygon points="32,12 50,22 50,42 32,52 14,42 14,22" fill="#0a3a8a"/><polygon points="32,18 46,26 46,38 32,46 18,38 18,26" fill="#3a8ee8"/><circle cx="32" cy="32" r="6" fill="#ffd166"/><circle cx="32" cy="32" r="3" fill="#fff"/></svg>`, colors: [] },
+
+  a14: { name: 'Amber Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a14bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#ffd166"/><stop offset="0.5" stop-color="#f4a020"/><stop offset="1" stop-color="#7a3010"/></radialGradient><radialGradient id="a14c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#ffe888"/><stop offset="1" stop-color="#c4500c"/></radialGradient></defs><rect width="64" height="64" fill="url(#a14bg)"/><polygon points="32,4 60,32 32,60 4,32" fill="url(#a14c)" stroke="#fff" stroke-width="0.5"/><polygon points="32,16 48,32 32,48 16,32" fill="#a83a10"/><polygon points="32,24 40,32 32,40 24,32" fill="#ffe888"/><circle cx="32" cy="32" r="2" fill="#5a1a00"/></svg>`, colors: [] },
+
+  a15: { name: 'Yeşim Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a15bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#7fd66a"/><stop offset="1" stop-color="#0e3018"/></radialGradient><radialGradient id="a15c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#b0ec9c"/><stop offset="1" stop-color="#2a5a30"/></radialGradient></defs><rect width="64" height="64" fill="url(#a15bg)"/><circle cx="32" cy="32" r="26" fill="url(#a15c)" stroke="#fff" stroke-width="0.5"/><circle cx="32" cy="32" r="20" fill="#2a5a30"/><circle cx="32" cy="32" r="14" fill="#5aa050"/><circle cx="32" cy="32" r="8" fill="#1a3a20"/><circle cx="32" cy="32" r="3" fill="#ffd166"/><circle cx="26" cy="24" r="2" fill="#fff" opacity="0.6"/></svg>`, colors: [] },
+
+  a16: { name: 'Lavanta Logo', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a16bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a87fd0"/><stop offset="1" stop-color="#2a0e50"/></linearGradient><radialGradient id="a16c" cx="0.5" cy="0.4"><stop offset="0" stop-color="#d0a8e8"/><stop offset="1" stop-color="#3a1f50"/></radialGradient></defs><rect width="64" height="64" fill="url(#a16bg)"/><polygon points="32,4 60,32 32,60 4,32" fill="url(#a16c)" stroke="#fff" stroke-width="0.5"/><rect x="20" y="20" width="24" height="24" fill="#2a0e50" transform="rotate(45 32 32)"/><circle cx="32" cy="32" r="6" fill="#ffd166"/><circle cx="32" cy="32" r="3" fill="#fff"/></svg>`, colors: [] },
+
+  a17: { name: 'Kartal Amblemi', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a17bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c44a1e"/><stop offset="1" stop-color="#3a0a0a"/></linearGradient><linearGradient id="a17eagle" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a020"/><stop offset="1" stop-color="#a83410"/></linearGradient></defs><rect width="64" height="64" fill="url(#a17bg)"/><circle cx="32" cy="32" r="28" fill="#5a0a0a" stroke="#ffd166" stroke-width="0.8"/><path d="M32 14 L40 22 L52 22 L46 30 L52 38 L46 42 L40 48 L32 44 L24 48 L18 42 L12 38 L18 30 L12 22 L24 22 Z" fill="url(#a17eagle)"/><polygon points="28,28 36,28 32,36" fill="#3a0a0a"/><circle cx="29" cy="26" r="1.5" fill="#fff"/><circle cx="35" cy="26" r="1.5" fill="#fff"/><circle cx="29" cy="26" r="0.8" fill="#000"/><circle cx="35" cy="26" r="0.8" fill="#000"/><path d="M28 38 L32 42 L36 38" stroke="#ffd166" stroke-width="0.8" fill="none"/></svg>`, colors: [] },
+
+  a18: { name: 'Altın Yıldız', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a18bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#3a2a10"/><stop offset="1" stop-color="#0a0a18"/></radialGradient><radialGradient id="a18star" cx="0.4" cy="0.3"><stop offset="0" stop-color="#ffffff"/><stop offset="0.3" stop-color="#ffe888"/><stop offset="0.7" stop-color="#ffd166"/><stop offset="1" stop-color="#a87000"/></radialGradient></defs><rect width="64" height="64" fill="url(#a18bg)"/><g fill="#ffd166" opacity="0.5"><circle cx="10" cy="14" r="0.8"/><circle cx="54" cy="20" r="1"/><circle cx="14" cy="50" r="0.8"/><circle cx="58" cy="52" r="1.2"/><circle cx="6" cy="32" r="0.6"/><circle cx="58" cy="38" r="0.8"/></g><polygon points="32,6 38,24 58,24 42,36 48,56 32,46 16,56 22,36 6,24 26,24" fill="url(#a18star)" stroke="#a87000" stroke-width="0.5"/><polygon points="32,14 36,26 48,26 38,34 42,46 32,40 22,46 26,34 16,26 28,26" fill="none" stroke="#fff" stroke-width="0.3" opacity="0.6"/></svg>`, colors: [] },
+
+  a19: { name: 'Elmas', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="a19bg" cx="0.5" cy="0.5"><stop offset="0" stop-color="#1a3a4a"/><stop offset="1" stop-color="#02101e"/></radialGradient></defs><rect width="64" height="64" fill="url(#a19bg)"/><g fill="#5fc0d0" opacity="0.3"><circle cx="12" cy="14" r="0.8"/><circle cx="50" cy="18" r="1"/><circle cx="58" cy="42" r="0.8"/><circle cx="10" cy="48" r="1.2"/></g><polygon points="20,14 44,14 56,28 32,58 8,28" fill="#5fc0d0" stroke="#fff" stroke-width="0.5"/><polygon points="20,14 44,14 32,28" fill="#c0e8f0" opacity="0.9"/><polygon points="8,28 20,14 32,28" fill="#3a8da0"/><polygon points="44,14 56,28 32,28" fill="#3a8da0"/><polygon points="8,28 32,28 32,58" fill="#5fc0d0"/><polygon points="32,28 56,28 32,58" fill="#4a9faf"/><polygon points="20,14 26,18 22,22 16,18" fill="#fff" opacity="0.6"/></svg>`, colors: [] },
+
+  a20: { name: 'Şirket Binası', svg: () => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a20bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4a6a"/><stop offset="1" stop-color="#0a1018"/></linearGradient><linearGradient id="a20glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5fc0d0"/><stop offset="1" stop-color="#1a4a6a"/></linearGradient></defs><rect width="64" height="64" fill="url(#a20bg)"/><circle cx="50" cy="14" r="4" fill="#ffd166" opacity="0.8"/><circle cx="50" cy="14" r="2" fill="#fff8c0"/><path d="M0 56 L64 56 L64 64 L0 64 Z" fill="#1a1f2e"/><rect x="12" y="20" width="40" height="36" fill="#252830" stroke="#1a1f2e"/><rect x="14" y="22" width="36" height="32" fill="url(#a20glass)"/><g fill="#1a1f2e"><line x1="14" y1="28" x2="50" y2="28" stroke="#1a1f2e" stroke-width="0.5"/><line x1="14" y1="34" x2="50" y2="34" stroke="#1a1f2e" stroke-width="0.5"/><line x1="14" y1="40" x2="50" y2="40" stroke="#1a1f2e" stroke-width="0.5"/><line x1="14" y1="46" x2="50" y2="46" stroke="#1a1f2e" stroke-width="0.5"/><line x1="20" y1="22" x2="20" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="26" y1="22" x2="26" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="32" y1="22" x2="32" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="38" y1="22" x2="38" y2="54" stroke="#1a1f2e" stroke-width="0.5"/><line x1="44" y1="22" x2="44" y2="54" stroke="#1a1f2e" stroke-width="0.5"/></g><g fill="#ffd166" opacity="0.8"><rect x="22" y="24" width="2" height="2"/><rect x="28" y="30" width="2" height="2"/><rect x="40" y="24" width="2" height="2"/><rect x="34" y="36" width="2" height="2"/><rect x="46" y="42" width="2" height="2"/><rect x="22" y="42" width="2" height="2"/><rect x="40" y="48" width="2" height="2"/></g><rect x="28" y="50" width="8" height="6" fill="#f4a020"/></svg>`, colors: [] }
 };
 
 // Avatar HTML üretir. avatarId: 'a01'-'a20' veya 'google' veya 'letter' veya null
@@ -14356,14 +14499,40 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.42';
+const CURRENT_VERSION = 'v1.44';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
   {
+    version: 'v1.44',
+    date: '17 Mayıs 2026',
+    title: 'ARSA SAYFASI SEKMELERE BÖLÜNDÜ',
+    items: [
+      { cat: 'major', text: '🏞 <strong>Arsa & Gayrimenkul sayfası 4 sekmeye bölündü</strong>' },
+      { cat: 'feature', text: '📌 <strong>Arsalarım</strong>: Boş arsalar + tamamlanmış normal binalar' },
+      { cat: 'feature', text: '🏗 <strong>Devam Eden Projeler</strong>: İnşa edilen veya yıkım sürecindeki normal projeler' },
+      { cat: 'feature', text: '🏚 <strong>Kentsel Dönüşüm</strong>: Tüm KD projeleri (yıkım, inşaat, tamamlanmış)' },
+      { cat: 'feature', text: '🏬 <strong>Piyasa</strong>: Satılık arsa ilanları' },
+      { cat: 'feature', text: 'Her sekmede sayım badge\'i (kaç arsa var)' },
+      { cat: 'feature', text: 'KD projeleri arsalarda 🏚 KD etiketiyle işaretlendi' }
+    ]
+  },
+  {
+    version: 'v1.43',
+    date: '17 Mayıs 2026',
+    title: 'SÖZLEŞMELERDE FABRİKA SEVKİYATI',
+    items: [
+      { cat: 'major', text: '🏭 <strong>Sözleşme tablosunda her malzeme için "FABRİKADAN SEVK" butonu</strong> — bayiliğin varsa görünür' },
+      { cat: 'feature', text: 'Tek tıkla kalan miktarın tamamı fabrikadan müşteriye direkt sevk edilir' },
+      { cat: 'feature', text: 'Min 5 ton sevk şartı — küçük miktarlar için kamyon dolusu olmadan sevk yapılmaz' },
+      { cat: 'feature', text: 'Malzeme adının yanında 🏭 simgesi bayilik olan ürünleri belirgin gösterir' },
+      { cat: 'feature', text: '5 tonun altı için "⚠️ <5 ton" uyarısı görünür' }
+    ]
+  },
+  {
     version: 'v1.42',
     date: '17 Mayıs 2026',
-    title: 'BAŞARIM SİSTEMİ',
+    title: 'BAŞARIM SİSTEMİ + AVATAR YENİLEMESİ',
     items: [
       { cat: 'major', text: '🏆 <strong>Başarım sistemi eklendi</strong> — Profil sayfasında görüntülenir' },
       { cat: 'major', text: '22 başarım, 10 kategoride: İnşaat, Ticaret, Gayrimenkul, Finans, Personel, Filo, Kentsel Dönüşüm, Bayilik, Yatırım, Özel' },
@@ -14371,7 +14540,11 @@ const CHANGELOG_DATA = [
       { cat: 'feature', text: 'Kademe atladıkça otomatik XP ödülü (30-5000 XP arası)' },
       { cat: 'feature', text: 'İlerleme bar\'ları ve tier göstergeleri' },
       { cat: 'feature', text: 'Her başarım kazanımında toast bildirimi + agenda kaydı' },
-      { cat: 'feature', text: 'Toplam servet hesabı (kasa + portföy + vadeli + gayrimenkul)' }
+      { cat: 'feature', text: 'Toplam servet hesabı (kasa + portföy + vadeli + gayrimenkul)' },
+      { cat: 'major', text: '🎨 <strong>20 yeni profil avatarı</strong> — gradient ve karakter detaylarıyla tamamen yenilendi' },
+      { cat: 'feature', text: 'Karakter avatarları: Patron, Mühendis Hanım, Baretli Usta, Sakallı Patron — yüz ve saç detayları' },
+      { cat: 'feature', text: 'Manzaralar: Şehir Silüeti, Vinç (gün batımı), Buldozer, Çimento Karıştırıcı' },
+      { cat: 'feature', text: 'Premium logolar: Kobalt, Amber, Yeşim, Lavanta, Kartal Amblemi, Altın Yıldız, Elmas, Şirket Binası' }
     ]
   },
   {

@@ -3487,9 +3487,7 @@ function quickFactoryDispatch(contractId, brandId, productId) {
     return;
   }
 
-  // Sevkiyatı yap
-  const cust = getCustomer(ct.customerId);
-  if (!cust) return;
+  const isInternal = !!ct.isInternalConstruction;
   spend(total, 'fabrika-alim');
   dealership.totalPurchased += remaining;
   const cheapest = cheapestSupplier(productId);
@@ -3512,20 +3510,44 @@ function quickFactoryDispatch(contractId, brandId, productId) {
     externalCost: 0
   });
 
-  // Tüm teslim oldu mu?
-  const allDelivered = ct.items.every(itm => {
-    const tot = ct.deliveries.reduce((s, d) =>
-      s + (d.items.find(x => x.productId === itm.productId)?.qty || 0), 0);
-    return tot >= itm.qty;
-  });
-  if (allDelivered) {
-    ct.delivered = true;
-    cust.balance += ct.total;
-    toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Cari: ${fmt(ct.total)}`, 'success');
-    addXP(15, 'tüm sevkiyatlar tamam');
+  if (isInternal) {
+    // İç sözleşme: malzeme şantiyenin malzemeNeeded'ine consumed olarak eklenir (inşaatı ilerletir)
+    const land = (state.lands || []).find(l => l.id === ct.constructionLandId);
+    if (land && land.building) {
+      const matEntry = land.building.materialsNeeded.find(m => m.productId === productId);
+      if (matEntry) matEntry.consumed = Math.min(matEntry.qty, matEntry.consumed + remaining);
+    }
+    // Tüm teslimler tamam mı?
+    const allDelivered = ct.items.every(itm => {
+      const tot = ct.deliveries.reduce((s, d) =>
+        s + (d.items.find(x => x.productId === itm.productId)?.qty || 0), 0);
+      return tot >= itm.qty;
+    });
+    if (allDelivered) {
+      ct.delivered = true;
+      ct.paid = true; // iç sözleşme, ödeme yok
+      toast(`✅ Şantiye sözleşmesi tamamen sevk edildi`, 'success');
+    }
+    toast(`✓ ${remaining} ${p.unit} ${b.name} fabrikadan şantiyene gönderildi (${tripDays} gün) · ${fmt(total)}`, 'success');
+  } else {
+    // Normal müşteri sözleşmesi
+    const cust = getCustomer(ct.customerId);
+    if (cust) {
+      const allDelivered = ct.items.every(itm => {
+        const tot = ct.deliveries.reduce((s, d) =>
+          s + (d.items.find(x => x.productId === itm.productId)?.qty || 0), 0);
+        return tot >= itm.qty;
+      });
+      if (allDelivered) {
+        ct.delivered = true;
+        cust.balance += ct.total;
+        toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Cari: ${fmt(ct.total)}`, 'success');
+        addXP(15, 'tüm sevkiyatlar tamam');
+      }
+      toast(`✓ ${remaining} ${p.unit} ${b.name} fabrikadan ${cust.name}'a gönderildi (${tripDays} gün) · ${fmt(total)}`, 'success');
+    }
   }
 
-  toast(`✓ ${remaining} ${p.unit} ${b.name} fabrikadan ${cust.name}'a gönderildi (${tripDays} gün) · ${fmt(total)}`, 'success');
   addXP(8, 'fabrika sevkiyatı');
   render();
 }
@@ -4914,6 +4936,49 @@ function generateApartmentsFor(buildingType, landM2) {
 }
 
 // İnşaata başla
+// İç sözleşmeye stoktan tüketim deliverysi ekle
+function addInternalContractDeliveries(land, items, source) {
+  if (!items || items.length === 0) return;
+  // Bu arsanın iç sözleşmesini bul
+  const ct = state.contracts.find(c => c.isInternalConstruction && c.constructionLandId === land.id && !c.delivered);
+  if (!ct) return;
+
+  // Tek bir delivery satırı (günlük toplam)
+  const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase() + '-' + (source === 'stok' ? 'STK' : 'FAB');
+  let totalWeight = 0;
+  items.forEach(it => {
+    const p = PRODUCTS[it.productId];
+    if (p) totalWeight += (p.weight * it.qty) / 1000;
+  });
+  ct.deliveries.push({
+    no: irNo,
+    day: state.day,
+    arrivalDay: state.day,
+    vehicleId: null,
+    driverId: null,
+    internalSource: source,
+    items: items.map(it => ({ productId: it.productId, qty: it.qty })),
+    weight: totalWeight,
+    fuelCost: 0,
+    externalCost: 0
+  });
+
+  // Tüm teslimler tamam mı?
+  const allDelivered = ct.items.every(itm => {
+    const tot = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === itm.productId)?.qty || 0), 0);
+    return tot >= itm.qty;
+  });
+  if (allDelivered) {
+    ct.delivered = true;
+    ct.paid = true;
+    // Arşive ekle ve aktif listeden çıkar
+    state.archive.push({ ...ct, type: 'internal-construction', status: 'completed', completedDay: state.day });
+    const idx = state.contracts.findIndex(c => c.id === ct.id);
+    if (idx >= 0) state.contracts.splice(idx, 1);
+  }
+}
+
 function startConstruction(landId, buildingType) {
   if (!state.lands) state.lands = [];
   const land = state.lands.find(l => l.id === landId);
@@ -4924,51 +4989,204 @@ function startConstruction(landId, buildingType) {
     return;
   }
 
-  // Malzeme ihtiyaçlarını hesapla
+  // Malzeme listesi
   const materials = calculateConstructionMaterials(buildingType, land.m2);
-
-  // Stoktan eksik var mı?
-  const missing = [];
-  for (const m of materials) {
-    const have = state.inventory[m.productId] || 0;
-    if (have < m.qty) {
-      missing.push({ ...m, have, short: m.qty - have });
-    }
-  }
-
-  if (missing.length > 0) {
-    const lines = missing.map(m => `• ${m.label}: ${m.qty} ${PRODUCTS[m.productId].unit} lazım, ${m.have} var (${m.short} eksik)`).join('\n');
-    toast('Yetersiz malzeme. Detay onay popup\'ında.', 'error');
-    if (!confirm(`Bu inşaat için yetersiz malzeme var:\n\n${lines}\n\nYine de başlatmak istiyor musun? (Malzeme bulunmadığı için inşaat duracak)`)) return;
-  }
-
   const days = calculateConstructionDays(buildingType, land.m2);
   const t = BUILDING_TYPES[buildingType];
   const totalArea = land.m2 * t.floorMultiplier;
   const estimatedApartments = t.apartmentsCalc(land.m2);
+  const startCost = Math.round(totalArea * 200);
+  const companyName = state.company?.name || 'YAPI TİCARET';
 
-  if (!confirm(`${ILCELER[land.ilce].name}'da ${t.name} inşaatı başlatılacak\n\n• Arsa: ${land.m2} m²\n• Toplam inşaat alanı: ${totalArea.toFixed(0)} m²\n• Süre: ~${days} gün\n• Daire sayısı: ~${estimatedApartments}\n\nMalzemeler her gün stoktan otomatik tüketilecek. Devam edilsin mi?`)) return;
+  // Stok analizi
+  const stockAnalysis = materials.map(m => {
+    const have = state.inventory[m.productId] || 0;
+    const p = PRODUCTS[m.productId];
+    const cheapest = cheapestSupplier(m.productId);
+    const unitPrice = cheapest ? cheapest.price : 0;
+    return { ...m, have, short: Math.max(0, m.qty - have), unitPrice, total: unitPrice * m.qty, productName: p.name, unit: p.unit };
+  });
+  const totalMaterialCost = stockAnalysis.reduce((s, x) => s + x.total, 0);
+  const missingCount = stockAnalysis.filter(x => x.short > 0).length;
 
-  // İnşaat başlat — malzemeleri günlük tüketim için planla
+  // Profesyonel sözleşme modalı
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-header">
+        <div class="r-company">📜 İNŞAAT MALZEME SÖZLEŞMESİ</div>
+        <div class="r-tagline">İç Şantiye Sevkiyat Planı · ${ILCELER[land.ilce].name}</div>
+      </div>
+
+      <div class="receipt-title-bar">
+        <div class="r-title">İNŞAAT BAŞLATMA</div>
+        <div class="r-number">
+          <div>Belge No: <strong>INS-${state.day}-${landId.slice(-4).toUpperCase()}</strong></div>
+          <div>Gün: <strong>${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Müteahhit (Sözleşme Sahibi)</div>
+          <div class="ri-val">${companyName}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">İç şantiye sözleşmesi · Sevkiyat Sözleşmeler sekmesinde takip edilir</span>
+          </div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">İnşaat Alanı</div>
+          <div class="ri-val">${ILCELER[land.ilce].name}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${land.m2} m² arsa · ${totalArea.toFixed(0)} m² inşaat alanı</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr><th>Açıklama</th><th class="num">Birim</th><th class="num">Tutar</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <span class="r-product">${t.icon} ${t.name}</span><br>
+                <span style="font-size: 10px; color: #5a5048;">${days} gün · ~${estimatedApartments} daire</span>
+              </td>
+              <td class="num">—</td>
+              <td class="num">—</td>
+            </tr>
+            <tr>
+              <td><em>Başlangıç maliyeti (temel, ruhsat)</em></td>
+              <td class="num">${totalArea.toFixed(0)} m² × ₺200</td>
+              <td class="num">${fmt(startCost)}</td>
+            </tr>
+            <tr style="background: #fff8e7;">
+              <td colspan="3" style="padding-top: 12px;"><strong style="color: #5a3a10;">🧱 MALZEME LİSTESİ (${stockAnalysis.length} kalem)</strong></td>
+            </tr>
+            ${stockAnalysis.map(m => `<tr>
+              <td>
+                <span class="r-product">${m.productName}</span>
+                ${m.short > 0 ? ` <span style="color: #b00020; font-size: 10px;">⚠️ ${m.short} ${m.unit} eksik</span>` : ` <span style="color: #0d7c46; font-size: 10px;">✓ Stokta</span>`}
+              </td>
+              <td class="num">${m.qty} ${m.unit}</td>
+              <td class="num">${fmt(m.total)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-totals">
+        <div class="rt-row subtotal">
+          <span>Başlangıç maliyeti (hemen ödenir)</span>
+          <span>${fmt(startCost)}</span>
+        </div>
+        <div class="rt-row subtotal">
+          <span>Tahmini malzeme maliyeti</span>
+          <span>${fmt(totalMaterialCost)}</span>
+        </div>
+        <div class="rt-row grand">
+          <span>TAHMİNİ TOPLAM</span>
+          <span>${fmt(startCost + totalMaterialCost)}</span>
+        </div>
+      </div>
+
+      <div style="padding: 10px 14px; background: ${missingCount > 0 ? '#fff5f5' : '#f0fdf4'}; border-left: 3px solid ${missingCount > 0 ? '#b00020' : '#0d7c46'}; margin-top: 12px; font-size: 11px; color: #3a3024; line-height: 1.6;">
+        ${missingCount > 0
+          ? `⚠️ <strong>${missingCount} kalemde eksik var.</strong> İnşaat başladıktan sonra eksik malzeme bulunamazsa duracaktır. Eksikleri Tedarikçilerden alabilirsin (ya da bayilik varsa fabrikadan direkt sevk).`
+          : `✅ <strong>Tüm malzemeler stokta mevcut.</strong> İnşaat sorunsuz başlayabilir.`}
+        <br>📌 Bu sözleşme <strong>Sözleşmeler > Şantiye Sevkiyatları</strong> bölümünde takip edilebilir. Stoktan günlük tüketim otomatiktir.
+      </div>
+
+      <div class="receipt-actions">
+        <button class="primary" onclick="confirmStartConstruction('${landId}','${buildingType}')">
+          ✓ İNŞAATI BAŞLAT (${fmt(startCost)})
+        </button>
+        <button onclick="closeModal()">✕ İPTAL</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmStartConstruction(landId, buildingType) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land) { closeModal(); return; }
+  if (land.building) { toast('Zaten inşaat var', 'error'); closeModal(); return; }
+
+  const materials = calculateConstructionMaterials(buildingType, land.m2);
+  const days = calculateConstructionDays(buildingType, land.m2);
+  const t = BUILDING_TYPES[buildingType];
+  const totalArea = land.m2 * t.floorMultiplier;
+  const startCost = Math.round(totalArea * 200);
+
+  if (state.cash < startCost) {
+    toast(`Yetersiz bakiye. Başlangıç için ${fmt(startCost)} gerekli`, 'error');
+    return;
+  }
+
+  // İnşaat oluştur
   land.building = {
     id: state.buildingNextId++,
     type: buildingType,
     startDay: state.day,
     totalDays: days,
     daysPassed: 0,
-    status: 'building', // building | paused | completed
+    status: 'building',
     materialsNeeded: materials.map(m => ({ ...m, consumed: 0 })),
-    totalCost: 0  // birikecek (her gün malzeme + işçilik)
+    totalCost: 0
   };
 
-  // Başlangıç maliyeti — temel atma, ruhsat, vs (toplam alanın küçük bir oranı)
-  const startCost = Math.round(totalArea * 200); // m² başına ₺200 başlangıç
+  // İç sözleşme oluştur — Sözleşmeler sekmesinde görünür
+  createInternalConstructionContract(land);
+
   spend(startCost, 'insaat');
   land.building.totalCost += startCost;
 
-  toast(`🏗 ${t.name} inşaatı başladı! Süre: ${days} gün`, 'success');
+  closeModal();
+  toast(`🏗 ${t.name} inşaatı başladı! Süre: ${days} gün · Sözleşme oluşturuldu`, 'success');
   addXP(50, 'inşaat başlatma');
   render();
+}
+
+// İnşaat veya KD için iç şirket sözleşmesi oluştur — Sözleşmeler sekmesinde görünür, sevkiyat yapılabilir
+function createInternalConstructionContract(land) {
+  const b = land.building;
+  if (!b) return;
+  const t = BUILDING_TYPES[b.type];
+  const isUrban = !!land.isUrbanRenewal;
+
+  const contractId = 'INS-' + (isUrban ? 'KD-' : '') + uid();
+
+  // Müşteri olarak kendi şirket adımız (sanal)
+  const ourCompanyId = 'self:' + (state.company?.id || 'company');
+
+  const items = b.materialsNeeded.map(m => ({
+    productId: m.productId,
+    qty: m.qty
+  }));
+
+  // Toplam değer = malzemelerin piyasa değeri (sadece referans)
+  let estTotal = 0;
+  items.forEach(it => {
+    const cheapest = cheapestSupplier(it.productId);
+    if (cheapest) estTotal += cheapest.price * it.qty;
+  });
+
+  state.contracts.push({
+    id: contractId,
+    customerId: ourCompanyId,
+    customerName: `🏗 ${state.company?.name || 'Şantiyem'} (${ILCELER[land.ilce].name})`,
+    items,
+    total: estTotal,
+    estimatedCost: estTotal,
+    createdDay: state.day,
+    dueDay: state.day + b.totalDays,
+    delivered: false,
+    paid: false,
+    deliveries: [],
+    isInternalConstruction: true,
+    isUrbanRenewal: isUrban,
+    constructionLandId: land.id
+  });
 }
 
 // Her gün inşaatı ilerlet — `nextDay`'de çağrılır
@@ -5020,12 +5238,13 @@ function progressConstruction(land) {
 
     if (b.status === 'paused-warned') b.status = 'building';
 
-    // Malzeme tüket (stoktan)
+    // Malzeme tüket (stoktan) + iç sözleşmeye delivery yaz
     consumptionTodaySub.forEach(c => {
       state.inventory[c.productId] -= c.qty;
       const m = b.materialsNeeded.find(x => x.productId === c.productId);
       if (m) m.consumed += c.qty;
     });
+    addInternalContractDeliveries(land, consumptionTodaySub, 'stok');
 
     b.daysPassed++;
     if (b.daysPassed >= b.totalDays) {
@@ -5069,12 +5288,13 @@ function progressConstruction(land) {
     b.status = 'building';
   }
 
-  // Malzeme tüket
+  // Malzeme tüket + iç sözleşmeye delivery yaz
   consumptionToday.forEach(c => {
     state.inventory[c.productId] -= c.qty;
     const m = b.materialsNeeded.find(x => x.productId === c.productId);
     if (m) m.consumed += c.qty;
   });
+  addInternalContractDeliveries(land, consumptionToday, 'stok');
 
   // İşçilik
   const t = BUILDING_TYPES[b.type];
@@ -6109,6 +6329,9 @@ function confirmUrbanRenewal(emailId) {
   const newLand = state.lands.find(l => l.id === urbanLandId);
   newLand.urbanProjectId = projectId;
 
+  // İç inşaat sözleşmesi oluştur (Sözleşmeler sekmesinde görünür)
+  createInternalConstructionContract(newLand);
+
   // Müşteri güveni artar
   const cust = getCustomer(e.customerId);
   if (cust) cust.trust = Math.min(100, cust.trust + 5);
@@ -6120,8 +6343,9 @@ function confirmUrbanRenewal(emailId) {
   state.selectedEmail = null;
 
   closeModal();
-  toast(`✓ Kentsel dönüşüm projesi başladı! Yıkım: ${fmt(e.demolitionCost)}`, 'success');
+  toast(`✓ Kentsel dönüşüm projesi başladı! Yıkım: ${fmt(e.demolitionCost)} · İç sözleşme oluşturuldu`, 'success');
   addXP(80, 'kentsel dönüşüm onayı');
+  state.agenda.push(`🏚 ${ILCELER[e.ilce].name} kentsel dönüşüm projesi başladı · Şantiye sevkiyatları "Sözleşmeler" sekmesinde takip edilir`);
   setView('lands');
   render();
 }
@@ -9189,76 +9413,106 @@ function renderContractsView() {
         ⚠️ <strong style="color: var(--accent);">Sevkiyat Sorumlusu yok</strong> — Personel > Sevkiyat sekmesinden işe alırsan tek tıkla otomatik sevkiyat yapabilirsin.
       </div>`;
 
+  // İç inşaat sözleşmeleri ve normal müşteri sözleşmelerini ayır
+  const customerContracts = state.contracts.filter(c => !c.isInternalConstruction);
+  const internalContracts = state.contracts.filter(c => c.isInternalConstruction && !c.delivered);
+
   c.innerHTML = `<h2>AKTİF SÖZLEŞMELER</h2>
-    <div class="subtitle">${state.contracts.length} aktif sözleşme</div>
+    <div class="subtitle">${customerContracts.length} müşteri sözleşmesi${internalContracts.length > 0 ? ` · ${internalContracts.length} şantiye sevkiyatı` : ''}</div>
     ${dispatcherInfo}
+
+    ${internalContracts.length > 0 ? `
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px; color: var(--purple);">🏗 ŞANTİYE SEVKİYATLARI (${internalContracts.length})</h3>
+    <div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 12px; font-size: 11px;">
+      💡 İnşaat ve kentsel dönüşüm projelerin için <strong>kendi şantiyene</strong> yapılan iç sözleşmelerdir. Stoktan günlük tüketim otomatiktir, ayrıca <strong>bayilik fabrikasından direkt sevk</strong> de yapabilirsin.
+    </div>
+    <div class="email-list" style="margin-bottom: 24px;">
+      ${internalContracts.map(ct => renderContractCard(ct, dispatcherCount, true)).join('')}
+    </div>
+    ` : ''}
+
+    ${customerContracts.length > 0 ? `
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px;">📜 MÜŞTERİ SÖZLEŞMELERİ (${customerContracts.length})</h3>
+    ` : ''}
     <div class="email-list">
-      ${state.contracts.slice().sort((a, b) => {
-        // 1) Ödenmiş olanlar en altta
+      ${customerContracts.slice().sort((a, b) => {
         if (a.paid !== b.paid) return a.paid ? 1 : -1;
-        // 2) Teslim edilmiş ama ödenmemiş olanlar (tahsilat bekleyenler) ortada
         if (a.delivered !== b.delivered) return a.delivered ? 1 : -1;
-        // 3) Aktif olanlar termine göre (yakın → uzak, gecikmiş olanlar en üstte)
         return (a.deadline - state.day) - (b.deadline - state.day);
-      }).map(ct => {
-        const cust = getCustomer(ct.customerId);
-        const daysLeft = ct.deadline - state.day;
-        return `<div class="email" style="cursor: default; border-left-color: ${daysLeft <= 1 ? 'var(--red)' : ct.delivered ? 'var(--green)' : 'var(--blue)'}">
-          <div class="top">
-            <span class="from">${cust.name}</span>
-            <span class="date">${daysLeft >= 0 ? daysLeft + ' gün kaldı' : 'GECİKMİŞ'}</span>
-          </div>
-          <div class="subject">${ILCELER[cust.ilce].name} · ${fmt(ct.total)} · ${ct.delivered ? '✓ Teslim Tamam' : ct.paid ? 'Ödendi' : 'Sevkiyat sürüyor'}</div>
-          <div class="table-scroll">
-          <table class="data-table" style="margin: 10px 0;">
-            <thead><tr><th>Malzeme</th><th>Sözleşme</th><th>Teslim</th><th>Kalan</th><th>Eylem</th></tr></thead>
-            <tbody>
-              ${ct.items.map(it => {
-                const delivered = ct.deliveries.reduce((s, d) =>
-                  s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
-                const remaining = it.qty - delivered;
-                const p = PRODUCTS[it.productId];
-
-                // Bu malzeme için bayiliğimiz var mı?
-                const dealership = (state.dealerships || []).find(d => d.productId === it.productId);
-                let actionCell = '—';
-                if (remaining > 0 && dealership) {
-                  // 5 ton sınırı kontrolü — kalan tonajı hesapla
-                  const remainingTons = (p.weight * remaining) / 1000;
-                  if (remainingTons >= 5) {
-                    const b = BRANDS[dealership.brandId];
-                    actionCell = `<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-size: 10px; padding: 4px 8px;" onclick="quickFactoryDispatch('${ct.id}','${dealership.brandId}','${it.productId}')" title="${b.name} fabrikasından ${remaining} ${p.unit} direkt müşteriye gönder">🏭 FABRİKADAN SEVK</button>`;
-                  } else {
-                    actionCell = `<span style="font-size: 10px; color: var(--ink-dim);" title="Fabrika sevki min 5 ton">⚠️ <5 ton</span>`;
-                  }
-                }
-
-                return `<tr>
-                  <td>${p.name}${dealership ? ` <span style="font-size: 9px; color: #a855f7;">🏭</span>` : ''}</td>
-                  <td>${it.qty} ${p.unit}</td>
-                  <td class="${delivered >= it.qty ? 'have' : ''}">${delivered}</td>
-                  <td class="${remaining > 0 ? 'miss' : 'have'}">${remaining}</td>
-                  <td>${actionCell}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-          </div>
-          ${ct.deliveries.length ? `<div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 8px;">
-            <strong style="color: var(--ink);">İrsaliyeler:</strong> ${ct.deliveries.map(d => `#${d.no} (Gün ${d.day}${d.externalCarrier ? ' · 🚚' : ''})`).join(', ')}
-          </div>` : ''}
-          <div class="actions">
-            ${!ct.delivered ? `<button class="btn primary" onclick="openDispatchModal('${ct.id}')">📦 SEVKİYAT PLANLA</button>` : ''}
-            ${!ct.delivered && dispatcherCount > 0 ? `<button class="btn" style="background: var(--red); color: #fff; border-color: var(--red);" onclick="autoDispatchContract('${ct.id}')" title="Sevkiyat sorumlusu en uygun aracı seçer ve hemen başlatır">🚛 SEVKİYATÇIYLA GÖNDER</button>` : ''}
-            ${!ct.delivered ? `<button class="btn" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="openExternalCarrierModal('${ct.id}')" title="Dış nakliye firması — kendi aracın yoksa veya acil teslimat için (~2-2.5 kat pahalı)">🚚 DIŞ NAKLİYE</button>` : ''}
-            ${!ct.delivered && dispatcherCount === 0 ? `<button class="btn" style="opacity: 0.55; background: var(--panel); color: var(--ink-dim);" onclick="setView('hr'); switchHRTab('dispatchers');" title="Sevkiyat sorumlusu işe almalısın">🚛 Sevkiyat Sorumlusu işe al →</button>` : ''}
-            ${ct.delivered && !ct.paid && (state.accountants || []).length === 0 ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
-            ${ct.delivered && !ct.paid && (state.accountants || []).length > 0 ? `<span style="color: #f59e0b; font-size: 12px; padding: 6px 10px; background: var(--panel-2); border-left: 2px solid #f59e0b;">📊 Muhasebeci yarın tahsil edecek (${fmt(ct.total)})</span>` : ''}
-            ${ct.paid ? `<span style="color: var(--green); font-size: 12px;">✓ Ödeme alındı, sözleşme kapandı</span>` : ''}
-          </div>
-        </div>`;
-      }).join('')}
+      }).map(ct => renderContractCard(ct, dispatcherCount, false)).join('')}
     </div>`;
+}
+
+// Tek bir sözleşme kartını render et (iç + dış için ortak)
+function renderContractCard(ct, dispatcherCount, isInternal) {
+  let custName, ilceName;
+  if (isInternal) {
+    // İç inşaat sözleşmesi
+    const land = (state.lands || []).find(l => l.id === ct.constructionLandId);
+    custName = ct.customerName || '🏗 Şantiyem';
+    ilceName = land ? ILCELER[land.ilce].name : 'Şantiye';
+  } else {
+    const cust = getCustomer(ct.customerId);
+    if (!cust) return ''; // sessizce atla
+    custName = cust.name;
+    ilceName = ILCELER[cust.ilce].name;
+  }
+
+  const daysLeft = (ct.dueDay || ct.deadline) - state.day;
+  const statusText = ct.delivered ? '✓ Teslim Tamam' : ct.paid ? 'Ödendi' : (isInternal ? 'Şantiyede tüketiliyor' : 'Sevkiyat sürüyor');
+  const borderColor = isInternal ? 'var(--purple)' : (daysLeft <= 1 ? 'var(--red)' : ct.delivered ? 'var(--green)' : 'var(--blue)');
+
+  return `<div class="email" style="cursor: default; border-left-color: ${borderColor}">
+    <div class="top">
+      <span class="from">${custName}</span>
+      <span class="date">${isInternal ? `${ct.dueDay - state.day} gün inşaat` : (daysLeft >= 0 ? daysLeft + ' gün kaldı' : 'GECİKMİŞ')}</span>
+    </div>
+    <div class="subject">${ilceName} · ${fmt(ct.total)} · ${statusText}${isInternal ? ' · 🏗 İç sözleşme' : ''}</div>
+    <div class="table-scroll">
+    <table class="data-table" style="margin: 10px 0;">
+      <thead><tr><th>Malzeme</th><th>Sözleşme</th><th>Teslim</th><th>Kalan</th><th>Eylem</th></tr></thead>
+      <tbody>
+        ${ct.items.map(it => {
+          const delivered = ct.deliveries.reduce((s, d) =>
+            s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
+          const remaining = it.qty - delivered;
+          const p = PRODUCTS[it.productId];
+          const dealership = (state.dealerships || []).find(d => d.productId === it.productId);
+          let actionCell = '—';
+          if (remaining > 0 && dealership) {
+            const remainingTons = (p.weight * remaining) / 1000;
+            if (remainingTons >= 5) {
+              const b = BRANDS[dealership.brandId];
+              actionCell = `<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-size: 10px; padding: 4px 8px;" onclick="quickFactoryDispatch('${ct.id}','${dealership.brandId}','${it.productId}')" title="${b.name} fabrikasından ${remaining} ${p.unit} direkt ${isInternal ? 'şantiyene' : 'müşteriye'} gönder">🏭 FABRİKADAN SEVK</button>`;
+            } else {
+              actionCell = `<span style="font-size: 10px; color: var(--ink-dim);" title="Fabrika sevki min 5 ton">⚠️ <5 ton</span>`;
+            }
+          }
+          return `<tr>
+            <td>${p.name}${dealership ? ` <span style="font-size: 9px; color: #a855f7;">🏭</span>` : ''}</td>
+            <td>${it.qty} ${p.unit}</td>
+            <td class="${delivered >= it.qty ? 'have' : ''}">${delivered}</td>
+            <td class="${remaining > 0 ? 'miss' : 'have'}">${remaining}</td>
+            <td>${actionCell}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+    ${ct.deliveries.length ? `<div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 8px;">
+      <strong style="color: var(--ink);">İrsaliyeler:</strong> ${ct.deliveries.map(d => `#${d.no} (Gün ${d.day}${d.externalCarrier ? ' · 🚚' : d.factoryBrand ? ' · 🏭' : ''})`).join(', ')}
+    </div>` : ''}
+    <div class="actions">
+      ${!ct.delivered && !isInternal ? `<button class="btn primary" onclick="openDispatchModal('${ct.id}')">📦 SEVKİYAT PLANLA</button>` : ''}
+      ${!ct.delivered && !isInternal && dispatcherCount > 0 ? `<button class="btn" style="background: var(--red); color: #fff; border-color: var(--red);" onclick="autoDispatchContract('${ct.id}')" title="Sevkiyat sorumlusu en uygun aracı seçer ve hemen başlatır">🚛 SEVKİYATÇIYLA GÖNDER</button>` : ''}
+      ${!ct.delivered && !isInternal ? `<button class="btn" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="openExternalCarrierModal('${ct.id}')" title="Dış nakliye firması">🚚 DIŞ NAKLİYE</button>` : ''}
+      ${!ct.delivered && !isInternal && dispatcherCount === 0 ? `<button class="btn" style="opacity: 0.55; background: var(--panel); color: var(--ink-dim);" onclick="setView('hr'); switchHRTab('dispatchers');" title="Sevkiyat sorumlusu işe almalısın">🚛 Sevkiyat Sorumlusu işe al →</button>` : ''}
+      ${ct.delivered && !ct.paid && !isInternal && (state.accountants || []).length === 0 ? `<button class="btn success" onclick="collectPayment('${ct.id}')">ÖDEMEYİ TAHSİL ET (${fmt(ct.total)})</button>` : ''}
+      ${ct.delivered && !ct.paid && !isInternal && (state.accountants || []).length > 0 ? `<span style="color: #f59e0b; font-size: 12px; padding: 6px 10px; background: var(--panel-2); border-left: 2px solid #f59e0b;">📊 Muhasebeci yarın tahsil edecek (${fmt(ct.total)})</span>` : ''}
+      ${ct.paid ? `<span style="color: var(--green); font-size: 12px;">✓ Ödeme alındı, sözleşme kapandı</span>` : ''}
+      ${isInternal ? `<span style="color: var(--purple); font-size: 11px;">🏗 İç şantiye sözleşmesi — stoktan günlük tüketim otomatik · Fabrika sevki açık</span>` : ''}
+    </div>
+  </div>`;
 }
 
 // Makbuz numarası sayacı (oyun boyunca artar)
@@ -14499,10 +14753,24 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.44';
+const CURRENT_VERSION = 'v1.45';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.45',
+    date: '17 Mayıs 2026',
+    title: 'ŞANTİYE SEVKİYATI: İÇ İNŞAAT SÖZLEŞMELERİ',
+    items: [
+      { cat: 'major', text: '🏗 <strong>İnşaat ve Kentsel Dönüşüm başlattığında otomatik iç sözleşme oluşur</strong>' },
+      { cat: 'major', text: 'Sözleşmeler sayfasında <strong>"Şantiye Sevkiyatları"</strong> başlıklı ayrı bölüm — mor temalı' },
+      { cat: 'major', text: 'İnşaat başlatma artık <strong>profesyonel sözleşme görseliyle</strong> — confirm popup\'ı yok' },
+      { cat: 'feature', text: 'İç sözleşme detayında tüm malzemeler tek tek listeli, stok analizi + eksik uyarısı' },
+      { cat: 'feature', text: 'Bayilik fabrikasından şantiyene <strong>direkt sevk butonu</strong>' },
+      { cat: 'feature', text: 'Stoktan günlük tüketim otomatik olarak iç sözleşmeye irsaliye yazar' },
+      { cat: 'feature', text: 'İnşaat tamamlanınca iç sözleşme otomatik arşive geçer' }
+    ]
+  },
   {
     version: 'v1.44',
     date: '17 Mayıs 2026',

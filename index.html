@@ -7666,6 +7666,15 @@ function closeSheet() {
 }
 
 function render() {
+  try {
+    _renderInner();
+  } catch (e) {
+    console.error('Render hatası:', e.stack || e);
+    toast('Render hatası: ' + e.message + ' · F12 ile detay', 'error');
+  }
+}
+
+function _renderInner() {
   // Brand
   $('brand-logo').textContent = state.company.logo;
   $('brand-logo').style.background = state.company.color;
@@ -7775,7 +7784,8 @@ function render() {
 
 function renderInventoryPanel() {
   const inv = $('inventory');
-  const items = Object.entries(state.inventory).filter(([k, v]) => v > 0);
+  if (!state.inventory || typeof state.inventory !== 'object') state.inventory = {};
+  const items = Object.entries(state.inventory).filter(([k, v]) => v > 0 && PRODUCTS[k]);
   $('depo-count').textContent = items.length + ' kalem';
   if (items.length === 0) {
     inv.innerHTML = '<div class="empty-mini">Depo boş.<br>Piyasa veya tedarikçilerden malzeme al.</div>';
@@ -7797,8 +7807,17 @@ function renderContractsMini() {
     return;
   }
   c.innerHTML = state.contracts.slice(0, 4).map(ct => {
-    const cust = getCustomer(ct.customerId);
-    const daysLeft = ct.deadline - state.day;
+    // İç inşaat sözleşmeleri (kendine yapılan) için özel
+    const isInternal = !!ct.isInternalConstruction;
+    let custName;
+    if (isInternal) {
+      custName = ct.customerName || '🏗 Şantiyem';
+    } else {
+      const cust = getCustomer(ct.customerId);
+      if (!cust) return ''; // müşteri yoksa atla
+      custName = cust.name;
+    }
+    const daysLeft = (ct.dueDay || ct.deadline) - state.day;
     const pendingItems = ct.items.filter(it => {
       const delivered = ct.deliveries.reduce((s, d) =>
         s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
@@ -7807,7 +7826,7 @@ function renderContractsMini() {
     return `
       <div class="item-row" style="grid-template-columns: 1fr; padding: 8px 12px;">
         <div style="display: flex; justify-content: space-between; font-size:11px;">
-          <span style="color: var(--ink); font-weight: 700; overflow:hidden; text-overflow: ellipsis; white-space:nowrap; max-width: 180px;">${cust.name}</span>
+          <span style="color: var(--ink); font-weight: 700; overflow:hidden; text-overflow: ellipsis; white-space:nowrap; max-width: 180px;">${custName}</span>
           <span style="color: ${daysLeft <= 1 ? 'var(--red)' : 'var(--accent)'}">${daysLeft >= 0 ? daysLeft + 'g' : 'GEÇMİŞ'}</span>
         </div>
         <div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">
@@ -14755,8 +14774,8 @@ async function loadAndStart(slotId) {
     render();
     toast('☁ Kayıt yüklendi: ' + (state.company?.name || 'Şirket'), 'success');
   } catch (err) {
-    console.error(err);
-    toast('Yükleme hatası: ' + err.message, 'error');
+    console.error('Yükleme hatası — Stack:', err.stack || err);
+    toast('Yükleme hatası: ' + err.message + ' · F12 ile detay gör', 'error');
     closeModal();
     showIntroModal();
   }
@@ -15899,8 +15918,12 @@ function sanitizeLoadedState() {
           if (d.items) d.items = d.items.filter(it => PRODUCTS[it.productId]);
         });
       });
-      // İçinde hiç item kalmayan sözleşmeleri sil
-      state.contracts = state.contracts.filter(c => c.items.length > 0);
+      // İç sözleşme değilse ve müşterisi yoksa sil
+      state.contracts = state.contracts.filter(c => {
+        if (c.items.length === 0) return false;
+        if (c.isInternalConstruction) return true; // iç sözleşme, müşteri kontrolü gerek yok
+        return !!getCustomer(c.customerId);
+      });
     }
 
     // 3) Mailbox: items içindeki geçersiz product'ları temizle

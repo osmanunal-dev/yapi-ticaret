@@ -3483,6 +3483,85 @@ function updateFactoryBuyEstimate(brandId) {
   document.getElementById('factory-total').textContent = fmt(Math.round(total));
 }
 
+// Sözleşme detayından stoktan sevkiyat (tek tıkla — stokta varsa)
+function quickStockDispatch(contractId, productId) {
+  const ct = state.contracts.find(c => c.id === contractId);
+  if (!ct) { toast('Sözleşme bulunamadı', 'error'); return; }
+  const it = ct.items.find(x => x.productId === productId);
+  if (!it) { toast('Malzeme sözleşmede yok', 'error'); return; }
+
+  const delivered = (ct.deliveries || []).reduce((s, d) =>
+    s + (d.items.find(x => x.productId === productId)?.qty || 0), 0);
+  const remaining = it.qty - delivered;
+  if (remaining <= 0) { toast('Bu malzeme zaten teslim edilmiş', 'info'); return; }
+
+  const have = state.inventory[productId] || 0;
+  if (have <= 0) { toast('Stokta yok', 'error'); return; }
+
+  const sendQty = Math.min(have, remaining);
+  const p = PRODUCTS[productId];
+  const isInternal = !!ct.isInternalConstruction;
+  const tons = (p.weight * sendQty) / 1000;
+
+  // Stoktan düş
+  state.inventory[productId] -= sendQty;
+
+  if (isInternal) {
+    // İç sözleşme: malzeme inşaata "consumed" sayılır
+    const land = (state.lands || []).find(l => l.id === ct.constructionLandId);
+    if (land && land.building) {
+      const matEntry = land.building.materialsNeeded.find(m => m.productId === productId);
+      if (matEntry) matEntry.consumed = Math.min(matEntry.qty, matEntry.consumed + sendQty);
+    }
+  }
+
+  // İrsaliye ekle
+  const tripDays = isInternal ? 0 : 1 + Math.floor(Math.random() * 2);
+  const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase() + '-STK';
+  ct.deliveries.push({
+    no: irNo,
+    day: state.day,
+    arrivalDay: state.day + tripDays,
+    vehicleId: null,
+    driverId: null,
+    internalSource: 'stok',
+    items: [{ productId, qty: sendQty }],
+    weight: tons,
+    fuelCost: 0,
+    externalCost: 0
+  });
+
+  // Tüm teslim oldu mu?
+  const allDelivered = ct.items.every(itm => {
+    const tot = ct.deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === itm.productId)?.qty || 0), 0);
+    return tot >= itm.qty;
+  });
+
+  if (allDelivered) {
+    ct.delivered = true;
+    if (isInternal) {
+      ct.paid = true;
+      // İç sözleşme arşivle
+      state.archive.push({ ...ct, type: 'internal-construction', status: 'completed', completedDay: state.day });
+      const idx = state.contracts.findIndex(c => c.id === ct.id);
+      if (idx >= 0) state.contracts.splice(idx, 1);
+      toast(`✅ Şantiye sözleşmesi tamamen sevk edildi`, 'success');
+    } else {
+      const cust = getCustomer(ct.customerId);
+      if (cust) {
+        cust.balance += ct.total;
+        toast(`✅ ${cust.name} sözleşmesi tamamen teslim edildi! Cari: ${fmt(ct.total)}`, 'success');
+        addXP(15, 'tüm sevkiyatlar tamam');
+      }
+    }
+  }
+
+  toast(`✓ Stoktan ${sendQty} ${p.unit} ${PRODUCTS[productId].name} ${isInternal ? 'şantiyene' : 'müşteriye'} sevk edildi`, 'success');
+  addXP(3, 'stok sevkiyatı');
+  render();
+}
+
 // Sözleşme detayından tek tıkla fabrika sevkiyatı (kalanın tamamı, onay modal'sız)
 function quickFactoryDispatch(contractId, brandId, productId) {
   const ct = state.contracts.find(c => c.id === contractId);
@@ -9583,16 +9662,30 @@ function renderContractCard(ct, dispatcherCount, isInternal) {
           if (!p) return ''; // ürün bilinmiyorsa satırı atla
           const dealership = (state.dealerships || []).find(d => d.productId === it.productId);
           let actionCell = '—';
+          const haveStock = state.inventory[it.productId] || 0;
+          const buttons = [];
+
+          // Stoktan sevk (varsa ve kalan miktar > 0)
+          if (remaining > 0 && haveStock > 0) {
+            const sendQty = Math.min(haveStock, remaining);
+            buttons.push(`<button class="btn small" style="background: var(--green); color: #fff; border-color: var(--green); font-size: 10px; padding: 4px 8px;" onclick="quickStockDispatch('${ct.id}','${it.productId}')" title="Stoktan ${sendQty} ${p.unit} ${isInternal ? 'şantiyene' : 'müşteriye'} sevk et">📦 STOKTAN (${sendQty})</button>`);
+          }
+
+          // Fabrikadan sevk (bayilik varsa ve 5+ ton)
           if (remaining > 0 && dealership) {
             const remainingTons = (p.weight * remaining) / 1000;
             if (remainingTons >= 5) {
               const b = BRANDS[dealership.brandId];
               if (b) {
-                actionCell = `<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-size: 10px; padding: 4px 8px;" onclick="quickFactoryDispatch('${ct.id}','${dealership.brandId}','${it.productId}')" title="${b.name} fabrikasından ${remaining} ${p.unit} direkt ${isInternal ? 'şantiyene' : 'müşteriye'} gönder">🏭 FABRİKADAN SEVK</button>`;
+                buttons.push(`<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-size: 10px; padding: 4px 8px;" onclick="quickFactoryDispatch('${ct.id}','${dealership.brandId}','${it.productId}')" title="${b.name} fabrikasından ${remaining} ${p.unit} direkt ${isInternal ? 'şantiyene' : 'müşteriye'} gönder">🏭 FABRİKADAN</button>`);
               }
-            } else {
-              actionCell = `<span style="font-size: 10px; color: var(--ink-dim);" title="Fabrika sevki min 5 ton">⚠️ <5 ton</span>`;
             }
+          }
+
+          if (buttons.length > 0) {
+            actionCell = `<div style="display: flex; gap: 4px; flex-wrap: wrap;">${buttons.join('')}</div>`;
+          } else if (remaining > 0) {
+            actionCell = `<span style="font-size: 10px; color: var(--ink-dim);">stokta yok</span>`;
           }
           return `<tr>
             <td>${p.name}${dealership ? ` <span style="font-size: 9px; color: #a855f7;">🏭</span>` : ''}</td>
@@ -14973,10 +15066,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.48';
+const CURRENT_VERSION = 'v1.49';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.49',
+    date: '17 Mayıs 2026',
+    title: 'STOKTAN HIZLI SEVKİYAT',
+    items: [
+      { cat: 'major', text: '📦 <strong>Sözleşme tablosunda her malzeme için "STOKTAN" butonu</strong> — stoktaki malzemeyi tek tıkla sevk et' },
+      { cat: 'feature', text: '5 ton sınırı sadece fabrika sevki için geçerli — stoktan istediğin kadar göndertebilirsin' },
+      { cat: 'feature', text: 'Buton üzerinde sevk edilecek miktar yazılı: "📦 STOKTAN (2826)"' },
+      { cat: 'feature', text: 'Hem normal müşteri sözleşmeleri hem iç şantiye sözleşmeleri için çalışır' },
+      { cat: 'feature', text: 'Stoktan + Fabrikadan butonları yan yana görünür (her ikisi de mümkünse)' },
+      { cat: 'feature', text: 'Stok yetersizse "stokta yok" uyarısı, bayilik yoksa fabrika butonu gizlenir' }
+    ]
+  },
   {
     version: 'v1.48',
     date: '17 Mayıs 2026',

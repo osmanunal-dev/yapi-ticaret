@@ -6926,6 +6926,35 @@ state.vehicles.push({
 
 const $ = id => document.getElementById(id);
 const fmt = n => '₺' + Math.round(n).toLocaleString('tr-TR');
+
+// Türkçe-uyumlu lowercase
+// JS'in toLowerCase() Türkçe karakterlerde sorun yapabilir (İ→i̇ kombinasyonu vs)
+// Bu fonksiyon hem İ→i, I→ı dönüşümünü doğru yapar hem aksanlı karakterleri sadeleştirir
+function turkishLower(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .replace(/Ğ/g, 'ğ')
+    .replace(/Ü/g, 'ü')
+    .replace(/Ş/g, 'ş')
+    .replace(/Ö/g, 'ö')
+    .replace(/Ç/g, 'ç')
+    .toLowerCase();
+}
+
+// Arama eşleşmesi: hem büyük/küçük harf farkını hem Türkçe karakterleri yok sayar
+// Ayrıca aksansız varyasyona da bakar (i↔ı, u↔ü, s↔ş, o↔ö, c↔ç, g↔ğ)
+function turkishMatch(text, query) {
+  if (!query) return true;
+  if (!text) return false;
+  const t = turkishLower(text);
+  const q = turkishLower(query);
+  if (t.includes(q)) return true;
+  // Aksansız varyasyona da bak (kullanıcı "sigorta" yazınca "şigorta" değil "sigorta" arar ya da tersi)
+  const stripDiacritics = (s) => s.replace(/ş/g, 's').replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c');
+  return stripDiacritics(t).includes(stripDiacritics(q));
+}
 const rand = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 const choice = arr => arr[Math.floor(Math.random() * arr.length)];
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -9345,17 +9374,17 @@ function renderMarket() {
   };
 
   // Filter products by search & category
-  const q = state.marketSearch.toLowerCase().trim();
+  const q = (state.marketSearch || '').trim();
   const filteredPids = Object.keys(PRODUCTS).filter(pid => {
     const p = PRODUCTS[pid];
     if (state.marketCategory !== 'all' && p.cat !== state.marketCategory) return false;
     if (q) {
       const matches =
-        p.name.toLowerCase().includes(q) ||
-        p.cat.toLowerCase().includes(q) ||
-        p.unit.toLowerCase().includes(q) ||
+        turkishMatch(p.name, q) ||
+        turkishMatch(p.cat, q) ||
+        turkishMatch(p.unit, q) ||
         // Also match supplier names
-        SUPPLIERS.filter(s => s.products.includes(pid)).some(s => s.name.toLowerCase().includes(q));
+        SUPPLIERS.filter(s => s.products.includes(pid)).some(s => turkishMatch(s.name, q));
       if (!matches) return false;
     }
     return true;
@@ -9464,7 +9493,7 @@ function setMarketCategory(cat) {
 
 function renderSuppliers() {
   const c = $('center');
-  const q = state.supplierSearch.toLowerCase().trim();
+  const q = (state.supplierSearch || '').trim();
 
   // Filter logic:
   // - Match supplier name, ilce name OR
@@ -9475,13 +9504,13 @@ function renderSuppliers() {
   if (q) {
     // Check if query matches any product name (so we can filter products too)
     const matchingProducts = Object.entries(PRODUCTS)
-      .filter(([pid, p]) => p.name.toLowerCase().includes(q) || p.cat.toLowerCase().includes(q))
+      .filter(([pid, p]) => turkishMatch(p.name, q) || turkishMatch(p.cat, q))
       .map(([pid]) => pid);
 
     filteredSuppliers = SUPPLIERS.filter(s => {
       // Supplier name or ilce match
-      if (s.name.toLowerCase().includes(q)) return true;
-      if (ILCELER[s.ilce].name.toLowerCase().includes(q)) return true;
+      if (turkishMatch(s.name, q)) return true;
+      if (turkishMatch(ILCELER[s.ilce].name, q)) return true;
       // Any matching product?
       if (matchingProducts.some(pid => s.products.includes(pid))) return true;
       return false;
@@ -12466,7 +12495,7 @@ function renderDealerships() {
 
   // Aktif filtre
   const filterCategory = _dealershipCategoryFilter;
-  const searchTerm = (_dealershipSearch || '').toLowerCase().trim();
+  const searchTerm = (_dealershipSearch || '').trim();
 
   // Markaları filtrele
   const allBrands = Object.entries(BRANDS).map(([id, b]) => ({ id, ...b }));
@@ -12476,8 +12505,8 @@ function renderDealerships() {
   }
   if (searchTerm) {
     filteredBrands = filteredBrands.filter(b =>
-      b.name.toLowerCase().includes(searchTerm) ||
-      PRODUCTS[b.productId].name.toLowerCase().includes(searchTerm)
+      turkishMatch(b.name, searchTerm) ||
+      turkishMatch(PRODUCTS[b.productId].name, searchTerm)
     );
   }
 
@@ -15140,10 +15169,22 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.51';
+const CURRENT_VERSION = 'v1.52';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.52',
+    date: '17 Mayıs 2026',
+    title: 'TÜRKÇE ARAMA İYİLEŞTİRMESİ',
+    items: [
+      { cat: 'major', text: '🔍 <strong>Aramada büyük/küçük harf hassasiyeti kaldırıldı</strong>' },
+      { cat: 'feature', text: 'SİGORTA PANOSU = sigorta panosu = Sigorta Panosu — hepsi aynı sonucu döner' },
+      { cat: 'feature', text: 'Türkçe karakterler doğru çözülür: İ/i, I/ı, Ş/ş, Ğ/ğ, Ü/ü, Ö/ö, Ç/ç' },
+      { cat: 'feature', text: 'Aksanlı varyasyon da çalışır: "sigorta" yazarak şehir adlarındaki "ş\'li" kelimeler de bulunur' },
+      { cat: 'feature', text: 'Piyasa, Tedarikçiler, Bayilik sayfalarında geçerli' }
+    ]
+  },
   {
     version: 'v1.51',
     date: '17 Mayıs 2026',

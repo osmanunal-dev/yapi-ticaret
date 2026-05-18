@@ -6933,6 +6933,8 @@ const fmt = n => '₺' + Math.round(n).toLocaleString('tr-TR');
 function turkishLower(s) {
   if (!s) return '';
   return String(s)
+    .normalize('NFC')                  // Unicode normalize — kombinasyon karakterlerini birleştir
+    .replace(/\u0307/g, '')            // combining dot above'u kaldır (İ.toLowerCase() çıktısı)
     .replace(/İ/g, 'i')
     .replace(/I/g, 'ı')
     .replace(/Ğ/g, 'ğ')
@@ -6940,7 +6942,8 @@ function turkishLower(s) {
     .replace(/Ş/g, 'ş')
     .replace(/Ö/g, 'ö')
     .replace(/Ç/g, 'ç')
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\u0307/g, '');           // toLowerCase sonrası kalan kombinasyon noktalarını da temizle
 }
 
 // Arama eşleşmesi: hem büyük/küçük harf farkını hem Türkçe karakterleri yok sayar
@@ -6951,8 +6954,10 @@ function turkishMatch(text, query) {
   const t = turkishLower(text);
   const q = turkishLower(query);
   if (t.includes(q)) return true;
-  // Aksansız varyasyona da bak (kullanıcı "sigorta" yazınca "şigorta" değil "sigorta" arar ya da tersi)
-  const stripDiacritics = (s) => s.replace(/ş/g, 's').replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c');
+  // Aksansız varyasyona da bak — i↔ı, s↔ş, g↔ğ, u↔ü, o↔ö, c↔ç
+  const stripDiacritics = (s) => s
+    .replace(/ş/g, 's').replace(/ı/g, 'i').replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c');
   return stripDiacritics(t).includes(stripDiacritics(q));
 }
 const rand = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;

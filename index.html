@@ -2867,6 +2867,18 @@
       const user = auth.currentUser;
       if (user) {
         const userRef = doc(db, 'users', uid);
+        // Toplam mal varlığı hesabı — kasadaki para + portföy + vadeli + arsa/daire
+        let totalWealth = data.cash || 0;
+        (data.deposits || []).forEach(d => totalWealth += (d.amount || 0) + (d.accruedInterest || 0));
+        (data.lands || []).forEach(l => {
+          if (!l.isUrbanRenewal) totalWealth += l.purchasePrice || 0;
+          if (l.building?.apartments) {
+            l.building.apartments.forEach(a => {
+              if (a.status === 'unsold' || a.status === 'listed') totalWealth += a.salePrice || 0;
+            });
+          }
+        });
+
         const profileData = {
           uid: uid,
           displayName: user.displayName || user.email,
@@ -2875,6 +2887,7 @@
           lastSeen: serverTimestamp(),
           // En iyi skoru güncelle (yalnızca daha iyiyse)
           bestCash: data.cash || 0,
+          bestWealth: Math.round(totalWealth),
           bestLevel: data.level || 1,
           bestDay: data.day || 1,
           companyName: data.company?.name || 'Yapı Ticaret',
@@ -2886,6 +2899,7 @@
         if (existingSnap.exists()) {
           const ex = existingSnap.data();
           profileData.bestCash = Math.max(ex.bestCash || 0, data.cash || 0);
+          profileData.bestWealth = Math.max(ex.bestWealth || 0, Math.round(totalWealth));
           profileData.bestLevel = Math.max(ex.bestLevel || 1, data.level || 1);
           profileData.bestDay = Math.max(ex.bestDay || 1, data.day || 1);
           profileData.contractsCompleted = Math.max(ex.contractsCompleted || 0, data.contractsCompleted || 0);
@@ -2925,7 +2939,7 @@
 
     // ============== LEADERBOARD ==============
     getLeaderboard: async (sortBy, max) => {
-      sortBy = sortBy || 'bestCash';
+      sortBy = sortBy || 'bestWealth';
       max = max || 50;
       const q = query(
         collection(db, 'users'),
@@ -2943,6 +2957,7 @@
           photoURL: data.photoURL,
           avatarId: data.avatarId || null,
           bestCash: data.bestCash || 0,
+          bestWealth: data.bestWealth || data.bestCash || 0,  // fallback: eski kayıtlar için kasa
           bestLevel: data.bestLevel || 1,
           bestDay: data.bestDay || 1,
           contractsCompleted: data.contractsCompleted || 0,
@@ -13439,7 +13454,7 @@ async function saveProfileName() {
 // ============================================================
 
 let _leaderboardCache = null;
-let _leaderboardSort = 'bestCash';
+let _leaderboardSort = 'bestWealth';
 
 function renderLeaderboard() {
   const c = $('center');
@@ -13454,6 +13469,7 @@ function renderLeaderboard() {
   }
 
   const sortOptions = {
+    bestWealth: { label: 'Mal Varlığı', icon: '💎' },
     bestCash: { label: 'Kasa', icon: '💰' },
     bestLevel: { label: 'Seviye', icon: '⭐' },
     bestDay: { label: 'Toplam Gün', icon: '📅' },
@@ -13506,6 +13522,7 @@ function renderLeaderboardContent(rows) {
   const myRank = rows.findIndex(r => r.uid === myUid) + 1;
 
   const sortLabels = {
+    bestWealth: 'En Yüksek Mal Varlığı',
     bestCash: 'En Yüksek Kasa',
     bestLevel: 'En Yüksek Seviye',
     bestDay: 'En Uzun Oyun',
@@ -13525,6 +13542,7 @@ function renderLeaderboardContent(rows) {
           <th style="width: 50px;">Sıra</th>
           <th>Oyuncu</th>
           <th>Şirket</th>
+          <th class="num">💎 Mal Varlığı</th>
           <th class="num">Kasa</th>
           <th class="num">Sv</th>
           <th class="num">Gün</th>
@@ -13576,6 +13594,7 @@ function renderLeaderboardContent(rows) {
               </div>
             </td>
             <td style="color: var(--ink-dim);">${r.companyName}</td>
+            <td class="num" style="${_leaderboardSort === 'bestWealth' ? 'color: var(--accent); font-weight: 700;' : ''}">${fmt(r.bestWealth)}</td>
             <td class="num" style="${_leaderboardSort === 'bestCash' ? 'color: var(--green); font-weight: 700;' : ''}">${fmt(r.bestCash)}</td>
             <td class="num" style="${_leaderboardSort === 'bestLevel' ? 'color: var(--accent); font-weight: 700;' : ''}">${r.bestLevel}</td>
             <td class="num" style="${_leaderboardSort === 'bestDay' ? 'color: var(--blue); font-weight: 700;' : ''}">${r.bestDay}</td>
@@ -14160,7 +14179,6 @@ function nextDay() {
       }
     } else if (e.expiresDay < state.day) {
       state.archive.push({ ...e, status: 'expired' });
-      state.reputation = Math.max(0, state.reputation - 1);
       state.agenda.push(`Cevapsız ihale: ${getCustomer(e.customerId).name}`);
     } else {
       stillInbox.push(e);
@@ -14349,8 +14367,7 @@ function nextDay() {
       toast(`💼 Aylık maaşlar ödendi: ${fmt(totalPayroll)} (${breakdown.length} kişi)`, 'info');
 
       if (state.cash < 0) {
-        state.reputation = Math.max(0, state.reputation - 3);
-        toast(`⚠️ Maaş ödemesi için kasa açıkta kaldı! İtibar -3`, 'error');
+        toast(`⚠️ Maaş ödemesi için kasa açıkta kaldı! Krediye veya tahsilata bak.`, 'error');
       }
     } else {
       state.lastPayrollDay = state.day;
@@ -15377,10 +15394,35 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.57';
+const CURRENT_VERSION = 'v1.59';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.59',
+    date: '17 Mayıs 2026',
+    title: 'İTİBAR SADECE GECİKMEDE DÜŞER',
+    items: [
+      { cat: 'major', text: '⭐ <strong>İtibar artık sadece yapılan iş zamanında bitmediğinde düşer</strong>' },
+      { cat: 'feature', text: 'KALDIRILDI: Cevapsız ihale itibar düşürmüyor (iş kabul edilmedi ki)' },
+      { cat: 'feature', text: 'KALDIRILDI: Maaş ödenirken kasa eksiye düşse de itibar düşmüyor (iş gecikmesi değil)' },
+      { cat: 'feature', text: 'KORUNDU: Sözleşme deadline geçtiğinde itibar düşer (gecikme cezası)' },
+      { cat: 'feature', text: 'KORUNDU: Kentsel dönüşüm iptal edilirse itibar düşer (iş kabul edildi ama yapılmadı)' }
+    ]
+  },
+  {
+    version: 'v1.58',
+    date: '17 Mayıs 2026',
+    title: 'SIRALAMA: TOPLAM MAL VARLIĞI',
+    items: [
+      { cat: 'major', text: '💎 <strong>Sıralama varsayılan olarak Toplam Mal Varlığına göre yapılıyor</strong>' },
+      { cat: 'feature', text: 'Mal varlığı hesabı: kasa + vadeli + portföy + arsa + satılık daireler' },
+      { cat: 'feature', text: 'Yeni sütun "💎 Mal Varlığı" tabloda gösterilir' },
+      { cat: 'feature', text: 'Eski "Kasa" sıralaması korundu (alternatif olarak seçilebilir)' },
+      { cat: 'feature', text: 'Bulutdaki kullanıcı profilinde `bestWealth` alanı tutulur (yalnızca daha iyi olduğunda güncellenir)' },
+      { cat: 'feature', text: 'Eski kullanıcılarda `bestWealth` yoksa otomatik `bestCash`\'e fallback yapılır' }
+    ]
+  },
   {
     version: 'v1.57',
     date: '17 Mayıs 2026',

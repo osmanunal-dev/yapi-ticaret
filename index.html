@@ -5391,7 +5391,7 @@ function createInternalConstructionContract(land) {
     });
   }
 
-  state.contracts.push({
+  const newContract = {
     id: contractId,
     customerId: ourCompanyId,
     customerName: `🏗 ${state.company?.name || 'Şantiyem'} (${ILCELER[land.ilce].name})`,
@@ -5406,7 +5406,22 @@ function createInternalConstructionContract(land) {
     isInternalConstruction: true,
     isUrbanRenewal: isUrban,
     constructionLandId: land.id
+  };
+
+  // Tüm malzemeler zaten teslim edilmişse (eski state için) direkt arşive geçir, aktif listeye ekleme
+  const allDelivered = items.every(itm => {
+    const tot = deliveries.reduce((s, d) =>
+      s + (d.items.find(x => x.productId === itm.productId)?.qty || 0), 0);
+    return tot >= itm.qty;
   });
+
+  if (allDelivered) {
+    newContract.delivered = true;
+    newContract.paid = true;
+    state.archive.push({ ...newContract, type: 'internal-construction', status: 'completed', completedDay: state.day });
+  } else {
+    state.contracts.push(newContract);
+  }
 }
 
 // Her gün inşaatı ilerlet — `nextDay`'de çağrılır
@@ -15362,10 +15377,21 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.56';
+const CURRENT_VERSION = 'v1.57';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.57',
+    date: '17 Mayıs 2026',
+    title: 'TAMAMLANMIŞ ŞANTİYE SÖZLEŞMELERİ OTOMATİK ARŞİVLENİR',
+    items: [
+      { cat: 'major', text: '🛠️ <strong>"Sevkiyatlar tamamlanmış fakat sözleşme görünüyor" hatası giderildi</strong>' },
+      { cat: 'feature', text: '`createInternalConstructionContract` artık tüm malzemeler teslim edilmişse direkt arşive ekler' },
+      { cat: 'feature', text: 'Yükleme sırasında sanitize kontrolü: tamamlanmış iç sözleşmeler arşive taşınır' },
+      { cat: 'feature', text: 'Tüm kalemleri "Kalan: 0" olan sözleşmeler Sözleşmeler sayfasından otomatik çıkar' }
+    ]
+  },
   {
     version: 'v1.56',
     date: '17 Mayıs 2026',
@@ -16473,6 +16499,29 @@ function sanitizeLoadedState() {
           }
         }
       });
+    }
+
+    // 8) Tüm malzemeleri teslim edilmiş iç sözleşmeleri arşive geçir
+    if (state.contracts && Array.isArray(state.contracts)) {
+      const completedInternals = state.contracts.filter(c => {
+        if (!c.isInternalConstruction || c.delivered) return false;
+        if (!c.items || c.items.length === 0) return false;
+        return c.items.every(itm => {
+          const tot = (c.deliveries || []).reduce((s, d) =>
+            s + (d.items?.find(x => x.productId === itm.productId)?.qty || 0), 0);
+          return tot >= itm.qty;
+        });
+      });
+      completedInternals.forEach(c => {
+        c.delivered = true;
+        c.paid = true;
+        if (!state.archive) state.archive = [];
+        state.archive.push({ ...c, type: 'internal-construction', status: 'completed', completedDay: state.day });
+      });
+      if (completedInternals.length > 0) {
+        state.contracts = state.contracts.filter(c => !completedInternals.includes(c));
+        console.log(`Sanitize: ${completedInternals.length} tamamlanmış iç sözleşme arşive geçirildi`);
+      }
     }
   } catch (e) {
     console.error('Sanitize hatası (önemsiz):', e);

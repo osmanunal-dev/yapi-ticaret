@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d0e0c">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2776,7 +2776,8 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
   import {
     getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
-    signOut, onAuthStateChanged
+    signOut, onAuthStateChanged,
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, sendPasswordResetEmail
   } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
   import {
     getFirestore, doc, setDoc, getDoc, serverTimestamp,
@@ -2818,10 +2819,21 @@
     }
   });
 
-  // Redirect sonrası geri dönüş
-  getRedirectResult(auth).catch(err => {
-    console.error('Redirect result error:', err);
-  });
+  // Redirect sonrası geri dönüş — mobil için kritik
+  getRedirectResult(auth)
+    .then(result => {
+      if (result && result.user) {
+        console.log('Redirect başarılı:', result.user.email);
+        // onAuthStateChanged zaten tetiklenir, ekstra işlem gerekmez
+      }
+    })
+    .catch(err => {
+      console.error('Redirect result error:', err);
+      // Kullanıcıya görünür hata
+      window.dispatchEvent(new CustomEvent('fb:auth-error', {
+        detail: 'Giriş yapılamadı: ' + (err.message || err.code || 'Bilinmeyen hata')
+      }));
+    });
 
   // Global wrapper
   window.fbAuth = {
@@ -2839,18 +2851,87 @@
 
     signIn: async () => {
       try {
-        if (isMobile) {
+        // Mobil veya in-app browser tespit
+        const ua = navigator.userAgent || '';
+        const isInApp = /FBAN|FBAV|Instagram|Twitter|Line|WebView|wv\)/.test(ua);
+        const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+        const isMobileNow = window.matchMedia('(max-width: 900px)').matches;
+
+        // Mobil, iOS veya in-app browser → redirect kullan (popup sorun çıkarır)
+        if (isMobileNow || isIOS || isInApp) {
           await signInWithRedirect(auth, provider);
         } else {
-          await signInWithPopup(auth, provider);
+          try {
+            await signInWithPopup(auth, provider);
+          } catch (popupErr) {
+            // Popup engellenmişse redirect'e düş
+            const code = popupErr.code || '';
+            if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+              console.warn('Popup engellendi, redirect yöntemine geçiliyor:', code);
+              await signInWithRedirect(auth, provider);
+            } else {
+              throw popupErr;
+            }
+          }
         }
       } catch (err) {
         console.error('Sign in error:', err);
-        window.dispatchEvent(new CustomEvent('fb:auth-error', { detail: err.message }));
+        const msg = err.code === 'auth/network-request-failed' ? 'Bağlantı hatası — internet erişimini kontrol et'
+          : err.code === 'auth/unauthorized-domain' ? 'Bu alan adı Firebase\'de yetkili değil'
+          : err.code === 'auth/operation-not-allowed' ? 'Google girişi kapalı'
+          : err.message || 'Giriş yapılamadı';
+        window.dispatchEvent(new CustomEvent('fb:auth-error', { detail: msg }));
       }
     },
     signOut: async () => {
       await signOut(auth);
+    },
+
+    // E-posta + şifre ile kayıt (mobil yedek yöntem)
+    signUpWithEmail: async (email, password, displayName) => {
+      try {
+        const result = await createUserWithEmailAndPassword(auth, email, password);
+        if (displayName && result.user) {
+          await updateProfile(result.user, { displayName });
+        }
+        return { success: true };
+      } catch (err) {
+        console.error('Sign up error:', err);
+        const msg = err.code === 'auth/email-already-in-use' ? 'Bu e-posta zaten kayıtlı — giriş yapmayı dene'
+          : err.code === 'auth/weak-password' ? 'Şifre çok zayıf (en az 6 karakter olmalı)'
+          : err.code === 'auth/invalid-email' ? 'Geçersiz e-posta adresi'
+          : err.code === 'auth/network-request-failed' ? 'Bağlantı hatası'
+          : err.message || 'Kayıt yapılamadı';
+        return { success: false, error: msg };
+      }
+    },
+
+    // E-posta + şifre ile giriş
+    signInWithEmail: async (email, password) => {
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        return { success: true };
+      } catch (err) {
+        console.error('Sign in (email) error:', err);
+        const msg = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
+          ? 'E-posta veya şifre yanlış'
+          : err.code === 'auth/invalid-email' ? 'Geçersiz e-posta'
+          : err.code === 'auth/too-many-requests' ? 'Çok fazla deneme — biraz bekle'
+          : err.code === 'auth/network-request-failed' ? 'Bağlantı hatası'
+          : err.message || 'Giriş yapılamadı';
+        return { success: false, error: msg };
+      }
+    },
+
+    // Şifre sıfırlama maili gönder
+    sendPasswordReset: async (email) => {
+      try {
+        await sendPasswordResetEmail(auth, email);
+        return { success: true };
+      } catch (err) {
+        console.error('Password reset error:', err);
+        return { success: false, error: err.message };
+      }
     },
     saveGame: async (uid, slotId, data) => {
       const ref = doc(db, 'saves', uid, 'slots', slotId);
@@ -15430,6 +15511,28 @@ function showLoginScreen() {
         <span>Google ile Devam Et</span>
       </button>
 
+      <!-- E-POSTA İLE GİRİŞ (mobil yedek) -->
+      <div id="email-login-section" style="margin-top: 14px;">
+        <button class="login-guest-btn" id="show-email-btn" onclick="toggleEmailLogin()" style="background: var(--panel-2); border: 1px solid var(--border);">
+          📧 E-posta ile Giriş Yap / Kayıt Ol
+        </button>
+        <div id="email-login-form" style="display: none; margin-top: 12px; padding: 12px; background: var(--panel); border-radius: 4px; border: 1px solid var(--border);">
+          <div id="email-form-mode" data-mode="login">
+            <div style="margin-bottom: 10px; display: flex; gap: 4px;">
+              <button class="btn small primary" id="email-mode-login" onclick="setEmailMode('login')" style="flex: 1; padding: 8px;">GİRİŞ</button>
+              <button class="btn small" id="email-mode-signup" onclick="setEmailMode('signup')" style="flex: 1; padding: 8px;">KAYIT OL</button>
+            </div>
+            <input type="email" id="email-input" placeholder="E-posta adresi" autocomplete="email" style="width: 100%; padding: 10px; margin-bottom: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--ink); border-radius: 3px; font-size: 13px;">
+            <input type="password" id="password-input" placeholder="Şifre (en az 6 karakter)" autocomplete="current-password" style="width: 100%; padding: 10px; margin-bottom: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--ink); border-radius: 3px; font-size: 13px;">
+            <input type="text" id="displayname-input" placeholder="Görünür ismin" autocomplete="name" style="width: 100%; padding: 10px; margin-bottom: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--ink); border-radius: 3px; font-size: 13px; display: none;">
+            <button class="btn primary" id="email-submit-btn" onclick="submitEmailLogin()" style="width: 100%; padding: 12px; font-weight: 700; background: var(--accent); color: #000; border-color: var(--accent);">GİRİŞ YAP</button>
+            <div style="margin-top: 8px; text-align: center;">
+              <a href="#" onclick="resetPasswordPrompt(); return false;" style="color: var(--ink-dim); font-size: 11px; text-decoration: underline;">Şifremi unuttum</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="login-divider">veya</div>
 
       <button class="login-guest-btn" onclick="continueAsGuest()">
@@ -15437,11 +15540,95 @@ function showLoginScreen() {
       </button>
 
       <div class="login-status" id="login-status">
-        Bulut kaydı için Google girişi gerekir
+        Bulut kaydı için Google veya e-posta girişi gerekir
       </div>
     </div>
   </div>`;
   $('modals').innerHTML = html;
+}
+
+function toggleEmailLogin() {
+  const form = $('email-login-form');
+  const btn = $('show-email-btn');
+  if (form.style.display === 'none') {
+    form.style.display = 'block';
+    btn.style.display = 'none';
+  } else {
+    form.style.display = 'none';
+    btn.style.display = 'block';
+  }
+}
+
+function setEmailMode(mode) {
+  const wrapper = $('email-form-mode');
+  wrapper.dataset.mode = mode;
+  const submit = $('email-submit-btn');
+  const nameField = $('displayname-input');
+  const loginTab = $('email-mode-login');
+  const signupTab = $('email-mode-signup');
+  if (mode === 'signup') {
+    submit.textContent = 'KAYIT OL';
+    nameField.style.display = 'block';
+    loginTab.classList.remove('primary');
+    signupTab.classList.add('primary');
+  } else {
+    submit.textContent = 'GİRİŞ YAP';
+    nameField.style.display = 'none';
+    loginTab.classList.add('primary');
+    signupTab.classList.remove('primary');
+  }
+}
+
+async function submitEmailLogin() {
+  const email = $('email-input').value.trim();
+  const password = $('password-input').value;
+  const displayName = $('displayname-input').value.trim();
+  const status = $('login-status');
+  const btn = $('email-submit-btn');
+  const mode = $('email-form-mode').dataset.mode;
+
+  if (!email || !password) {
+    status.className = 'login-status error';
+    status.textContent = 'E-posta ve şifreyi gir';
+    return;
+  }
+  if (password.length < 6) {
+    status.className = 'login-status error';
+    status.textContent = 'Şifre en az 6 karakter olmalı';
+    return;
+  }
+
+  btn.disabled = true;
+  status.className = 'login-status loading';
+  status.textContent = mode === 'signup' ? '☁ Kayıt yapılıyor...' : '☁ Giriş yapılıyor...';
+
+  const result = mode === 'signup'
+    ? await window.fbAuth.signUpWithEmail(email, password, displayName || email.split('@')[0])
+    : await window.fbAuth.signInWithEmail(email, password);
+
+  if (result.success) {
+    status.className = 'login-status success';
+    status.textContent = mode === 'signup' ? '✓ Kayıt başarılı! Giriş yapılıyor...' : '✓ Giriş başarılı!';
+    // onAuthStateChanged otomatik tetiklenir
+  } else {
+    status.className = 'login-status error';
+    status.textContent = result.error || 'Hata oluştu';
+    btn.disabled = false;
+  }
+}
+
+async function resetPasswordPrompt() {
+  const email = $('email-input').value.trim();
+  if (!email) {
+    toast('Önce e-posta alanına e-posta adresini yaz', 'error');
+    return;
+  }
+  const result = await window.fbAuth.sendPasswordReset(email);
+  if (result.success) {
+    toast(`Şifre sıfırlama e-postası ${email} adresine gönderildi`, 'success');
+  } else {
+    toast('Hata: ' + result.error, 'error');
+  }
 }
 
 async function initiateLogin() {
@@ -15765,10 +15952,40 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.62';
+const CURRENT_VERSION = 'v1.64';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.64',
+    date: '17 Mayıs 2026',
+    title: 'E-POSTA + ŞİFRE İLE GİRİŞ',
+    items: [
+      { cat: 'major', text: '📧 <strong>E-posta + şifre ile giriş ve kayıt eklendi</strong>' },
+      { cat: 'feature', text: 'Google girişi sorun yaparsa alternatif yöntem' },
+      { cat: 'feature', text: 'Mobil cihazda popup/redirect sorunlarını tamamen by-pass eder' },
+      { cat: 'feature', text: 'Giriş ekranında "E-posta ile Giriş Yap / Kayıt Ol" butonu' },
+      { cat: 'feature', text: 'GİRİŞ / KAYIT modları arasında geçiş' },
+      { cat: 'feature', text: 'Kayıt sırasında görünür isim atayabilirsin' },
+      { cat: 'feature', text: 'Şifremi unuttum: e-posta ile sıfırlama linki' },
+      { cat: 'feature', text: 'Türkçe hata mesajları (zaten kayıtlı, geçersiz e-posta, zayıf şifre vs)' },
+      { cat: 'info', text: '⚠️ Firebase Console > Authentication > Sign-in methods > Email/Password etkinleştirilmeli' }
+    ]
+  },
+  {
+    version: 'v1.63',
+    date: '17 Mayıs 2026',
+    title: 'MOBİL GİRİŞ DÜZELTMELERİ',
+    items: [
+      { cat: 'major', text: '📱 <strong>Telefondan Google girişi düzeltildi</strong>' },
+      { cat: 'feature', text: 'iOS Safari için özel redirect yöntemi (popup yerine)' },
+      { cat: 'feature', text: 'In-app browser tespiti (Instagram, Facebook, Twitter, vb)' },
+      { cat: 'feature', text: 'Popup engellendiğinde otomatik redirect\'e geçer (Brave, Firefox gizli vs)' },
+      { cat: 'feature', text: 'Hata mesajları net Türkçe: bağlantı sorunu, yetkili olmayan domain, Google girişi kapalı' },
+      { cat: 'feature', text: 'viewport ayarı esnek — kullanıcı yakınlaştırabilir (erişilebilirlik için)' },
+      { cat: 'feature', text: 'Redirect sonrası kullanıcı bilgisi consol\'a yazılır (debug)' }
+    ]
+  },
   {
     version: 'v1.62',
     date: '17 Mayıs 2026',

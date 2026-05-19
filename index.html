@@ -3498,6 +3498,159 @@ function updateFactoryBuyEstimate(brandId) {
   document.getElementById('factory-total').textContent = fmt(Math.round(total));
 }
 
+// Sözleşmedeki tüm stoktaki malzemeleri tek tıkla sevk et
+function bulkStockDispatch(contractId) {
+  const ct = state.contracts.find(c => c.id === contractId);
+  if (!ct) { toast('Sözleşme bulunamadı', 'error'); return; }
+  if (ct.delivered) { toast('Bu sözleşme zaten teslim edildi', 'info'); return; }
+
+  // Kalan malzemeleri bul
+  const items = ct.items.map(it => {
+    const delivered = (ct.deliveries || []).reduce((s, d) =>
+      s + (d.items?.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, remaining: Math.max(0, it.qty - delivered) };
+  }).filter(x => x.remaining > 0 && (state.inventory[x.productId] || 0) > 0);
+
+  if (items.length === 0) { toast('Stokta gönderilecek kalem yok', 'info'); return; }
+
+  let sentCount = 0;
+  items.forEach(x => {
+    // quickStockDispatch otomatik araç + şoför seçer
+    // Eğer araç boş kalmadıysa sırada beklerken loop bozulabilir; ama her seferinde araç durumunu kontrol eder
+    try {
+      const before = ct.deliveries.length;
+      quickStockDispatch(contractId, x.productId);
+      if (ct.deliveries.length > before) sentCount++;
+    } catch (e) { console.warn('Bulk stok sevki hatası:', e); }
+  });
+
+  if (sentCount > 0) {
+    toast(`🚛 ${sentCount} kalem stoktan kamyona yüklendi`, 'success');
+  } else {
+    toast('Sevkiyat yapılamadı (araç/şoför yok olabilir)', 'error');
+  }
+}
+
+// Sözleşmedeki tüm fabrika sevkleri toplu yap
+function bulkFactoryDispatch(contractId) {
+  const ct = state.contracts.find(c => c.id === contractId);
+  if (!ct) { toast('Sözleşme bulunamadı', 'error'); return; }
+  if (ct.delivered) { toast('Bu sözleşme zaten teslim edildi', 'info'); return; }
+
+  // Bayilikli + 5+ ton kalan kalemleri bul
+  const items = ct.items.map(it => {
+    const delivered = (ct.deliveries || []).reduce((s, d) =>
+      s + (d.items?.find(x => x.productId === it.productId)?.qty || 0), 0);
+    return { productId: it.productId, remaining: Math.max(0, it.qty - delivered) };
+  }).filter(x => {
+    if (x.remaining <= 0) return false;
+    const dealership = (state.dealerships || []).find(d => d.productId === x.productId);
+    if (!dealership) return false;
+    const p = PRODUCTS[x.productId];
+    if (!p) return false;
+    return (p.weight * x.remaining) / 1000 >= 5;
+  });
+
+  if (items.length === 0) { toast('Fabrikadan sevk edilebilecek kalem yok', 'info'); return; }
+
+  // Yeterli kasa kontrolü
+  let totalCost = 0;
+  items.forEach(x => {
+    const dealership = (state.dealerships || []).find(d => d.productId === x.productId);
+    if (dealership) totalCost += brandFactoryPrice(dealership.brandId) * x.remaining;
+  });
+  if (state.cash < totalCost) {
+    toast(`Yetersiz bakiye: ${fmt(totalCost)} gerekli, kasada ${fmt(state.cash)} var`, 'error');
+    return;
+  }
+
+  let sentCount = 0;
+  items.forEach(x => {
+    const dealership = (state.dealerships || []).find(d => d.productId === x.productId);
+    if (!dealership) return;
+    try {
+      const before = ct.deliveries.length;
+      quickFactoryDispatch(contractId, dealership.brandId, x.productId);
+      if (ct.deliveries.length > before) sentCount++;
+    } catch (e) { console.warn('Bulk fabrika sevki hatası:', e); }
+  });
+
+  if (sentCount > 0) {
+    toast(`🏭 ${sentCount} kalem fabrikadan sevk edildi · Toplam: ${fmt(totalCost)}`, 'success');
+  }
+}
+
+// Sözleşme için stoktaki eksik malzemeleri tedarikçiden topla al
+function bulkPurchaseForContract(contractId) {
+  const ct = state.contracts.find(c => c.id === contractId);
+  if (!ct) { toast('Sözleşme bulunamadı', 'error'); return; }
+  const purchasers = state.purchasers || [];
+  if (purchasers.length === 0) {
+    toast('Satın alma sorumlusu yok', 'error');
+    return;
+  }
+  const rep = purchasers.slice().sort((a, b) => b.level - a.level)[0];
+
+  // Bu sözleşme için eksikleri hesapla
+  const shortages = {};
+  ct.items.forEach(it => {
+    const delivered = (ct.deliveries || []).reduce((s, d) =>
+      s + (d.items?.find(x => x.productId === it.productId)?.qty || 0), 0);
+    const remaining = Math.max(0, it.qty - delivered);
+    const stock = state.inventory[it.productId] || 0;
+    const short = remaining - stock;
+    if (short > 0) shortages[it.productId] = short;
+  });
+
+  if (Object.keys(shortages).length === 0) {
+    toast('Bu sözleşme için eksik yok — stokta her şey var', 'info');
+    return;
+  }
+
+  // Tedarikçi paketleri oluştur — en uygun fiyatla
+  const supplierPackages = {};
+  Object.entries(shortages).forEach(([pid, qty]) => {
+    const sellers = SUPPLIERS.filter(s => s.products.includes(pid));
+    if (sellers.length === 0) return;
+    let bestSupplier = sellers[0];
+    let bestPrice = supplierPriceWithLoyalty(sellers[0], pid, rep.level);
+    for (const s of sellers) {
+      const p = supplierPriceWithLoyalty(s, pid, rep.level);
+      if (p < bestPrice) { bestPrice = p; bestSupplier = s; }
+    }
+    if (!supplierPackages[bestSupplier.id]) {
+      supplierPackages[bestSupplier.id] = { supplier: bestSupplier, items: [], total: 0 };
+    }
+    supplierPackages[bestSupplier.id].items.push({ productId: pid, qty, unitPrice: bestPrice, lineTotal: bestPrice * qty });
+    supplierPackages[bestSupplier.id].total += bestPrice * qty;
+  });
+
+  const purchases = Object.values(supplierPackages);
+  const totalCost = purchases.reduce((s, p) => s + p.total, 0);
+
+  if (state.cash < totalCost) {
+    toast(`Yetersiz bakiye: ${fmt(totalCost)} gerekli, kasada ${fmt(state.cash)} var`, 'error');
+    return;
+  }
+
+  // Tüm satın alımları yap
+  spend(totalCost, 'malzeme');
+  purchases.forEach(pkg => {
+    pkg.items.forEach(it => {
+      state.inventory[it.productId] = (state.inventory[it.productId] || 0) + it.qty;
+    });
+    // Tedarikçi bağlılığı +
+    if (!state.supplierLoyalty) state.supplierLoyalty = {};
+    state.supplierLoyalty[pkg.supplier.id] = Math.min(100, (state.supplierLoyalty[pkg.supplier.id] || 0) + 2);
+  });
+
+  rep.totalPurchases = (rep.totalPurchases || 0) + 1;
+  rep.xp += 10;
+  toast(`🛒 ${rep.name} eksikleri ${purchases.length} tedarikçiden aldı · Toplam: ${fmt(totalCost)}`, 'success');
+  addXP(8, 'toplu alım');
+  render();
+}
+
 // Sözleşme satırından stoktan sevkiyat — KAMYONLA gönderir (araç + şoför + yakıt)
 function quickStockDispatch(contractId, productId) {
   const ct = state.contracts.find(c => c.id === contractId);
@@ -5883,6 +6036,17 @@ function openApartmentsModal(landId, viewMode) {
 
   const aptsToShow = viewMode === 'archive' ? archivedApts : activeApts;
 
+  // Sadece aktif daireler için checkbox uygulansın — arşivde işlem yok
+  const showCheckbox = viewMode === 'active';
+  // Çoklu seçim için global set (sadece bu modal açıkken)
+  if (!window._aptSelected) window._aptSelected = new Set();
+  // Her açılışta seçimleri temizle (modal farklı binaya açılmış olabilir)
+  // Ama aynı binada sekme değiştirildiyse koru
+  if (!window._aptSelectedBuilding || window._aptSelectedBuilding !== land.id) {
+    window._aptSelected = new Set();
+    window._aptSelectedBuilding = land.id;
+  }
+
   const rows = aptsToShow.map(a => {
     const statusBadge = a.status === 'unsold' ? '<span style="color: var(--accent);">SATILIK</span>'
       : a.status === 'sold' ? `<span style="color: var(--green);">SATILDI${a.soldDay ? ' (G' + a.soldDay + ')' : ''}</span>`
@@ -5908,7 +6072,17 @@ function openApartmentsModal(landId, viewMode) {
     // Satış fiyatı: arşivde gerçek satış fiyatı, aktif daireler için liste fiyatı
     const displayPrice = a.actualSalePrice || a.salePrice;
 
-    return `<tr>
+    // Checkbox sadece "unsold" durumunda işlevsel (satılık daireler toplu satılabilir/kiralanabilir)
+    const selectable = a.status === 'unsold';
+    const checked = window._aptSelected.has(a.id);
+    const checkboxCell = showCheckbox
+      ? (selectable
+          ? `<input type="checkbox" class="apt-check" data-aid="${a.id}" ${checked ? 'checked' : ''} onclick="toggleAptSelect('${a.id}', this.checked)" style="width: 16px; height: 16px; cursor: pointer;">`
+          : '<span style="color: var(--ink-dim); font-size: 10px;">—</span>')
+      : '';
+
+    return `<tr${checked ? ' style="background: rgba(244,160,32,0.08);"' : ''}>
+      ${showCheckbox ? `<td>${checkboxCell}</td>` : ''}
       <td>#${a.number}</td>
       <td>${a.m2} m²</td>
       <td>${a.floor}. kat</td>
@@ -5918,6 +6092,10 @@ function openApartmentsModal(landId, viewMode) {
       <td>${action}</td>
     </tr>`;
   }).join('');
+
+  // Seçilebilir (unsold) daireler — toplu eylem butonu için
+  const selectableApts = aptsToShow.filter(a => a.status === 'unsold');
+  const selectedCount = selectableApts.filter(a => window._aptSelected.has(a.id)).length;
 
   // İstatistik
   const totalApts = b.apartments.length;
@@ -5960,10 +6138,26 @@ function openApartmentsModal(landId, viewMode) {
       </div>` : ''}
 
       ${aptsToShow.length === 0 ? `<div class="empty">${viewMode === 'archive' ? 'Henüz arşivlenecek daire yok.' : 'Aktif daire yok — hepsi satılmış veya teslim edilmiş.'}</div>` : `
+      ${showCheckbox && selectableApts.length > 0 ? `
+      <div id="bulk-action-bar" style="margin-bottom: 10px; padding: 10px 14px; background: var(--panel); border-left: 3px solid var(--accent); display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <div style="font-size: 12px;">
+          <strong style="color: var(--accent);" id="bulk-count">${selectedCount}</strong> daire seçildi
+          <span style="color: var(--ink-dim); font-size: 10px; margin-left: 8px;">(Sadece satılık daireler seçilebilir)</span>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <button class="btn small" onclick="selectAllApts('${land.id}', true)">TÜMÜNÜ SEÇ</button>
+          <button class="btn small" onclick="selectAllApts('${land.id}', false)">SEÇİMİ TEMİZLE</button>
+          <button class="btn small primary" ${selectedCount === 0 ? 'disabled style="opacity: 0.5;"' : ''} onclick="bulkRentApartments('${land.id}')" style="background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 700;">🏠 SEÇİLENLERİ KİRAYA VER (${selectedCount})</button>
+          <button class="btn small primary" ${selectedCount === 0 ? 'disabled style="opacity: 0.5;"' : ''} onclick="bulkSellApartments('${land.id}','emlakci')" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;">🏢 EMLAKÇIYA VER (${selectedCount})</button>
+          <button class="btn small primary" ${selectedCount === 0 ? 'disabled style="opacity: 0.5;"' : ''} onclick="bulkSellApartments('${land.id}','normal')" style="background: #1a5a70; color: #fff; border-color: #1a5a70; font-weight: 700;">🏘 PİYASAYA ÇIKAR (${selectedCount})</button>
+        </div>
+      </div>
+      ` : ''}
       <div class="table-scroll" style="max-height: 400px;">
         <table class="data-table">
           <thead>
             <tr>
+              ${showCheckbox ? `<th style="width: 30px;"><input type="checkbox" id="apt-select-all" onclick="selectAllApts('${land.id}', this.checked)" style="width: 16px; height: 16px; cursor: pointer;" ${selectedCount === selectableApts.length && selectableApts.length > 0 ? 'checked' : ''}></th>` : ''}
               <th>No</th>
               <th>m²</th>
               <th>Kat</th>
@@ -5983,6 +6177,135 @@ function openApartmentsModal(landId, viewMode) {
     </div>
   </div>`;
   $('modals').innerHTML = html;
+}
+
+// Daire seçimini toggle et
+function toggleAptSelect(aptId, checked) {
+  if (!window._aptSelected) window._aptSelected = new Set();
+  if (checked) {
+    window._aptSelected.add(aptId);
+  } else {
+    window._aptSelected.delete(aptId);
+  }
+  // Sadece sayım güncellemesi için yeniden render
+  const land = state.lands.find(l => l.building?.apartments?.some(a => a.id === aptId));
+  if (land) openApartmentsModal(land.id, 'active');
+}
+
+// Tüm satılık daireleri seç/temizle
+function selectAllApts(landId, select) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  if (!window._aptSelected) window._aptSelected = new Set();
+  if (select) {
+    land.building.apartments.filter(a => a.status === 'unsold').forEach(a => window._aptSelected.add(a.id));
+  } else {
+    window._aptSelected.clear();
+  }
+  openApartmentsModal(landId, 'active');
+}
+
+// Seçili daireleri toplu kiraya ver
+function bulkRentApartments(landId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  const selectedIds = Array.from(window._aptSelected || []);
+  if (selectedIds.length === 0) { toast('Önce daire seç', 'error'); return; }
+
+  // Seçili daireleri al
+  const apts = land.building.apartments.filter(a => selectedIds.includes(a.id) && a.status === 'unsold');
+  if (apts.length === 0) { toast('Seçili kiralanabilir daire yok', 'error'); return; }
+
+  // Onay modalı
+  const totalDepositi = apts.reduce((s, a) => s + (a.rentMonthly * 2), 0); // 2 aylık depozit
+  const totalMonthlyRent = apts.reduce((s, a) => s + a.rentMonthly, 0);
+  const ilceName = ILCELER[land.ilce].name;
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 540px;">
+      <h2>🏠 TOPLU KİRAYA VERME</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 14px;">
+        ${apts.length} daire kiralanacak — ${ilceName}
+      </p>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--blue); margin-bottom: 14px; font-size: 12px; line-height: 1.7;">
+        <strong>İŞLEM ÖZETİ:</strong>
+        <ul style="margin: 8px 0 0 18px; padding: 0;">
+          <li>Toplam <strong>${apts.length} daire</strong> kiraya çıkarılacak</li>
+          <li>Toplam aylık kira geliri: <strong style="color: var(--blue);">${fmt(totalMonthlyRent)}/ay</strong></li>
+          <li>Anında toplam depozit (2 aylık): <strong style="color: var(--green);">${fmt(totalDepositi)}</strong></li>
+          <li>Kiracılar otomatik atanır (her daire için rastgele isim)</li>
+        </ul>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1; padding: 12px; background: var(--blue); border-color: var(--blue);" onclick="confirmBulkRent('${landId}')">
+          ✓ ${apts.length} DAİREYİ KİRAYA VER
+        </button>
+        <button class="btn" style="padding: 12px;" onclick="openApartmentsModal('${landId}', 'active')">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmBulkRent(landId) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) { closeModal(); return; }
+  const selectedIds = Array.from(window._aptSelected || []);
+  const apts = land.building.apartments.filter(a => selectedIds.includes(a.id) && a.status === 'unsold');
+
+  let totalDeposit = 0;
+  apts.forEach(a => {
+    a.status = 'rented';
+    a.tenantName = fullName();
+    a.rentStartDay = state.day;
+    a.lastRentDay = state.day;
+    const deposit = a.rentMonthly * 2;
+    totalDeposit += deposit;
+  });
+
+  earn(totalDeposit, 'kira-depozit');
+  window._aptSelected = new Set();
+  closeModal();
+  toast(`🏠 ${apts.length} daire kiraya verildi · Depozit: +${fmt(totalDeposit)}`, 'success');
+  addXP(apts.length * 5, 'toplu kira');
+  openApartmentsModal(landId, 'active');
+}
+
+// Seçili daireleri toplu sat
+function bulkSellApartments(landId, method) {
+  const land = state.lands.find(l => l.id === landId);
+  if (!land || !land.building) return;
+  const selectedIds = Array.from(window._aptSelected || []);
+  if (selectedIds.length === 0) { toast('Önce daire seç', 'error'); return; }
+  const apts = land.building.apartments.filter(a => selectedIds.includes(a.id) && a.status === 'unsold');
+  if (apts.length === 0) return;
+
+  if (method === 'emlakci') {
+    let totalEarn = 0;
+    apts.forEach(a => {
+      const price = Math.round(a.salePrice * 0.92);
+      a.status = 'sold';
+      a.soldDay = state.day;
+      a.actualSalePrice = price;
+      totalEarn += price;
+    });
+    earn(totalEarn, 'daire-satis');
+    window._aptSelected = new Set();
+    toast(`🏢 Emlakçı ${apts.length} daire sattı · +${fmt(totalEarn)}`, 'success');
+    addXP(apts.length * 10, 'toplu daire satışı');
+  } else if (method === 'normal') {
+    apts.forEach(a => {
+      a.status = 'listed';
+      a.listedDay = state.day;
+      a.listedPrice = a.salePrice;
+    });
+    window._aptSelected = new Set();
+    toast(`🏘 ${apts.length} daire piyasaya çıkarıldı. Alıcı bulunması bekleniyor...`, 'success');
+    addXP(apts.length * 3, 'toplu listeleme');
+  }
+  openApartmentsModal(landId, 'active');
 }
 
 // Daire sat
@@ -9947,6 +10270,51 @@ function renderContractCard(ct, dispatcherCount, isInternal) {
       </tbody>
     </table>
     </div>
+    ${(() => {
+      // Toplu eylem butonları — sadece teslim edilmemiş sözleşmeler için
+      if (ct.delivered) return '';
+
+      // Kalan malzemeleri analiz et
+      const remainingItems = ct.items.map(it => {
+        const delivered = (ct.deliveries || []).reduce((s, d) =>
+          s + (d.items?.find(x => x.productId === it.productId)?.qty || 0), 0);
+        return { productId: it.productId, remaining: Math.max(0, it.qty - delivered) };
+      }).filter(x => x.remaining > 0);
+
+      if (remainingItems.length === 0) return '';
+
+      // Stoktan sevk edilebilecek kalemler (stokta varsa)
+      const stockable = remainingItems.filter(x => (state.inventory[x.productId] || 0) > 0).length;
+
+      // Fabrikadan sevk edilebilecek kalemler (bayilik varsa + 5+ ton kalanı)
+      const factoryAble = remainingItems.filter(x => {
+        const dealership = (state.dealerships || []).find(d => d.productId === x.productId);
+        if (!dealership) return false;
+        const p = PRODUCTS[x.productId];
+        if (!p) return false;
+        return (p.weight * x.remaining) / 1000 >= 5;
+      }).length;
+
+      // Tedarikçiden alınabilecek (stokta olmayan)
+      const purchaserCount = (state.purchasers || []).length;
+      const missing = remainingItems.filter(x => (state.inventory[x.productId] || 0) <= 0).length;
+
+      const buttons = [];
+      if (stockable > 0) {
+        buttons.push(`<button class="btn small" style="background: var(--green); color: #fff; border-color: var(--green); font-weight: 700;" onclick="bulkStockDispatch('${ct.id}')" title="Stokta olan tüm malzemeleri kamyonla sevk et">📦 STOKTAKİ TÜM MALZEMELERİ SEVK ET (${stockable} kalem)</button>`);
+      }
+      if (factoryAble > 0) {
+        buttons.push(`<button class="btn small" style="background: #a855f7; color: #fff; border-color: #a855f7; font-weight: 700;" onclick="bulkFactoryDispatch('${ct.id}')" title="Bayiliklerden tüm eksikleri fabrikadan direkt sevk et">🏭 FABRİKADAN TÜM EKSİKLERİ AL (${factoryAble} kalem)</button>`);
+      }
+      if (isInternal && missing > 0 && purchaserCount > 0) {
+        buttons.push(`<button class="btn small" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="bulkPurchaseForContract('${ct.id}')" title="Stokta olmayanları tedarikçiden al">🛒 EKSİKLERİ TEDARİKÇİDEN AL (${missing} kalem)</button>`);
+      }
+
+      if (buttons.length === 0) return '';
+      return `<div style="display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 10px 0; padding-top: 8px; border-top: 1px dashed var(--border);">
+        ${buttons.join('')}
+      </div>`;
+    })()}
     ${ct.deliveries.length ? `<div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 8px;">
       <strong style="color: var(--ink);">İrsaliyeler:</strong> ${ct.deliveries.map(d => `#${d.no} (Gün ${d.day}${d.externalCarrier ? ' · 🚚' : d.factoryBrand ? ' · 🏭' : ''})`).join(', ')}
     </div>` : ''}
@@ -15397,10 +15765,37 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.60';
+const CURRENT_VERSION = 'v1.62';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.62',
+    date: '17 Mayıs 2026',
+    title: 'TOPLU DAİRE İŞLEMİ',
+    items: [
+      { cat: 'major', text: '☑️ <strong>Daire yönetim panelinde checkbox ile çoklu seçim</strong>' },
+      { cat: 'feature', text: 'TÜMÜNÜ SEÇ / SEÇİMİ TEMİZLE butonları' },
+      { cat: 'feature', text: '🏠 <strong>SEÇİLENLERİ KİRAYA VER</strong>: tek tıkla tüm seçili daireler kiraya çıkar' },
+      { cat: 'feature', text: '🏢 <strong>EMLAKÇIYA VER</strong>: seçilenleri %8 indirimli anında sat' },
+      { cat: 'feature', text: '🏘 <strong>PİYASAYA ÇIKAR</strong>: seçilenleri tam fiyatla ilana çıkar' },
+      { cat: 'feature', text: 'Her seçili daire için isim atama + 2 aylık depozit otomatik' },
+      { cat: 'feature', text: 'Sadece "satılık" daireler seçilebilir' }
+    ]
+  },
+  {
+    version: 'v1.61',
+    date: '17 Mayıs 2026',
+    title: 'SÖZLEŞMELERE TOPLU EYLEM BUTONLARI',
+    items: [
+      { cat: 'major', text: '🚛 <strong>Her sözleşme tablosunun altında toplu eylem butonları</strong>' },
+      { cat: 'feature', text: '📦 <strong>STOKTAKİ TÜM MALZEMELERİ SEVK ET</strong>: stokta olan kalemler tek tıkla kamyona yüklenir' },
+      { cat: 'feature', text: '🏭 <strong>FABRİKADAN TÜM EKSİKLERİ AL</strong>: bayilikli + 5+ ton kalanı olan kalemler fabrikadan direkt' },
+      { cat: 'feature', text: '🛒 <strong>EKSİKLERİ TEDARİKÇİDEN AL</strong> (iç sözleşmelerde): stokta olmayan malzemeleri toplu alır' },
+      { cat: 'feature', text: 'Buton üzerinde kaç kalem etkilendiği yazılı: "(5 kalem)"' },
+      { cat: 'feature', text: 'Yetersiz kasa/araç durumlarında ön kontrol + hata mesajı' }
+    ]
+  },
   {
     version: 'v1.60',
     date: '17 Mayıs 2026',

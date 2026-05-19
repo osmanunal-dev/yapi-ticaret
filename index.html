@@ -8014,8 +8014,11 @@ function _renderInner() {
   $('badge-inbox').style.display = unread > 0 ? 'inline-block' : 'none';
   $('badge-inbox').textContent = unread;
 
-  $('badge-contracts').style.display = state.contracts.length > 0 ? 'inline-block' : 'none';
-  $('badge-contracts').textContent = state.contracts.length;
+  // Aktif sözleşmeler = teslim edilmemiş veya teslim edilmiş ama ödeme bekleyen
+  // (Tamamen kapanmış olanlar zaten arşivde, sayılmaz)
+  const activeContractsCount = state.contracts.filter(c => !c.paid).length;
+  $('badge-contracts').style.display = activeContractsCount > 0 ? 'inline-block' : 'none';
+  $('badge-contracts').textContent = activeContractsCount;
 
   const enRoute = state.vehicles.filter(v => v.busyUntil > state.day).length;
   $('badge-fleet').style.display = enRoute > 0 ? 'inline-block' : 'none';
@@ -8031,8 +8034,8 @@ function _renderInner() {
   }
   const mbc = $('mb-badge-contracts');
   if (mbc) {
-    mbc.style.display = state.contracts.length > 0 ? 'inline-block' : 'none';
-    mbc.textContent = state.contracts.length;
+    mbc.style.display = activeContractsCount > 0 ? 'inline-block' : 'none';
+    mbc.textContent = activeContractsCount;
   }
 
   // Show debt stat only if has debt (mobile compact)
@@ -15394,10 +15397,21 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.59';
+const CURRENT_VERSION = 'v1.60';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.60',
+    date: '17 Mayıs 2026',
+    title: 'SÖZLEŞME ROZET SAYIMI DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '🔢 <strong>Sözleşme rozeti artık kapanmış sözleşmeleri saymıyor</strong>' },
+      { cat: 'feature', text: 'Aktif sözleşme = ödenmemiş olanlar (teslim olmuş veya teslim edilmemiş)' },
+      { cat: 'feature', text: 'Yükleme sırasında delivered+paid sözleşmeler otomatik arşive geçer' },
+      { cat: 'feature', text: 'Mobile bottom nav rozeti de aynı mantıkla sayar' }
+    ]
+  },
   {
     version: 'v1.59',
     date: '17 Mayıs 2026',
@@ -16563,6 +16577,21 @@ function sanitizeLoadedState() {
       if (completedInternals.length > 0) {
         state.contracts = state.contracts.filter(c => !completedInternals.includes(c));
         console.log(`Sanitize: ${completedInternals.length} tamamlanmış iç sözleşme arşive geçirildi`);
+      }
+    }
+
+    // 9) Tamamen kapanmış (delivered + paid) sözleşmeleri arşive geçir
+    if (state.contracts && Array.isArray(state.contracts)) {
+      const closedContracts = state.contracts.filter(c => c.delivered && c.paid);
+      closedContracts.forEach(c => {
+        if (!state.archive) state.archive = [];
+        const status = c.isInternalConstruction ? 'completed' : 'paid';
+        const type = c.isInternalConstruction ? 'internal-construction' : 'contract';
+        state.archive.push({ ...c, type, status, completedDay: state.day });
+      });
+      if (closedContracts.length > 0) {
+        state.contracts = state.contracts.filter(c => !closedContracts.includes(c));
+        console.log(`Sanitize: ${closedContracts.length} kapanmış sözleşme arşive geçirildi`);
       }
     }
   } catch (e) {

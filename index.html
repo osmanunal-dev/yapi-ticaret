@@ -3483,7 +3483,7 @@ function updateFactoryBuyEstimate(brandId) {
   document.getElementById('factory-total').textContent = fmt(Math.round(total));
 }
 
-// Sözleşme detayından stoktan sevkiyat (tek tıkla — stokta varsa)
+// Sözleşme satırından stoktan sevkiyat — KAMYONLA gönderir (araç + şoför + yakıt)
 function quickStockDispatch(contractId, productId) {
   const ct = state.contracts.find(c => c.id === contractId);
   if (!ct) { toast('Sözleşme bulunamadı', 'error'); return; }
@@ -3498,16 +3498,85 @@ function quickStockDispatch(contractId, productId) {
   const have = state.inventory[productId] || 0;
   if (have <= 0) { toast('Stokta yok', 'error'); return; }
 
-  const sendQty = Math.min(have, remaining);
   const p = PRODUCTS[productId];
   const isInternal = !!ct.isInternalConstruction;
-  const tons = (p.weight * sendQty) / 1000;
 
-  // Stoktan düş
-  state.inventory[productId] -= sendQty;
-
+  // Hedef ilçe (mesafe için)
+  let targetIlce;
   if (isInternal) {
-    // İç sözleşme: malzeme inşaata "consumed" sayılır
+    const land = (state.lands || []).find(l => l.id === ct.constructionLandId);
+    if (!land) { toast('Şantiye bulunamadı', 'error'); return; }
+    targetIlce = land.ilce;
+  } else {
+    const cust = getCustomer(ct.customerId);
+    if (!cust) { toast('Müşteri bulunamadı', 'error'); return; }
+    targetIlce = cust.ilce;
+  }
+  const dist = ILCELER[targetIlce].km;
+
+  // Boş araç + şoför ara
+  const allVehicles = state.vehicles || [];
+  if (allVehicles.length === 0) {
+    toast('Hiç aracın yok. Dış nakliye penceresi açılıyor...', 'info');
+    if (!isInternal) setTimeout(() => openExternalCarrierModal(contractId), 300);
+    return;
+  }
+  const idleVehicles = allVehicles.filter(v => v.busyUntil <= state.day);
+  if (idleVehicles.length === 0) {
+    toast('Tüm araçlar görevde. Bir gün bekle ya da dış nakliye kullan.', 'error');
+    return;
+  }
+  const availableVehicles = idleVehicles.filter(v => state.drivers.some(d => d.vehicleId === v.id));
+  if (availableVehicles.length === 0) {
+    toast('Boş araç var ama şoförü atanmış değil. Personel > Şoför > araç ata.', 'error');
+    return;
+  }
+
+  // En küçük yeterli araç seç
+  const sortedTypes = ['kamyonet', 'kucuk', 'orta', 'buyuk'];
+  const unitWeight = p.weight / 1000; // ton/birim
+  const targetTons = unitWeight * Math.min(have, remaining);
+
+  let chosenVehicle = null;
+  for (const vt of sortedTypes) {
+    const cap = VEHICLE_TYPES[vt].tonaj;
+    if (cap < targetTons) continue;
+    const v = availableVehicles.find(av => av.type === vt);
+    if (v) { chosenVehicle = v; break; }
+  }
+  // Yetmiyorsa en büyük boş araç
+  if (!chosenVehicle) {
+    chosenVehicle = availableVehicles.slice()
+      .sort((a, b) => VEHICLE_TYPES[b.type].tonaj - VEHICLE_TYPES[a.type].tonaj)[0];
+  }
+  if (!chosenVehicle) { toast('Uygun araç bulunamadı', 'error'); return; }
+
+  const t = VEHICLE_TYPES[chosenVehicle.type];
+  const driver = state.drivers.find(d => d.vehicleId === chosenVehicle.id);
+
+  // Yük miktarı: araç kapasitesi + stok + kalan ihtiyaç hangisi azsa
+  const maxByCapacity = unitWeight > 0 ? Math.floor(t.tonaj / unitWeight) : have;
+  const sendQty = Math.min(have, remaining, maxByCapacity);
+  if (sendQty <= 0) { toast('Sevk edilecek yük hesaplanamadı', 'error'); return; }
+
+  const weight = unitWeight * sendQty;
+
+  // Stoktan düş + yakıt
+  state.inventory[productId] -= sendQty;
+  const fuelCost = Math.round(t.fuelPerKm * dist * 2 * FUEL_PRICE);
+  spend(fuelCost, 'yakit');
+  chosenVehicle.km = (chosenVehicle.km || 0) + dist * 2;
+
+  // Yol süresi (şoför seviyesine göre)
+  const speedBonus = driver ? Math.max(0, (driver.level - 1) * 0.1) : 0;
+  const baseDays = Math.max(1, Math.ceil(dist / 100));
+  const tripDays = Math.max(1, Math.round(baseDays * (1 - speedBonus)));
+
+  chosenVehicle.busyUntil = state.day + tripDays;
+  if (driver) driver.busyUntil = state.day + tripDays;
+
+  // İç sözleşmeyse consumed artır
+  if (isInternal) {
     const land = (state.lands || []).find(l => l.id === ct.constructionLandId);
     if (land && land.building) {
       const matEntry = land.building.materialsNeeded.find(m => m.productId === productId);
@@ -3515,19 +3584,18 @@ function quickStockDispatch(contractId, productId) {
     }
   }
 
-  // İrsaliye ekle
-  const tripDays = isInternal ? 0 : 1 + Math.floor(Math.random() * 2);
+  // İrsaliye
   const irNo = 'IR-' + state.day + '-' + uid().slice(0, 4).toUpperCase() + '-STK';
   ct.deliveries.push({
     no: irNo,
     day: state.day,
     arrivalDay: state.day + tripDays,
-    vehicleId: null,
-    driverId: null,
+    vehicleId: chosenVehicle.id,
+    driverId: driver?.id || null,
     internalSource: 'stok',
     items: [{ productId, qty: sendQty }],
-    weight: tons,
-    fuelCost: 0,
+    weight: weight,
+    fuelCost: fuelCost,
     externalCost: 0
   });
 
@@ -3542,7 +3610,6 @@ function quickStockDispatch(contractId, productId) {
     ct.delivered = true;
     if (isInternal) {
       ct.paid = true;
-      // İç sözleşme arşivle
       state.archive.push({ ...ct, type: 'internal-construction', status: 'completed', completedDay: state.day });
       const idx = state.contracts.findIndex(c => c.id === ct.id);
       if (idx >= 0) state.contracts.splice(idx, 1);
@@ -3557,8 +3624,10 @@ function quickStockDispatch(contractId, productId) {
     }
   }
 
-  toast(`✓ Stoktan ${sendQty} ${p.unit} ${PRODUCTS[productId].name} ${isInternal ? 'şantiyene' : 'müşteriye'} sevk edildi`, 'success');
-  addXP(3, 'stok sevkiyatı');
+  const vehName = chosenVehicle.name || t.name;
+  const driverName = driver ? driver.name : 'şoför yok';
+  toast(`🚛 ${vehName} (${driverName}) ${sendQty} ${p.unit} ${p.name} ile yola çıktı · ${tripDays} gün · Yakıt: ${fmt(fuelCost)}`, 'success');
+  addXP(5, 'stok sevkiyatı');
   render();
 }
 
@@ -5543,6 +5612,18 @@ function handleBuildingCompleted(land) {
     const remaining = availableApartments.length;
     toast(`🎉 ${t.name} inşaatı tamamlandı! ${remaining} daire teslime hazır.`, 'success');
   }
+
+  // Bu inşaata bağlı iç sözleşmeyi tamamen kapat ve arşive geçir
+  const internalIdx = state.contracts.findIndex(c =>
+    c.isInternalConstruction && c.constructionLandId === land.id && !c.delivered
+  );
+  if (internalIdx >= 0) {
+    const ct = state.contracts[internalIdx];
+    ct.delivered = true;
+    ct.paid = true;
+    state.archive.push({ ...ct, type: 'internal-construction', status: 'completed', completedDay: state.day });
+    state.contracts.splice(internalIdx, 1);
+  }
 }
 
 // İnşaatı iptal et (yıkılır, hiçbir ödeme iadesi yok)
@@ -5615,6 +5696,16 @@ function confirmCancelConstruction() {
 
   const isUrban = !!land.isUrbanRenewal;
   const ilceName = ILCELER[land.ilce].name;
+
+  // Bu inşaata bağlı iç sözleşmeyi iptal et (arşive iptal olarak yaz)
+  const internalIdx = state.contracts.findIndex(c =>
+    c.isInternalConstruction && c.constructionLandId === land.id && !c.delivered
+  );
+  if (internalIdx >= 0) {
+    const ct = state.contracts[internalIdx];
+    state.archive.push({ ...ct, type: 'internal-construction', status: 'cancelled', completedDay: state.day });
+    state.contracts.splice(internalIdx, 1);
+  }
 
   if (isUrban) {
     // Kentsel dönüşüm: proje + arsa tamamen silinir
@@ -5744,18 +5835,30 @@ function openBuildModal(landId) {
 }
 
 // Daireleri yönet modalı (sadece tamamlanmış binalar için)
-function openApartmentsModal(landId) {
+function openApartmentsModal(landId, viewMode) {
   const land = state.lands.find(l => l.id === landId);
   if (!land || !land.building || land.building.status !== 'completed') return;
   const b = land.building;
   const t = BUILDING_TYPES[b.type];
 
-  const rows = b.apartments.map(a => {
+  // Görüntü modu: 'active' (varsayılan) veya 'archive'
+  viewMode = viewMode || 'active';
+
+  // Daire kategorileri
+  // Aktif: hâlâ ilgilenmemiz gereken daireler (satılık, listed, kirada)
+  // Arşiv: işimiz biten daireler (satılmış, müşteriye/taşerona teslim)
+  const isAptArchived = (a) => a.status === 'sold' || a.status === 'delivered-to-customer' || a.status === 'delivered-to-subcontractor';
+  const activeApts  = b.apartments.filter(a => !isAptArchived(a));
+  const archivedApts = b.apartments.filter(a => isAptArchived(a));
+
+  const aptsToShow = viewMode === 'archive' ? archivedApts : activeApts;
+
+  const rows = aptsToShow.map(a => {
     const statusBadge = a.status === 'unsold' ? '<span style="color: var(--accent);">SATILIK</span>'
-      : a.status === 'sold' ? '<span style="color: var(--green);">SATILDI</span>'
+      : a.status === 'sold' ? `<span style="color: var(--green);">SATILDI${a.soldDay ? ' (G' + a.soldDay + ')' : ''}</span>`
       : a.status === 'listed' ? `<span style="color: #1a5a70;">🏘 PİYASADA (${state.day - (a.listedDay || state.day)} gün)</span>`
-      : a.status === 'delivered-to-customer' ? '<span style="color: var(--purple);">MÜŞTERİDE</span>'
-      : a.status === 'delivered-to-subcontractor' ? '<span style="color: var(--red);">TAŞERONDA</span>'
+      : a.status === 'delivered-to-customer' ? `<span style="color: var(--purple);">MÜŞTERİDE${a.deliveredToCustomerDay ? ' (G' + a.deliveredToCustomerDay + ')' : ''}</span>`
+      : a.status === 'delivered-to-subcontractor' ? `<span style="color: var(--red);">TAŞERONDA${a.deliveredToSubcontractorDay ? ' (G' + a.deliveredToSubcontractorDay + ')' : ''}</span>`
       : `<span style="color: var(--blue);">KİRADA (${a.tenantName || '?'})</span>`;
 
     let action;
@@ -5769,14 +5872,17 @@ function openApartmentsModal(landId) {
     } else if (a.status === 'rented') {
       action = `<button class="btn small danger" onclick="terminateRent('${land.id}', '${a.id}')">FESH ET</button>`;
     } else {
-      action = '<span style="font-size: 10px; color: var(--ink-dim);">-</span>';
+      action = '<span style="font-size: 10px; color: var(--ink-dim);">—</span>';
     }
+
+    // Satış fiyatı: arşivde gerçek satış fiyatı, aktif daireler için liste fiyatı
+    const displayPrice = a.actualSalePrice || a.salePrice;
 
     return `<tr>
       <td>#${a.number}</td>
       <td>${a.m2} m²</td>
       <td>${a.floor}. kat</td>
-      <td class="num">${fmt(a.salePrice)}</td>
+      <td class="num">${fmt(displayPrice)}</td>
       <td class="num">${fmt(a.rentMonthly)}/ay</td>
       <td>${statusBadge}</td>
       <td>${action}</td>
@@ -5814,6 +5920,16 @@ function openApartmentsModal(landId) {
         <strong style="color: var(--blue);">📅 Aylık kira geliri:</strong> ${fmt(monthlyRentIncome)} (her 30 günde bir otomatik kasaya girer)
       </div>` : ''}
 
+      <div class="filter-chips" style="margin-bottom: 12px;">
+        <div class="filter-chip ${viewMode === 'active' ? 'active' : ''}" onclick="openApartmentsModal('${land.id}','active')">🏠 Aktif Daireler (${activeApts.length})</div>
+        ${archivedApts.length > 0 ? `<div class="filter-chip ${viewMode === 'archive' ? 'active' : ''}" onclick="openApartmentsModal('${land.id}','archive')">📁 Arşiv (${archivedApts.length})</div>` : ''}
+      </div>
+
+      ${viewMode === 'archive' ? `<div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--ink-dim); margin-bottom: 10px; font-size: 11px;">
+        📁 İşi biten daireler — satılmış, müşteriye veya taşerona teslim edilmiş.
+      </div>` : ''}
+
+      ${aptsToShow.length === 0 ? `<div class="empty">${viewMode === 'archive' ? 'Henüz arşivlenecek daire yok.' : 'Aktif daire yok — hepsi satılmış veya teslim edilmiş.'}</div>` : `
       <div class="table-scroll" style="max-height: 400px;">
         <table class="data-table">
           <thead>
@@ -5829,7 +5945,7 @@ function openApartmentsModal(landId) {
           </thead>
           <tbody>${rows}</tbody>
         </table>
-      </div>
+      </div>`}
 
       <div class="actions" style="margin-top: 14px;">
         <button class="btn" onclick="closeModal()">KAPAT</button>
@@ -6846,6 +6962,7 @@ const state = {
 
   // Pending visits scheduled
   pendingVisits: [],  // {repId, customerId, dueDay}
+  lastFieldVisitDay: 0,  // En son hangi gün saha ziyareti yapıldı (günde 1 ziyaret limiti)
 
   // Payroll - maaşlar her 30 günde bir ödenir
   lastPayrollDay: 0,  // son ödeme günü (gün 30, 60, 90...)
@@ -7661,11 +7778,18 @@ function tryDispatcherProposal(rep) {
 
 // Bir satın alma sorumlusu çalışır: sözleşme ihtiyaçlarını analiz eder, alış paketleri oluşturur
 // returns: { purchases: [{supplier, items: [{productId, qty, unit, total}], total, savings}], totalCost, totalSavings } | null
-function tryPurchaserProposal(rep) {
+function tryPurchaserProposal(rep, scope) {
+  // scope: 'customer' = sadece müşteri sözleşmeleri, 'internal' = sadece şantiye sözleşmeleri
+  // Belirtilmezse tümü (geriye uyumluluk)
+  scope = scope || 'all';
+
   // Aktif sözleşmelerden malzeme ihtiyaçlarını hesapla
   const needs = {}; // { productId: needed_qty }
   state.contracts.forEach(ct => {
     if (ct.delivered) return;
+    const isInternal = !!ct.isInternalConstruction;
+    if (scope === 'customer' && isInternal) return;
+    if (scope === 'internal' && !isInternal) return;
     ct.items.forEach(it => {
       const delivered = (ct.deliveries || []).reduce((s, d) =>
         s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
@@ -8370,7 +8494,8 @@ function renderPurchaseProposalDetail(e) {
 // SATIN ALMA SORUMLUSU — Tek tıkla toplu alış
 // ============================================================
 // Aktif sözleşmelerin ihtiyaçlarını analiz et, en uygun tedarikçilerden toplu al
-function autoPurchaseAll() {
+function autoPurchaseAll(scope) {
+  scope = scope || 'all';
   const purchasers = state.purchasers || [];
   if (purchasers.length === 0) {
     toast('Satın alma sorumlusu yok. Personel > Satın Alma sekmesinden işe al.', 'error');
@@ -8381,14 +8506,15 @@ function autoPurchaseAll() {
   const rep = purchasers.slice().sort((a, b) => b.level - a.level)[0];
 
   // Mevcut tryPurchaserProposal fonksiyonu ihtiyaçları + paketleri hazırlıyor
-  const proposal = tryPurchaserProposal(rep);
+  const proposal = tryPurchaserProposal(rep, scope);
   if (!proposal) {
-    toast('Şu an alınacak malzeme yok. Stokta her şey yeterli ya da aktif sözleşme yok.', 'info');
+    const scopeLabel = scope === 'customer' ? 'Müşteri sözleşmeleri için' : scope === 'internal' ? 'Şantiye ihtiyaçları için' : '';
+    toast(`${scopeLabel} alınacak malzeme yok. Stokta her şey yeterli ya da aktif sözleşme yok.`, 'info');
     return;
   }
 
   // Proposal'ı geçici olarak sakla, modal "TAMAM" butonu okuyacak
-  state._pendingPurchase = { proposal, repId: rep.id };
+  state._pendingPurchase = { proposal, repId: rep.id, scope };
 
   // Tedarikçi blokları (her biri kalem tablosuyla)
   const supplierBlocks = proposal.purchases.map(p => {
@@ -8432,6 +8558,7 @@ function autoPurchaseAll() {
 
   const totalItemCount = proposal.purchases.reduce((s, p) => s + p.items.length, 0);
   const enoughCash = state.cash >= proposal.totalCost;
+  const scopeTitle = scope === 'customer' ? '📜 MÜŞTERİ SÖZLEŞMELERİ' : scope === 'internal' ? '🏗 ŞANTİYE İHTİYAÇLARI' : '🛒 TÜM SÖZLEŞMELER';
 
   const html = `<div class="modal-bg" onclick="if(event.target===this) cancelAutoPurchase()">
     <div class="modal" onclick="event.stopPropagation()" style="max-width: 760px; max-height: 90vh; overflow-y: auto;">
@@ -8441,7 +8568,7 @@ function autoPurchaseAll() {
 
       <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
         <strong style="color: var(--accent);">${rep.name}</strong> (${['Sv1 Tedarik Asistanı','Sv2 Satın Alma Uzmanı','Sv3 Satın Alma Müdürü'][rep.level - 1]})
-        sözleşme ihtiyaçlarını analiz etti ve aşağıdaki tedarikçilerden alış yapmak istiyor.
+        <strong>${scopeTitle}</strong> için ihtiyaçları analiz etti ve aşağıdaki tedarikçilerden alış yapmak istiyor.
       </div>
 
       <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">TEDARİKÇİLER (${proposal.purchases.length}) · ${totalItemCount} KALEM</h3>
@@ -9527,14 +9654,22 @@ function renderSuppliers() {
   }
 
   const purchaserCount = (state.purchasers || []).length;
+  // Sözleşme türlerine göre ihtiyaç sayıları
+  const customerOpen = state.contracts.filter(c => !c.delivered && !c.isInternalConstruction).length;
+  const internalOpen = state.contracts.filter(c => !c.delivered && c.isInternalConstruction).length;
   const purchaserBanner = purchaserCount > 0
-    ? `<div style="margin-bottom: 14px; padding: 12px 16px; background: var(--panel); border-left: 3px solid var(--accent); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <div style="font-size: 12px;">
-          🛒 <strong style="color: var(--accent);">Satın Alma Sorumlun: ${purchaserCount} kişi</strong> · Tek tıkla aktif sözleşmeler için en uygun tedarikçilerden toplu alış yapabilir.
+    ? `<div style="margin-bottom: 14px; padding: 12px 16px; background: var(--panel); border-left: 3px solid var(--accent);">
+        <div style="font-size: 12px; margin-bottom: 10px;">
+          🛒 <strong style="color: var(--accent);">Satın Alma Sorumlun: ${purchaserCount} kişi</strong> · Sözleşme türüne göre ayrı toplu alış yap.
         </div>
-        <button class="btn primary" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="autoPurchaseAll()">
-          🛒 TEK TIKLA TOPLU ALIM
-        </button>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn primary" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="autoPurchaseAll('customer')" ${customerOpen === 0 ? 'disabled style="opacity:0.4; background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;"' : ''}>
+            📜 MÜŞTERİ SÖZLEŞMELERİ İÇİN AL${customerOpen > 0 ? ` (${customerOpen})` : ''}
+          </button>
+          <button class="btn primary" style="background: var(--purple); color: #fff; border-color: var(--purple); font-weight: 700;" onclick="autoPurchaseAll('internal')" ${internalOpen === 0 ? 'disabled style="opacity:0.4; background: var(--purple); color: #fff; border-color: var(--purple); font-weight: 700;"' : ''}>
+            🏗 ŞANTİYE İÇİN AL${internalOpen > 0 ? ` (${internalOpen})` : ''}
+          </button>
+        </div>
       </div>`
     : `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--ink-dim); font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div>⚠️ <strong>Satın Alma Sorumlusu yok</strong> — Personel'den işe alırsan tek tıkla otomatik toplu alış yapabilirsin.</div>
@@ -9749,7 +9884,7 @@ function renderContractCard(ct, dispatcherCount, isInternal) {
           // Stoktan sevk (varsa ve kalan miktar > 0)
           if (remaining > 0 && haveStock > 0) {
             const sendQty = Math.min(haveStock, remaining);
-            buttons.push(`<button class="btn small" style="background: var(--green); color: #fff; border-color: var(--green); font-size: 10px; padding: 4px 8px;" onclick="quickStockDispatch('${ct.id}','${it.productId}')" title="Stoktan ${sendQty} ${p.unit} ${isInternal ? 'şantiyene' : 'müşteriye'} sevk et">📦 STOKTAN (${sendQty})</button>`);
+            buttons.push(`<button class="btn small" style="background: var(--green); color: #fff; border-color: var(--green); font-size: 10px; padding: 4px 8px;" onclick="quickStockDispatch('${ct.id}','${it.productId}')" title="Stoktan ${sendQty} ${p.unit} kamyonla ${isInternal ? 'şantiyene' : 'müşteriye'} sevk et (araç + yakıt + şoför)">🚛 STOKTAN (${sendQty})</button>`);
           }
 
           // Fabrikadan sevk (bayilik varsa ve 5+ ton)
@@ -11833,21 +11968,38 @@ function renderLands() {
   const lands = state.lands || [];
   const market = state.landMarket || [];
 
-  // Kategorize et
-  const myLands = lands.filter(l => !l.isUrbanRenewal && (!l.building || l.building.status === 'completed'));
-  const activeProjects = lands.filter(l => !l.isUrbanRenewal && l.building && ['demolition', 'building', 'paused-warned'].includes(l.building.status));
-  const urbanRenewals = lands.filter(l => l.isUrbanRenewal);
+  // Bir arsa arşivlik mi? (işimiz tamamen bitmiş)
+  // - Bina tamamlanmış VE
+  // - Tüm daireler ya satılmış ya kiraya verilmemiş (artık aktif rol yok) ya da müşteriye/taşerona teslim edilmiş
+  // Kirada daire varsa hâlâ aktif çünkü her ay kira geliyor; o yüzden kirada varsa arşivlenmez
+  const isArchived = (l) => {
+    if (!l.building || l.building.status !== 'completed') return false;
+    const apts = l.building.apartments || [];
+    if (apts.length === 0) return false;
+    // Hâlâ satılabilir veya kirada daire varsa aktif
+    const hasActive = apts.some(a =>
+      a.status === 'unsold' || a.status === 'listed' || a.status === 'rented'
+    );
+    return !hasActive;
+  };
 
-  // Genel özet — sadece "Arsalarım" alanına dahil olanların değeri
-  const totalLandValue = lands.reduce((s, l) => s + landCurrentValue(l), 0);
-  const totalInvested = lands.reduce((s, l) => s + l.purchasePrice, 0);
+  // Kategorize et
+  const myLands       = lands.filter(l => !l.isUrbanRenewal && (!l.building || l.building.status === 'completed') && !isArchived(l));
+  const activeProjects = lands.filter(l => !l.isUrbanRenewal && l.building && ['demolition', 'building', 'paused-warned'].includes(l.building.status));
+  const urbanRenewals = lands.filter(l => l.isUrbanRenewal && !isArchived(l));
+  const archivedLands = lands.filter(l => isArchived(l));
+
+  // Genel özet — sadece aktif arsalar (arşiv hariç)
+  const activeLands = lands.filter(l => !isArchived(l));
+  const totalLandValue = activeLands.reduce((s, l) => s + landCurrentValue(l), 0);
+  const totalInvested = activeLands.reduce((s, l) => s + l.purchasePrice, 0);
   const totalProfit = totalLandValue - totalInvested;
 
   c.innerHTML = `<h2>🏞 ARSA & GAYRİMENKUL</h2>
-    <div class="subtitle">İstanbul arsa piyasası · Yatırım ve inşaat için arsa alın · Sahip olunan: ${lands.length}</div>
+    <div class="subtitle">İstanbul arsa piyasası · Yatırım ve inşaat için arsa alın · Aktif: ${activeLands.length}${archivedLands.length > 0 ? ` · Arşiv: ${archivedLands.length}` : ''}</div>
 
     <div class="stat-grid">
-      <div class="stat-tile"><div class="stat-label">Toplam Arsa</div><div class="stat-val" style="color: var(--blue)">${lands.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif Arsa</div><div class="stat-val" style="color: var(--blue)">${activeLands.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Yatırılan</div><div class="stat-val">${fmt(totalInvested)}</div></div>
       <div class="stat-tile"><div class="stat-label">Güncel Değer</div><div class="stat-val" style="color: var(--green)">${fmt(totalLandValue)}</div></div>
       <div class="stat-tile"><div class="stat-label">Net K/Z</div><div class="stat-val" style="color: ${totalProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${totalProfit >= 0 ? '+' : ''}${fmt(totalProfit)}</div></div>
@@ -11858,6 +12010,7 @@ function renderLands() {
       <div class="filter-chip ${_landTab === 'projects' ? 'active' : ''}" onclick="changeLandTab('projects')">🏗 Devam Eden Projeler (${activeProjects.length})</div>
       <div class="filter-chip ${_landTab === 'urban' ? 'active' : ''}" onclick="changeLandTab('urban')">🏚 Kentsel Dönüşüm (${urbanRenewals.length})</div>
       <div class="filter-chip ${_landTab === 'market' ? 'active' : ''}" onclick="changeLandTab('market')">🏬 Piyasa (${market.length})</div>
+      ${archivedLands.length > 0 ? `<div class="filter-chip ${_landTab === 'archive' ? 'active' : ''}" onclick="changeLandTab('archive')">📁 Arşiv (${archivedLands.length})</div>` : ''}
     </div>
 
     <div id="land-content"></div>`;
@@ -11880,6 +12033,8 @@ function renderLandContent() {
     c.innerHTML = renderMyLandsFiltered('projects');
   } else if (_landTab === 'urban') {
     c.innerHTML = renderMyLandsFiltered('urban');
+  } else if (_landTab === 'archive') {
+    c.innerHTML = renderMyLandsFiltered('archive');
   } else if (_landTab === 'market') {
     c.innerHTML = renderLandMarket();
   }
@@ -11888,24 +12043,46 @@ function renderLandContent() {
 // Sekmeye göre arsa filtreleyip render et
 function renderMyLandsFiltered(filter) {
   const allLands = state.lands || [];
+
+  // Arşiv kriteri (üstteki ile aynı)
+  const isArchived = (l) => {
+    if (!l.building || l.building.status !== 'completed') return false;
+    const apts = l.building.apartments || [];
+    if (apts.length === 0) return false;
+    const hasActive = apts.some(a =>
+      a.status === 'unsold' || a.status === 'listed' || a.status === 'rented'
+    );
+    return !hasActive;
+  };
+
   let lands;
   let emptyMsg;
   if (filter === 'mine') {
-    lands = allLands.filter(l => !l.isUrbanRenewal && (!l.building || l.building.status === 'completed'));
+    lands = allLands.filter(l => !l.isUrbanRenewal && (!l.building || l.building.status === 'completed') && !isArchived(l));
     emptyMsg = 'Henüz boş arsan yok. "Piyasa" sekmesinden arsa al ya da inşaatlarının bitmesini bekle.';
   } else if (filter === 'projects') {
     lands = allLands.filter(l => !l.isUrbanRenewal && l.building && ['demolition', 'building', 'paused-warned'].includes(l.building.status));
     emptyMsg = 'Devam eden projen yok. Bir arsana inşaat başlatabilirsin.';
   } else if (filter === 'urban') {
-    lands = allLands.filter(l => l.isUrbanRenewal);
+    lands = allLands.filter(l => l.isUrbanRenewal && !isArchived(l));
     emptyMsg = 'Henüz kentsel dönüşüm projen yok. Mailden gelen tekliflere bak.';
+  } else if (filter === 'archive') {
+    lands = allLands.filter(l => isArchived(l));
+    emptyMsg = 'Arşivde proje yok. İşin biten projeler (tüm daireler satılan binalar) buraya gelir.';
   }
 
   if (!lands || lands.length === 0) {
     return `<div class="empty">${emptyMsg}</div>`;
   }
 
-  return `<div class="grid-2">${lands.map(l => renderLandCard(l)).join('')}</div>`;
+  // Arşivde özel bir başlık eklersin
+  const archiveBanner = filter === 'archive'
+    ? `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--ink-dim); font-size: 11px; line-height: 1.6;">
+        📁 <strong>Arşivlenen projeler</strong> — Tüm daireleri satılmış veya teslim edilmiş binalar. Bunlar artık aktif gelir getirmez ama yatırım geçmişin olarak burada saklanır.
+      </div>`
+    : '';
+
+  return `${archiveBanner}<div class="grid-2">${lands.map(l => renderLandCard(l)).join('')}</div>`;
 }
 
 // Tek bir arsa kartını render et
@@ -14220,32 +14397,43 @@ function nextDay() {
   }
 
   // 7b) Saha satış sorumluları ziyaret yapar — her 2-3 günde bir
-  (state.fieldSalesReps || []).forEach(rep => {
-    if (rep.busyUntil > state.day) return; // hâlâ sahada
+  // Saha satış ziyareti — GÜNDE SADECE 1 MÜŞTERİ ZİYARET EDİLİR (en kıdemli rep yapar)
+  // Çoklu rep varsa sıralı olarak her gün başka bir rep aktif olur
+  const fsReps = (state.fieldSalesReps || []).filter(r => r.busyUntil <= state.day);
+  if (fsReps.length > 0) {
+    // Bugün ziyaret yapıldı mı? Aynı gün tekrar yapılmasın
+    if (state.lastFieldVisitDay !== state.day) {
+      // En kıdemli ve en uzun süredir ziyaret yapmamış rep'i seç
+      // (rotasyon — herkese fırsat verilir)
+      const sortedReps = fsReps.slice().sort((a, b) => {
+        const aLast = a.lastVisitDay || 0;
+        const bLast = b.lastVisitDay || 0;
+        // Önce en uzun süre önce ziyaret yapan, sonra en yüksek seviye
+        if (aLast !== bLast) return aLast - bLast;
+        return b.level - a.level;
+      });
+      const rep = sortedReps[0];
 
-    // Sıklık: Sv1 her 3 günde, Sv2 her 2 günde, Sv3 her 1-2 günde
-    const visitInterval = rep.level >= 3 ? 1.5 : rep.level === 2 ? 2 : 3;
-    const lastVisit = rep.lastVisitDay || (rep.hireDay - visitInterval);
-    if (state.day - lastVisit < visitInterval) return;
+      rep.lastVisitDay = state.day;
+      rep.busyUntil = state.day + 1; // 1 gün sahada
+      state.lastFieldVisitDay = state.day;
 
-    rep.lastVisitDay = state.day;
-    rep.busyUntil = state.day + 1; // 1 gün sahada
-
-    const proposal = tryFieldSalesVisit(rep);
-    if (proposal) {
-      state.inbox.push(proposal);
-      rep.xp += 15;
-      // Level up?
-      const xpReq = 100 * rep.level;
-      if (rep.xp >= xpReq && rep.level < 3) {
-        rep.level++;
-        rep.xp = 0;
-        toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
+      const proposal = tryFieldSalesVisit(rep);
+      if (proposal) {
+        state.inbox.push(proposal);
+        rep.xp += 15;
+        // Level up?
+        const xpReq = 100 * rep.level;
+        if (rep.xp >= xpReq && rep.level < 3) {
+          rep.level++;
+          rep.xp = 0;
+          toast(`⭐ ${rep.name} Sv ${rep.level}'e yükseldi!`, 'success');
+        }
+      } else {
+        rep.xp += 3; // boş dönse de tecrübe kazanır
       }
-    } else {
-      rep.xp += 3; // boş dönse de tecrübe kazanır
     }
-  });
+  }
 
   // 7c) Satın alma sorumlusu artık mail atmıyor — Tedarikçiler ekranında tek tık ile çalışır
   // (Eski blok v1.36'da kaldırıldı)
@@ -15174,10 +15362,65 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.52';
+const CURRENT_VERSION = 'v1.56';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.56',
+    date: '17 Mayıs 2026',
+    title: 'ARSA + DAİRE ARŞİV SEKMESİ',
+    items: [
+      { cat: 'major', text: '📁 <strong>Arsa & Gayrimenkul sayfasında yeni "Arşiv" sekmesi</strong> — işi biten projeler' },
+      { cat: 'major', text: '🏠 <strong>Daire yönetim panelinde Aktif/Arşiv ayrımı</strong> — satılmış daireler ayrı sekmede' },
+      { cat: 'feature', text: 'Tüm daireleri satılmış/teslim edilmiş binalar otomatik arşivlenir' },
+      { cat: 'feature', text: 'Hâlâ satılık, listede veya kirada daire varsa proje aktif kalır' },
+      { cat: 'feature', text: 'Stat satırı: "Toplam Arsa" → "Aktif Arsa" (arşiv hariç)' },
+      { cat: 'feature', text: 'Arşiv sayısı her yerde görünür: "Aktif: 5 · Arşiv: 12"' },
+      { cat: 'feature', text: 'Arşiv sekmesi sadece arşivlik proje varsa gösterilir' },
+      { cat: 'feature', text: 'Satılmış dairelerde gerçek satış fiyatı ve gün bilgisi görünür' }
+    ]
+  },
+  {
+    version: 'v1.55',
+    date: '17 Mayıs 2026',
+    title: 'AYRI SATIN ALMA + ŞANTİYE OTOMATIK KAPATMA',
+    items: [
+      { cat: 'major', text: '🛒 <strong>Tedarikçi sayfasında iki ayrı buton</strong>: 📜 Müşteri Sözleşmeleri + 🏗 Şantiye İhtiyaçları' },
+      { cat: 'feature', text: 'Her buton kendi sözleşme türüne göre ihtiyaç hesaplar — karışmaz' },
+      { cat: 'feature', text: 'Açık sözleşme yoksa buton soluk + devre dışı' },
+      { cat: 'feature', text: 'Modal başlığında hangi tür için satın alma yapıldığı yazar' },
+      { cat: 'major', text: '🏁 <strong>İnşaat tamamlanınca iç sözleşme otomatik arşive geçer</strong>' },
+      { cat: 'feature', text: 'İnşaat iptal edilirse iç sözleşme "iptal" olarak arşivlenir' }
+    ]
+  },
+  {
+    version: 'v1.54',
+    date: '17 Mayıs 2026',
+    title: 'STOKTAN SEVK ARTIK KAMYONLA',
+    items: [
+      { cat: 'major', text: '🚛 <strong>Stoktan sevk araç ile yapılıyor</strong> — anında değil, gerçek kamyon hareketi' },
+      { cat: 'feature', text: 'Buton ikonu: 📦 → 🚛 (kamyon)' },
+      { cat: 'feature', text: 'Boş araç + şoför atanmış olması gerekir, yoksa hata mesajı' },
+      { cat: 'feature', text: 'En küçük yeterli araç seçilir (kamyonet → küçük → orta → büyük)' },
+      { cat: 'feature', text: 'Yakıt maliyeti hesaplanır (mesafe × yakıt litresi)' },
+      { cat: 'feature', text: 'Şoför seviyesine göre yol süresi azalır (Sv2 %10, Sv3 %20 hızlı)' },
+      { cat: 'feature', text: 'İç şantiye sözleşmelerinde de aynı sistem — hedef ilçeye göre mesafe' },
+      { cat: 'feature', text: 'Araç kapasitesi sınırı: tek yükleme tonajdan fazlasını alamaz' }
+    ]
+  },
+  {
+    version: 'v1.53',
+    date: '17 Mayıs 2026',
+    title: 'GÜNDE 1 MÜŞTERİ ZİYARETİ',
+    items: [
+      { cat: 'major', text: '🚗 <strong>Saha satış: günde sadece 1 müşteri ziyareti yapılır</strong>' },
+      { cat: 'feature', text: 'Birden fazla saha sorumlusu varsa sırayla rotasyon yapılır' },
+      { cat: 'feature', text: 'En uzun süre önce ziyaret yapmayan rep seçilir (eşitlikte kıdemli)' },
+      { cat: 'feature', text: 'Diğer reps ertesi gün ziyarete gider — daha gerçekçi tempo' },
+      { cat: 'feature', text: '`state.lastFieldVisitDay` ile günlük limit kontrolü' }
+    ]
+  },
   {
     version: 'v1.52',
     date: '17 Mayıs 2026',

@@ -3402,6 +3402,380 @@ function brandFactoryPrice(brandId) {
   return Math.round(cheapest.price * (1 - b.discount));
 }
 
+// ============================================================
+// FABRİKA SATIN ALMA SİSTEMİ
+// ============================================================
+
+// Fabrika satın alma fiyatı (tier'a göre)
+function brandFactoryBuyPrice(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) return 0;
+  const base = (BASE_PRICE[b.productId] || 0);
+  // Tier çarpanları
+  const tierMult = { premium: 2.5, standart: 1.5, ekonomik: 0.8 }[b.tier] || 1;
+  // Ürün başına ortalama × kapasite × tier
+  // Premium pano fabrikası: 12000 × 2.5 × 8000 = ~₺240M
+  // Ekonomik tuğla: 8 × 0.8 × 8000 = ~₺50K (çok düşük, minimum koyalım)
+  const price = Math.round(base * tierMult * 8000);
+  return Math.max(50_000_000, price); // min ₺50M
+}
+
+// Sahip olunan fabrikanın üretim maliyeti — piyasa fiyatının ~%45'i (bayilikten de ucuz)
+function factoryProductionCost(factoryId) {
+  const f = state.factories?.find(x => x.id === factoryId);
+  if (!f) return 0;
+  const cheapest = cheapestSupplier(f.productId);
+  if (!cheapest) return Math.round((BASE_PRICE[f.productId] || 0) * 0.45);
+  // Level 1: %50, Level 2: %42, Level 3: %35
+  const levelMult = [0.50, 0.42, 0.35][Math.min(2, f.level - 1)] || 0.50;
+  return Math.round(cheapest.price * levelMult);
+}
+
+// Fabrika aylık kapasitesi (birim cinsinden)
+function factoryMonthlyCapacity(brandId, level) {
+  const b = BRANDS[brandId];
+  if (!b) return 0;
+  // Tier kapasitesi
+  const tierCap = { premium: 8000, standart: 12000, ekonomik: 20000 }[b.tier] || 10000;
+  // Level çarpanı
+  const levelCap = [1, 1.6, 2.5][Math.min(2, (level || 1) - 1)] || 1;
+  return Math.round(tierCap * levelCap);
+}
+
+// Fabrika aylık işletme gideri (maaş + enerji + bakım)
+function factoryMonthlyOpex(brandId, level) {
+  const b = BRANDS[brandId];
+  if (!b) return 0;
+  const tierOpex = { premium: 1_200_000, standart: 750_000, ekonomik: 350_000 }[b.tier] || 500_000;
+  const levelOpex = [1, 1.4, 1.9][Math.min(2, (level || 1) - 1)] || 1;
+  return Math.round(tierOpex * levelOpex);
+}
+
+// Fabrika satın alma modal'ını aç
+function openFactoryBuyModal(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) return;
+  const p = PRODUCTS[b.productId];
+  const buyPrice = brandFactoryBuyPrice(brandId);
+  const capacity = factoryMonthlyCapacity(brandId, 1);
+  const monthlyOpex = factoryMonthlyOpex(brandId, 1);
+  const cheapest = cheapestSupplier(b.productId);
+  const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[b.productId] || 0);
+  // Fabrika maliyeti (level 1)
+  const prodCost = Math.round(marketPrice * 0.50);
+  const savings = marketPrice - prodCost;
+  const monthlyRevenue = capacity * marketPrice; // ideal satış
+  const monthlyProfit = monthlyRevenue - (capacity * prodCost) - monthlyOpex;
+  const paybackMonths = Math.ceil(buyPrice / Math.max(1, monthlyProfit));
+
+  const alreadyOwn = (state.factories || []).some(f => f.brandId === brandId);
+  if (alreadyOwn) {
+    toast('Bu markanın fabrikası zaten sende', 'info');
+    return;
+  }
+
+  const tierColors = { premium: '#a855f7', standart: '#3b82f6', ekonomik: '#10b981' };
+  const tierLabels = { premium: '💎 Premium', standart: '🔷 Standart', ekonomik: '💰 Ekonomik' };
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="receipt-modal" onclick="event.stopPropagation()">
+      <div class="receipt-header">
+        <div class="r-company">🏭 FABRİKA DEVİR SÖZLEŞMESİ</div>
+        <div class="r-tagline">${b.name} Üretim Tesisi · Sınai Yatırım</div>
+      </div>
+
+      <div class="receipt-title-bar">
+        <div class="r-title">FABRİKA SATIN ALMA</div>
+        <div class="r-number">
+          <div>Belge No: <strong>FB-${state.day}-${brandId.toUpperCase()}</strong></div>
+          <div>Gün: <strong>${state.day}</strong></div>
+        </div>
+      </div>
+
+      <div class="receipt-info">
+        <div class="ri-section">
+          <div class="ri-label">Satıcı (Mevcut Sahip)</div>
+          <div class="ri-val">${b.name} A.Ş.<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${tierLabels[b.tier]} üretici</span>
+          </div>
+        </div>
+        <div class="ri-section">
+          <div class="ri-label">Üretilen Ürün</div>
+          <div class="ri-val">${p.name}<br>
+            <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${p.cat} kategorisi</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="padding: 12px 14px; background: #fff8e7; margin: 12px 0; font-size: 11px; line-height: 1.7; color: #3a3024;">
+        <strong style="color: #5a3a10;">${b.desc}</strong><br>
+        Bu fabrikayı satın alarak <strong>kendi üretiminizi</strong> yapabilir, piyasa fiyatından çok daha ucuza
+        sınırsız tedarik edebilirsiniz. Aylık üretim kapasitesi sınırlıdır, kapasite artırımı için fabrikayı geliştirebilirsiniz.
+      </div>
+
+      <div class="receipt-items">
+        <table class="receipt-table">
+          <thead>
+            <tr><th>Açıklama</th><th class="num">Değer</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="r-product">🏭 Fabrika Devir Bedeli</span><br><span style="font-size: 10px; color: #5a5048;">Tesis + makine + lisans</span></td>
+              <td class="num"><strong style="color: #b00020;">${fmt(buyPrice)}</strong></td>
+            </tr>
+            <tr>
+              <td><span class="r-product">📦 Aylık Üretim Kapasitesi</span><br><span style="font-size: 10px; color: #5a5048;">Geliştirilebilir (3 kademe)</span></td>
+              <td class="num"><strong>${capacity.toLocaleString('tr-TR')} ${p.unit}</strong></td>
+            </tr>
+            <tr>
+              <td><span class="r-product">💰 Üretim Maliyeti (birim)</span><br><span style="font-size: 10px; color: #5a5048;">Piyasa fiyatının %50'si</span></td>
+              <td class="num"><strong style="color: #0d7c46;">${fmt(prodCost)}</strong></td>
+            </tr>
+            <tr>
+              <td><span class="r-product">🏭 Aylık İşletme Gideri</span><br><span style="font-size: 10px; color: #5a5048;">Maaş, enerji, bakım</span></td>
+              <td class="num"><strong style="color: #b00020;">-${fmt(monthlyOpex)}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="receipt-totals">
+        <div class="rt-row subtotal">
+          <span>Birim başına tasarruf (piyasaya göre)</span>
+          <span style="color: #0d7c46;">+${fmt(savings)}</span>
+        </div>
+        <div class="rt-row subtotal">
+          <span>Aylık potansiyel ciro (full kapasite)</span>
+          <span>${fmt(monthlyRevenue)}</span>
+        </div>
+        <div class="rt-row vat" style="color: ${monthlyProfit > 0 ? '#0d7c46' : '#b00020'};">
+          <span>Aylık tahmini net kâr</span>
+          <span>${monthlyProfit > 0 ? '+' : ''}${fmt(monthlyProfit)}</span>
+        </div>
+        <div class="rt-row grand">
+          <span>GERİ ÖDEME SÜRESİ</span>
+          <span>~${paybackMonths} ay</span>
+        </div>
+      </div>
+
+      <div style="padding: 10px 14px; background: #fff5f5; border-left: 3px solid #b00020; margin-top: 12px; font-size: 11px; color: #3a3024;">
+        ⚠️ Aylık ${fmt(monthlyOpex)} işletme gideri kasanızdan otomatik düşülür (30 günde bir).
+        Üretim yapmasanız bile bu gider devam eder.
+      </div>
+
+      <div class="receipt-actions">
+        <button class="primary" onclick="confirmFactoryPurchase('${brandId}')" ${state.cash < buyPrice ? 'disabled' : ''}>
+          ✓ FABRİKAYI SATIN AL (${fmt(buyPrice)})
+        </button>
+        <button onclick="closeModal()">✕ İPTAL</button>
+      </div>
+      ${state.cash < buyPrice ? `<div style="text-align: center; color: #b00020; font-size: 11px; margin-top: 8px;">⚠️ Yetersiz bakiye — eksik ${fmt(buyPrice - state.cash)}</div>` : ''}
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmFactoryPurchase(brandId) {
+  const b = BRANDS[brandId];
+  if (!b) { closeModal(); return; }
+  const buyPrice = brandFactoryBuyPrice(brandId);
+  if (state.cash < buyPrice) {
+    toast(`Yetersiz bakiye: ${fmt(buyPrice)} gerekli`, 'error');
+    return;
+  }
+
+  spend(buyPrice, 'fabrika-alim');
+
+  if (!state.factories) state.factories = [];
+  state.factories.push({
+    id: 'F-' + uid(),
+    brandId,
+    productId: b.productId,
+    purchaseDay: state.day,
+    purchasePrice: buyPrice,
+    monthlyCapacity: factoryMonthlyCapacity(brandId, 1),
+    currentProduction: 0,    // bu ay üretilen
+    productionMonthStartDay: state.day,
+    level: 1,
+    totalProduced: 0,
+    totalRevenue: 0
+  });
+
+  closeModal();
+  toast(`🏭 ${b.name} fabrikası satın alındı! Kapasiten: ${factoryMonthlyCapacity(brandId, 1).toLocaleString('tr-TR')} ${PRODUCTS[b.productId].unit}/ay`, 'success');
+  addXP(500, 'fabrika sahibi');
+  state.agenda.push(`🏭 ${b.name} fabrikası satın alındı! Sınai yatırımcı oldun.`);
+  render();
+}
+
+// Fabrikadan üretim yap (stoğa ekle)
+function produceFromFactory(factoryId, qty) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) { toast('Fabrika bulunamadı', 'error'); return; }
+  const p = PRODUCTS[f.productId];
+  if (!p) { toast('Ürün geçersiz', 'error'); return; }
+
+  // Ay başına sıfırla
+  if (state.day - f.productionMonthStartDay >= 30) {
+    f.currentProduction = 0;
+    f.productionMonthStartDay = state.day;
+  }
+
+  const remaining = f.monthlyCapacity - f.currentProduction;
+  if (remaining <= 0) {
+    toast(`Bu ay kapasiten doldu. ${30 - (state.day - f.productionMonthStartDay)} gün sonra yenilenir.`, 'error');
+    return;
+  }
+
+  qty = Math.min(qty, remaining);
+  const cost = factoryProductionCost(factoryId) * qty;
+  if (state.cash < cost) {
+    toast(`Üretim maliyeti ${fmt(cost)}, kasada yeterli yok`, 'error');
+    return;
+  }
+
+  spend(cost, 'uretim');
+  state.inventory[f.productId] = (state.inventory[f.productId] || 0) + qty;
+  f.currentProduction += qty;
+  f.totalProduced = (f.totalProduced || 0) + qty;
+  f.totalRevenue = (f.totalRevenue || 0) + cost;
+
+  const b = BRANDS[f.brandId];
+  toast(`🏭 ${b.name}: ${qty.toLocaleString('tr-TR')} ${p.unit} üretildi · Maliyet: ${fmt(cost)}`, 'success');
+  addXP(qty / 100, 'üretim');
+  render();
+}
+
+// Fabrika seviyesini geliştir (kapasite + maliyet düşüş)
+function upgradeFactory(factoryId) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) return;
+  if (f.level >= 3) {
+    toast('Fabrika maksimum seviyede', 'info');
+    return;
+  }
+  const upgradeCost = Math.round(brandFactoryBuyPrice(f.brandId) * (f.level === 1 ? 0.5 : 0.8));
+  if (state.cash < upgradeCost) {
+    toast(`Geliştirme bedeli ${fmt(upgradeCost)}, kasada yetersiz`, 'error');
+    return;
+  }
+  spend(upgradeCost, 'fabrika-gelistirme');
+  f.level++;
+  f.monthlyCapacity = factoryMonthlyCapacity(f.brandId, f.level);
+  const b = BRANDS[f.brandId];
+  toast(`🏭 ${b.name} fabrikası Sv ${f.level}'e yükseltildi! Yeni kapasite: ${f.monthlyCapacity.toLocaleString('tr-TR')}/ay`, 'success');
+  addXP(300, 'fabrika geliştirme');
+  render();
+}
+
+// Fabrika sat
+function sellFactory(factoryId) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) return;
+  const b = BRANDS[f.brandId];
+  const sellPrice = Math.round(f.purchasePrice * 0.70); // %30 değer kaybı
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 480px;">
+      <h2>🏭 FABRİKA SAT</h2>
+      <div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--red); margin: 12px 0; font-size: 12px;">
+        <strong>${b.name} fabrikası</strong> satılırsa:
+        <ul style="margin: 8px 0 0 18px;">
+          <li>Alış: ${fmt(f.purchasePrice)} · Satış: <strong style="color: var(--red);">${fmt(sellPrice)}</strong> (%30 değer kaybı)</li>
+          <li>${f.totalProduced.toLocaleString('tr-TR')} birim üretmişsin</li>
+          <li>Aylık işletme gideri durur</li>
+        </ul>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn danger" style="flex: 1; padding: 12px;" onclick="confirmSellFactory('${factoryId}')">SAT (+${fmt(sellPrice)})</button>
+        <button class="btn" style="padding: 12px;" onclick="closeModal()">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function confirmSellFactory(factoryId) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) { closeModal(); return; }
+  const sellPrice = Math.round(f.purchasePrice * 0.70);
+  earn(sellPrice, 'fabrika-satis');
+  const b = BRANDS[f.brandId];
+  state.factories = state.factories.filter(x => x.id !== factoryId);
+  closeModal();
+  toast(`🏭 ${b.name} fabrikası satıldı: +${fmt(sellPrice)}`, 'success');
+  render();
+}
+
+// Üretim modal'ı (kaç birim üretileceği seçimi)
+function openProductionModal(factoryId) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) return;
+  const b = BRANDS[f.brandId];
+  const p = PRODUCTS[f.productId];
+
+  // Ay başına sıfırla
+  if (state.day - f.productionMonthStartDay >= 30) {
+    f.currentProduction = 0;
+    f.productionMonthStartDay = state.day;
+  }
+
+  const remaining = f.monthlyCapacity - f.currentProduction;
+  const unitCost = factoryProductionCost(f.id);
+  const maxByCash = Math.floor(state.cash / unitCost);
+  const maxProduce = Math.min(remaining, maxByCash);
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 520px;">
+      <h2>🏭 ÜRETİM PLANI — ${b.name}</h2>
+      <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 10px;">${p.name} üretimi</div>
+
+      <div class="stat-grid" style="margin-bottom: 12px;">
+        <div class="stat-tile"><div class="stat-label">Aylık Kapasite</div><div class="stat-val">${f.monthlyCapacity.toLocaleString('tr-TR')}</div></div>
+        <div class="stat-tile"><div class="stat-label">Bu Ay Üretilen</div><div class="stat-val" style="color: var(--blue);">${f.currentProduction.toLocaleString('tr-TR')}</div></div>
+        <div class="stat-tile"><div class="stat-label">Kalan Kapasite</div><div class="stat-val" style="color: var(--green);">${remaining.toLocaleString('tr-TR')}</div></div>
+        <div class="stat-tile"><div class="stat-label">Birim Maliyet</div><div class="stat-val">${fmt(unitCost)}</div></div>
+      </div>
+
+      <div style="padding: 10px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 12px; font-size: 11px;">
+        Kasandaki para ile maksimum <strong>${maxByCash.toLocaleString('tr-TR')}</strong> birim üretebilirsin.
+        Kapasite × Para limiti: <strong style="color: var(--accent);">${maxProduce.toLocaleString('tr-TR')} ${p.unit}</strong>
+      </div>
+
+      <div style="margin: 12px 0;">
+        <label style="font-size: 12px; color: var(--ink-dim);">Üretim miktarı:</label>
+        <input type="number" id="prod-qty" min="1" max="${maxProduce}" value="${Math.min(remaining, Math.floor(maxProduce / 2))}"
+          style="width: 100%; padding: 10px; margin-top: 6px; background: var(--panel-2); border: 1px solid var(--border); color: var(--ink); font-size: 16px; border-radius: 3px;"
+          oninput="document.getElementById('prod-total').textContent = '₺' + (this.value * ${unitCost}).toLocaleString('tr-TR')">
+      </div>
+
+      <div style="text-align: center; font-size: 14px; padding: 10px; background: var(--panel-2); margin: 10px 0;">
+        Toplam maliyet: <strong style="color: var(--accent);" id="prod-total">${fmt(Math.min(remaining, Math.floor(maxProduce / 2)) * unitCost)}</strong>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+        <button class="btn small" onclick="document.getElementById('prod-qty').value = ${Math.floor(maxProduce * 0.25)}; document.getElementById('prod-qty').dispatchEvent(new Event('input'));" style="flex: 1;">%25</button>
+        <button class="btn small" onclick="document.getElementById('prod-qty').value = ${Math.floor(maxProduce * 0.5)}; document.getElementById('prod-qty').dispatchEvent(new Event('input'));" style="flex: 1;">%50</button>
+        <button class="btn small" onclick="document.getElementById('prod-qty').value = ${Math.floor(maxProduce * 0.75)}; document.getElementById('prod-qty').dispatchEvent(new Event('input'));" style="flex: 1;">%75</button>
+        <button class="btn small primary" onclick="document.getElementById('prod-qty').value = ${maxProduce}; document.getElementById('prod-qty').dispatchEvent(new Event('input'));" style="flex: 1;">MAKS</button>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn primary" style="flex: 1; padding: 12px;" onclick="doProduceFromFactory('${factoryId}')">🏭 ÜRET</button>
+        <button class="btn" style="padding: 12px;" onclick="closeModal()">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+function doProduceFromFactory(factoryId) {
+  const qty = parseInt(document.getElementById('prod-qty').value) || 0;
+  if (qty <= 0) { toast('Geçerli miktar gir', 'error'); return; }
+  closeModal();
+  produceFromFactory(factoryId, qty);
+}
+
 // Bayilik başvurusu — modal göster
 function openDealershipModal(brandId) {
   const b = BRANDS[brandId];
@@ -3509,7 +3883,7 @@ function confirmDealership(brandId) {
 }
 
 // Fabrika alım modalı — bayilik aldığımız markadan satın al
-function openFactoryBuyModal(brandId) {
+function openStockOrderModal(brandId) {
   const b = BRANDS[brandId];
   if (!b) return;
   const dealership = (state.dealerships || []).find(d => d.brandId === brandId);
@@ -7378,6 +7752,7 @@ const state = {
   // BAYİLİKLER — marka bazlı fabrika alım hakkı
   // { id, brandId, productId, teminat, monthlyFee, discount, openedDay, nextFeeDay, missedPayments, totalPurchased, totalSavings }
   dealerships: [],
+  factories: [], // {id, brandId, productId, purchaseDay, purchasePrice, monthlyCapacity, currentProduction, lastProductionDay, level, maintenance}
 
   // BAŞARIMLAR — { achId: tierIdx (kazanılan en yüksek tier) }
   achievements: {},
@@ -13189,10 +13564,58 @@ function renderDealerships() {
 
     <div class="stat-grid" style="margin-bottom: 16px;">
       <div class="stat-tile"><div class="stat-label">Aktif Bayilik</div><div class="stat-val" style="color: #a855f7;">${dealerships.length}</div></div>
+      ${(state.factories || []).length > 0 ? `<div class="stat-tile"><div class="stat-label">Fabrika</div><div class="stat-val" style="color: var(--accent);">${state.factories.length}</div></div>` : ''}
       <div class="stat-tile"><div class="stat-label">Yatırılan Teminat</div><div class="stat-val" style="color: var(--blue); font-size: 14px;">${fmt(totalTeminat)}</div></div>
       <div class="stat-tile"><div class="stat-label">Toplam Alım</div><div class="stat-val" style="font-size: 14px;">${fmt(totalPurchased)}</div></div>
       <div class="stat-tile"><div class="stat-label">Toplam Tasarruf</div><div class="stat-val" style="color: var(--green); font-size: 14px;">${fmt(Math.round(totalSavings))}</div></div>
     </div>
+
+    ${(state.factories || []).length > 0 ? `
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px; color: var(--accent);">🏭 FABRİKALARIM (${state.factories.length})</h3>
+      <div class="grid-2" style="margin-bottom: 20px;">
+        ${state.factories.map(f => {
+          const b = BRANDS[f.brandId];
+          if (!b) return '';
+          const p = PRODUCTS[f.productId];
+          if (!p) return '';
+          // Ay başına sıfırla (görüntü için)
+          let currentProd = f.currentProduction || 0;
+          let monthStartDay = f.productionMonthStartDay || f.purchaseDay;
+          if (state.day - monthStartDay >= 30) currentProd = 0;
+          const remaining = f.monthlyCapacity - currentProd;
+          const pct = Math.round((currentProd / f.monthlyCapacity) * 100);
+          const unitCost = factoryProductionCost(f.id);
+          const cheapest = cheapestSupplier(f.productId);
+          const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[f.productId] || 0);
+          const opex = factoryMonthlyOpex(f.brandId, f.level);
+          return `<div class="card" style="border-left: 3px solid var(--accent);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div>
+                <h3 style="margin: 0; color: var(--accent);">🏭 ${b.name} Fabrikası</h3>
+                <div style="font-size: 10px; color: var(--ink-dim);">${p.name} üretimi · Sv ${f.level}/3</div>
+              </div>
+              <div style="text-align: right; font-size: 10px; color: var(--ink-dim);">
+                <div>Alış: ${fmt(f.purchasePrice)}</div>
+                <div>G${f.purchaseDay} · ${state.day - f.purchaseDay} gün</div>
+              </div>
+            </div>
+            <div style="margin-top: 8px; padding: 8px 10px; background: var(--panel-2); font-size: 11px; line-height: 1.6;">
+              <div>Üretim maliyeti: <strong style="color: var(--green);">${fmt(unitCost)}</strong> / ${p.unit}</div>
+              <div style="font-size: 10px; color: var(--ink-dim);">Piyasa: ${fmt(marketPrice)} (Tasarruf: ${fmt(marketPrice - unitCost)})</div>
+              <div style="margin-top: 4px;">Aylık işletme: <strong style="color: var(--red);">-${fmt(opex)}</strong></div>
+              <div style="margin-top: 6px;">Bu Ay Üretim: <strong>${currentProd.toLocaleString('tr-TR')}</strong> / ${f.monthlyCapacity.toLocaleString('tr-TR')} ${p.unit}</div>
+              <div class="progress-bar" style="margin: 4px 0;"><div class="progress-fill" style="width: ${pct}%; background: var(--accent);"></div></div>
+              <div style="font-size: 10px; color: var(--ink-dim);">Toplam üretilen: ${(f.totalProduced || 0).toLocaleString('tr-TR')} ${p.unit}</div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
+              <button class="btn small primary" style="flex: 1; background: var(--accent); border-color: var(--accent); color: #000;" onclick="openProductionModal('${f.id}')" ${remaining <= 0 ? 'disabled' : ''}>🏭 ÜRET (${remaining.toLocaleString('tr-TR')})</button>
+              ${f.level < 3 ? `<button class="btn small" style="background: var(--blue); border-color: var(--blue); color: #fff;" onclick="upgradeFactory('${f.id}')" title="Sv ${f.level + 1}: kapasite artar, maliyet düşer">⬆️ GELİŞTİR</button>` : ''}
+              <button class="btn small danger" onclick="sellFactory('${f.id}')" title="%30 değer kaybıyla sat">SAT</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    ` : ''}
 
     ${dealerships.length > 0 ? `
       <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 10px;">📜 AKTİF BAYİLİKLERİM (${dealerships.length})</h3>
@@ -13222,7 +13645,7 @@ function renderDealerships() {
               <div style="margin-top: 4px;">Toplam alım: <strong>${d.totalPurchased} ${p.unit}</strong> · Tasarruf: <strong style="color: var(--green);">${fmt(Math.round(d.totalSavings))}</strong></div>
             </div>
             <div style="display: flex; gap: 6px; margin-top: 10px;">
-              <button class="btn small primary" style="flex: 1; background: ${tierColors[b.tier]}; border-color: ${tierColors[b.tier]}; color: #fff;" onclick="openFactoryBuyModal('${d.brandId}')">🛒 FABRİKADAN AL</button>
+              <button class="btn small primary" style="flex: 1; background: ${tierColors[b.tier]}; border-color: ${tierColors[b.tier]}; color: #fff;" onclick="openStockOrderModal('${d.brandId}')">🛒 FABRİKADAN AL</button>
               <button class="btn small danger" onclick="cancelDealership('${d.id}')" title="Teminat iade edilmez">İPTAL</button>
             </div>
           </div>`;
@@ -13281,6 +13704,14 @@ function renderDealerships() {
               <button class="btn small primary" style="margin-top: 8px; width: 100%; background: ${tierColors[b.tier]}; border-color: ${tierColors[b.tier]}; color: #fff;" onclick="openDealershipModal('${b.id}')" ${hasIt ? 'disabled' : ''}>
                 ${hasIt ? '✓ BAYİSİN' : 'DETAY & BAŞVUR'}
               </button>
+              ${(() => {
+                const hasFactory = (state.factories || []).some(f => f.brandId === b.id);
+                const factoryPrice = brandFactoryBuyPrice(b.id);
+                if (hasFactory) {
+                  return `<button class="btn small" style="margin-top: 4px; width: 100%; background: var(--green); border-color: var(--green); color: #fff;" disabled>🏭 FABRİKA SENDE</button>`;
+                }
+                return `<button class="btn small" style="margin-top: 4px; width: 100%; background: var(--panel); border-color: var(--accent); color: var(--accent); font-size: 10px;" onclick="openFactoryBuyModal('${b.id}')" title="Fabrikayı satın al, sınırsız üretim yap">🏭 FABRİKA AL · ${fmt(factoryPrice)}</button>`;
+              })()}
             </div>`;
           }).join('')}
         </div>
@@ -14500,7 +14931,41 @@ async function roleConfirmApply() {
 // DAY ADVANCEMENT
 // ============================================================
 
+// Çift tıklama koruması — gün atlama işlemi sırasında diğer çağrıları engelle
+let _nextDayInProgress = false;
+
 function nextDay() {
+  // Eğer önceki çağrı hâlâ işleniyorsa hiçbir şey yapma
+  if (_nextDayInProgress) return;
+  _nextDayInProgress = true;
+
+  // Tüm "next-day" butonlarını anında disabled yap (görsel feedback)
+  const buttons = document.querySelectorAll('.next-day, button[onclick*="nextDay"]');
+  buttons.forEach(b => {
+    b.disabled = true;
+    b.style.opacity = '0.5';
+    b.style.cursor = 'wait';
+  });
+
+  try {
+    _nextDayInner();
+  } catch (e) {
+    console.error('nextDay hatası:', e);
+    toast('Gün atlatılırken hata: ' + e.message, 'error');
+  } finally {
+    // Bir frame bekle ki render tamamlansın, sonra butonu serbest bırak
+    requestAnimationFrame(() => {
+      buttons.forEach(b => {
+        b.disabled = false;
+        b.style.opacity = '';
+        b.style.cursor = '';
+      });
+      _nextDayInProgress = false;
+    });
+  }
+}
+
+function _nextDayInner() {
   state.day++;
   state.agenda = [];
   rollPrices();
@@ -14824,6 +15289,23 @@ function nextDay() {
     } else {
       state.lastPayrollDay = state.day;
     }
+  }
+
+  // 5b) Fabrika işletme giderleri — 30 günde bir
+  if (state.factories && state.factories.length > 0) {
+    state.factories.forEach(f => {
+      if (!f.lastOpexDay) f.lastOpexDay = f.purchaseDay || state.day;
+      if (state.day - f.lastOpexDay >= 30) {
+        const opex = factoryMonthlyOpex(f.brandId, f.level);
+        spend(opex, 'fabrika-isletme');
+        f.lastOpexDay = state.day;
+        // Üretim sayacı ay başına sıfırlanır
+        f.currentProduction = 0;
+        f.productionMonthStartDay = state.day;
+        const b = BRANDS[f.brandId];
+        state.agenda.push(`🏭 ${b?.name || 'Fabrika'} aylık işletme: -${fmt(opex)}`);
+      }
+    });
   }
 
   // 6) Loan payments — Aylık tahsilat (her kredi kendi 30 günlük döngüsünde)
@@ -15952,10 +16434,40 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.64';
+const CURRENT_VERSION = 'v1.66';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.66',
+    date: '17 Mayıs 2026',
+    title: 'FABRİKA SATIN ALMA',
+    items: [
+      { cat: 'major', text: '🏭 <strong>Fabrika satın alabilirsin</strong> — Her markanın fabrikası ayrı fiyatta' },
+      { cat: 'feature', text: 'Tier\'a göre fiyatlandırma: Premium ~₺200M+, Standart ~₺100M, Ekonomik ~₺50M' },
+      { cat: 'feature', text: 'Sahip olunca: piyasa fiyatının %50 maliyetiyle sınırsız üretim' },
+      { cat: 'feature', text: '3 kademe geliştirme: kapasite ↑, maliyet ↓ (Sv2 %42, Sv3 %35)' },
+      { cat: 'feature', text: 'Aylık kapasite limiti — kapasite biterse 30 gün sonra yenilenir' },
+      { cat: 'feature', text: 'Aylık işletme gideri (maaş + enerji + bakım) — üretim yapmazsan da çıkar' },
+      { cat: 'feature', text: 'Üretim modal\'ı: %25/%50/%75/MAKS kısayolları, anlık maliyet' },
+      { cat: 'feature', text: 'Bayilik sayfasında "FABRİKALARIM" bölümü — ÜRET, GELİŞTİR, SAT' },
+      { cat: 'feature', text: '%30 değer kaybıyla istediğin zaman satabilirsin' },
+      { cat: 'feature', text: 'Geri ödeme süresi hesabı modal\'da gösterilir' }
+    ]
+  },
+  {
+    version: 'v1.65',
+    date: '17 Mayıs 2026',
+    title: 'GÜN BUTONU TAKILMASI DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '⏭ <strong>Gün atla butonu artık çift tıklamada takılmıyor</strong>' },
+      { cat: 'feature', text: 'İşlem devam ederken buton görsel olarak disabled olur (opaklık + cursor:wait)' },
+      { cat: 'feature', text: 'İşlem tamamlanınca buton otomatik serbest bırakılır' },
+      { cat: 'feature', text: 'requestAnimationFrame ile render tamamlanmasını bekler' },
+      { cat: 'feature', text: 'try-catch ile hata olsa bile buton kilitli kalmaz' },
+      { cat: 'feature', text: 'Çoklu butonları aynı anda kontrol eder (.next-day class)' }
+    ]
+  },
   {
     version: 'v1.64',
     date: '17 Mayıs 2026',

@@ -8366,16 +8366,9 @@ function tryFieldSalesVisit(rep) {
   let materialCost = 0;
   const unitPrices = []; // Anlaşılan birim fiyatları (kâr eklenmiş)
   items.forEach(it => {
-    // Min alış fiyatı bul
-    let minBuy = Infinity;
-    state.suppliers.forEach(sup => {
-      const sp = sup.products[it.productId];
-      if (sp) {
-        const adjustedPrice = sp.price * (state.priceModifiers[it.productId] || 1);
-        if (adjustedPrice < minBuy) minBuy = adjustedPrice;
-      }
-    });
-    if (!isFinite(minBuy)) minBuy = BASE_PRICE[it.productId] * 1.1;
+    // En ucuz tedarikçi fiyatını bul
+    const cheapest = cheapestSupplier(it.productId);
+    let minBuy = cheapest ? cheapest.price : (BASE_PRICE[it.productId] || 0) * 1.1;
     materialCost += minBuy * it.qty;
     // Anlaşılan fiyat: min alış × (1 + kâr marjı)
     unitPrices.push(Math.round(minBuy * (1 + profitMargin)));
@@ -16434,10 +16427,21 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.66';
+const CURRENT_VERSION = 'v1.67';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.67',
+    date: '17 Mayıs 2026',
+    title: 'GÜN ATLAMA HATASI DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '🛠️ <strong>"Cannot read properties of undefined (reading \'forEach\')" hatası giderildi</strong>' },
+      { cat: 'feature', text: 'tryFieldSalesVisit\'te eski state.suppliers kullanımı temizlendi' },
+      { cat: 'feature', text: 'cheapestSupplier() helper\'ına geçildi (mevcut sistem standardı)' },
+      { cat: 'feature', text: 'Saha satış teklifi maliyet hesabı artık doğru çalışır' }
+    ]
+  },
   {
     version: 'v1.66',
     date: '17 Mayıs 2026',

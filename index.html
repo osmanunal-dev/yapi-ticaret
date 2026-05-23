@@ -3821,17 +3821,20 @@ function openFactoryStaffModal(factoryId) {
         </div>
       </div>
 
-      <!-- SATIŞ UZMANI (gelecek özellik için) -->
-      <div style="padding: 12px; background: var(--panel); border: 1px solid var(--border); margin-bottom: 10px; opacity: 0.6;">
+      <!-- SATIŞ UZMANI -->
+      <div style="padding: 12px; background: var(--panel); border: 1px solid var(--border); margin-bottom: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <div>
             <strong style="color: var(--green);">💼 SATIŞ UZMANI: ${f.staff.salesRep || 0}</strong>
-            <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Müşteri ihalelerinden fabrikaya teklif çeker (yakında aktif olacak) · ₺${salesRepSalary.toLocaleString('tr-TR')}/ay maaş</div>
+            <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Müşteri ihalelerinden fabrikaya direkt teklif çeker · ₺${salesRepSalary.toLocaleString('tr-TR')}/ay maaş</div>
           </div>
           <div style="display: flex; gap: 4px;">
-            <button class="btn small" onclick="changeFactoryStaff('${factoryId}', 'salesRep', -1)" disabled>−</button>
-            <button class="btn small" onclick="changeFactoryStaff('${factoryId}', 'salesRep', 1)" disabled>+</button>
+            <button class="btn small" onclick="changeFactoryStaff('${factoryId}', 'salesRep', -1)">−</button>
+            <button class="btn small primary" onclick="changeFactoryStaff('${factoryId}', 'salesRep', 1)">+</button>
           </div>
+        </div>
+        <div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">
+          ${f.staff.salesRep > 0 ? '✓ İhale mailleri açıldığında "🏭 FABRİKADAN TEKLİF VER" butonu görünür' : 'Maks 3 satış uzmanı (rekabet avantajı için)'}
         </div>
       </div>
 
@@ -10426,7 +10429,40 @@ function renderEmailDetail() {
       <div class="actions">
         <button class="btn primary" id="submit-btn" onclick="submitOffer(${e.id})">Teklif Gönder</button>
         <button class="btn danger" onclick="declineOffer(${e.id})">Reddet</button>
-      </div>`}
+      </div>
+
+      ${(() => {
+        // Fabrikalardan biri ihaledeki ürünlerden birini üretiyor mu?
+        const myFactories = state.factories || [];
+        if (myFactories.length === 0) return '';
+        const tenderProductIds = (e.items || []).map(it => it.productId);
+        const eligibleFactories = myFactories.filter(f => tenderProductIds.includes(f.productId));
+        if (eligibleFactories.length === 0) return '';
+
+        // Satış uzmanı var mı?
+        const hasSalesRep = eligibleFactories.some(f => (f.staff?.salesRep || 0) > 0);
+
+        return `<div style="margin-top: 12px; padding: 12px 14px; background: var(--panel); border-left: 3px solid var(--purple);">
+          <div style="font-size: 12px; line-height: 1.6;">
+            <strong style="color: var(--purple);">🏭 Fabrikalarından ${eligibleFactories.length} tanesi bu ihaledeki bir ürünü üretiyor</strong>
+            <div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">
+              ${eligibleFactories.map(f => {
+                const b = BRANDS[f.brandId];
+                const p = PRODUCTS[f.productId];
+                const hasS = (f.staff?.salesRep || 0) > 0;
+                return `${b?.name || 'Fabrika'} (${p?.name}) ${hasS ? '✓ Satış uzmanı var' : '⚠️ Satış uzmanı yok'}`;
+              }).join(' · ')}
+            </div>
+          </div>
+          <div style="margin-top: 10px;">
+            <button class="btn primary" style="background: var(--purple); color: #fff; border-color: var(--purple); font-weight: 700;" onclick="openFactoryOfferModal(${e.id})" ${!hasSalesRep ? 'disabled title="Satış uzmanı olan fabrika yok"' : ''}>
+              🏭 FABRİKADAN TEKLİF VER
+            </button>
+            ${!hasSalesRep ? '<span style="font-size: 10px; color: var(--red); margin-left: 8px;">⚠️ Önce bir fabrikaya satış uzmanı işe al</span>' : ''}
+          </div>
+        </div>`;
+      })()}
+      `}
     </div>`;
 
   setTimeout(() => updateOfferPreview(e.id), 0);
@@ -10651,6 +10687,270 @@ function declineOffer(id) {
   state.inbox.splice(idx, 1);
   state.selectedEmail = null;
   toast('İhale reddedildi.', 'info');
+  render();
+}
+
+// ===== FABRİKADAN MÜŞTERİYE DİREKT TEKLİF =====
+function openFactoryOfferModal(emailId) {
+  const e = state.inbox.find(x => x.id === emailId);
+  if (!e || e.answered) { toast('İhale bulunamadı veya zaten cevaplandı', 'error'); return; }
+  const cust = getCustomer(e.customerId);
+  if (!cust) return;
+
+  const myFactories = (state.factories || []).filter(f => (f.staff?.salesRep || 0) > 0);
+  if (myFactories.length === 0) {
+    toast('Satış uzmanı olan fabrika yok', 'error');
+    return;
+  }
+
+  // İhalede her bir kalem için fabrika eşleştirmesi
+  const tenderItems = e.items || [];
+  const offers = []; // { item, factory, unitCost, suggestedPrice, profitPct, fromStock, deficit }
+
+  tenderItems.forEach(it => {
+    const eligibleFactory = myFactories.find(f => f.productId === it.productId);
+    if (!eligibleFactory) return;
+
+    const p = PRODUCTS[it.productId];
+    const stock = state.inventory[it.productId] || 0;
+    const unitCost = factoryProductionCost(eligibleFactory.id);
+    // Üretim maliyeti × 1.4 (40% kâr) — varsayılan teklif
+    const suggestedPrice = Math.round(unitCost * 1.4);
+    // Stoktan ne kadar gönderilebilir?
+    const fromStock = Math.min(stock, it.qty);
+    const deficit = Math.max(0, it.qty - fromStock);
+
+    // Eksik miktarı üretebilir mi? (kapasite kontrolü, gerekirse)
+    const remainingCap = eligibleFactory.monthlyCapacity - (eligibleFactory.currentProduction || 0);
+    const canProduce = remainingCap >= deficit;
+
+    offers.push({
+      item: it,
+      factory: eligibleFactory,
+      unitCost,
+      suggestedPrice,
+      fromStock,
+      deficit,
+      canProduce,
+      product: p
+    });
+  });
+
+  if (offers.length === 0) {
+    toast('Bu ihaledeki ürünleri üreten fabrikan yok', 'error');
+    return;
+  }
+
+  // Modal HTML
+  const offersHtml = offers.map((o, idx) => {
+    const b = BRANDS[o.factory.brandId];
+    const stockOk = o.fromStock >= o.item.qty;
+    const statusBadge = stockOk
+      ? '<span style="color: var(--green); font-size: 10px;">✓ Stokta var</span>'
+      : o.canProduce
+        ? `<span style="color: var(--accent); font-size: 10px;">📦 Stokta ${o.fromStock} · 🏭 Eksik ${o.deficit} üretilecek</span>`
+        : `<span style="color: var(--red); font-size: 10px;">⚠️ Stok yetersiz, kapasite de yetmez</span>`;
+
+    return `<tr>
+      <td>
+        <strong>${o.product.name}</strong><br>
+        <span style="font-size: 10px; color: var(--ink-dim);">${b?.name || 'Fabrika'}</span>
+      </td>
+      <td class="num">${o.item.qty.toLocaleString('tr-TR')} ${o.product.unit}</td>
+      <td class="num">${fmt(o.unitCost)}<br><span style="font-size: 9px; color: var(--ink-dim);">üretim maliyeti</span></td>
+      <td>
+        <input type="number" id="fo-price-${idx}" min="${o.unitCost}" value="${o.suggestedPrice}" style="width: 110px; padding: 6px; background: var(--panel-2); border: 1px solid var(--border); color: var(--ink); border-radius: 3px;" oninput="updateFactoryOfferTotal()">
+        <span data-cost="${o.unitCost}" data-qty="${o.item.qty}"></span>
+      </td>
+      <td class="num" id="fo-line-${idx}" data-cost="${o.unitCost}" data-qty="${o.item.qty}">${fmt(o.suggestedPrice * o.item.qty)}</td>
+      <td>${statusBadge}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <h2>🏭 FABRİKADAN TEKLİF — ${cust.name}</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 12px;">
+        Fabrikalarınızın satış uzmanları bu ihaleye direkt teklif veriyor. Müşteri kabul ederse ürünler fabrikadan direkt sevk edilir.
+      </p>
+
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 12px; font-size: 11px; line-height: 1.6;">
+        💡 <strong>Nasıl çalışır?</strong> Fabrika satış uzmanı müşteri ile pazarlık yapar.
+        Stoktaki ürünler anında, eksikler üretildikten sonra sevk edilir.
+        Sadece fabrikalarının ürettiği kalemler bu teklifte yer alır — diğerleri için ayrı teklif vermelisin.
+      </div>
+
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Ürün / Fabrika</th>
+              <th class="num">Talep</th>
+              <th class="num">Maliyet</th>
+              <th>Birim Fiyat (Teklif)</th>
+              <th class="num">Satır Toplam</th>
+              <th>Stok Durum</th>
+            </tr>
+          </thead>
+          <tbody>${offersHtml}</tbody>
+        </table>
+      </div>
+
+      <div style="margin-top: 14px; padding: 12px 14px; background: var(--panel-2);">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px;">
+          <span>Toplam Teklif:</span>
+          <strong id="fo-total" style="color: var(--accent); font-size: 16px;">₺0</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-dim);">
+          <span>Tahmini Kâr:</span>
+          <strong id="fo-profit" style="color: var(--green);">+₺0</strong>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px; padding: 10px 14px; background: rgba(244,160,32,0.08); border-left: 3px solid var(--accent); font-size: 11px;">
+        ⚠️ <strong>Müşteri kabul ederse:</strong> Stoktaki ürünler kamyonla sevk edilir, eksikler önce üretilip sonra gönderilir.
+        Diğer (fabrikan olmayan) ürünler için ayrı sevk yapman gerekir.
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-top: 14px;">
+        <button class="btn primary" style="flex: 1; padding: 12px; background: var(--purple); color: #fff; border-color: var(--purple); font-weight: 700;" onclick="confirmFactoryOffer(${emailId})">✓ FABRİKADAN TEKLİF VER</button>
+        <button class="btn" style="padding: 12px;" onclick="closeModal()">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  setTimeout(updateFactoryOfferTotal, 0);
+}
+
+function updateFactoryOfferTotal() {
+  let total = 0;
+  let profit = 0;
+  document.querySelectorAll('[id^="fo-price-"]').forEach(input => {
+    const idx = input.id.replace('fo-price-', '');
+    const price = parseFloat(input.value) || 0;
+    const lineEl = document.getElementById(`fo-line-${idx}`);
+    if (!lineEl) return;
+    const cost = parseFloat(lineEl.dataset.cost) || 0;
+    const qty = parseFloat(lineEl.dataset.qty) || 0;
+    const lineTotal = price * qty;
+    const lineProfit = (price - cost) * qty;
+    lineEl.textContent = fmt(lineTotal);
+    total += lineTotal;
+    profit += lineProfit;
+  });
+  const totalEl = document.getElementById('fo-total');
+  const profitEl = document.getElementById('fo-profit');
+  if (totalEl) totalEl.textContent = fmt(total);
+  if (profitEl) {
+    profitEl.textContent = (profit >= 0 ? '+' : '') + fmt(profit);
+    profitEl.style.color = profit >= 0 ? 'var(--green)' : 'var(--red)';
+  }
+}
+
+function confirmFactoryOffer(emailId) {
+  const e = state.inbox.find(x => x.id === emailId);
+  if (!e || e.answered) { closeModal(); return; }
+  const cust = getCustomer(e.customerId);
+  if (!cust) { closeModal(); return; }
+
+  // Teklif bilgilerini topla
+  const myFactories = (state.factories || []).filter(f => (f.staff?.salesRep || 0) > 0);
+  const factoryOfferItems = []; // {productId, qty, unitPrice, factoryId}
+  let totalPrice = 0;
+  let totalCost = 0;
+
+  (e.items || []).forEach((it, originalIdx) => {
+    const factory = myFactories.find(f => f.productId === it.productId);
+    if (!factory) return;
+    // Hangi index? offers ile aynı sırada üretildi
+    const offerIdx = factoryOfferItems.length;
+    const priceInput = document.getElementById(`fo-price-${offerIdx}`);
+    if (!priceInput) return;
+    const unitPrice = parseFloat(priceInput.value) || 0;
+    if (unitPrice <= 0) return;
+    factoryOfferItems.push({
+      productId: it.productId,
+      qty: it.qty,
+      unitPrice,
+      factoryId: factory.id
+    });
+    totalPrice += unitPrice * it.qty;
+    totalCost += factoryProductionCost(factory.id) * it.qty;
+  });
+
+  if (factoryOfferItems.length === 0) {
+    toast('Hiç ürün için teklif girilmedi', 'error');
+    return;
+  }
+
+  // İhalede fabrika dışı kalemler de var mı? — onlar reddedilmiş sayılacak
+  const factoryProductIds = factoryOfferItems.map(x => x.productId);
+  const nonFactoryItems = (e.items || []).filter(it => !factoryProductIds.includes(it.productId));
+
+  // Müşteri kabul oranı: fiyat × güven faktörü
+  // Basit mekanik: maliyetin ~1.5x altındaysa %85, 2x altında %50, 3x altında %20
+  const avgProfitRatio = totalCost > 0 ? totalPrice / totalCost : 0;
+  let acceptChance = 0;
+  if (avgProfitRatio <= 1.3) acceptChance = 0.92;
+  else if (avgProfitRatio <= 1.5) acceptChance = 0.78;
+  else if (avgProfitRatio <= 1.8) acceptChance = 0.55;
+  else if (avgProfitRatio <= 2.2) acceptChance = 0.30;
+  else acceptChance = 0.10;
+  // Müşteri güveni ve itibarımız etkiler
+  acceptChance += (cust.trust - 50) / 250;  // +/- %20
+  acceptChance += (state.reputation - 50) / 500; // +/- %10
+  acceptChance = Math.max(0.05, Math.min(0.95, acceptChance));
+
+  const accepted = Math.random() < acceptChance;
+
+  // Maili "cevaplanmış" işaretle
+  e.answered = true;
+  e.factoryOffer = {
+    accepted,
+    items: factoryOfferItems,
+    totalPrice,
+    totalCost,
+    nonFactoryItems: nonFactoryItems.map(it => ({ productId: it.productId, qty: it.qty }))
+  };
+
+  if (accepted) {
+    // Sözleşme oluştur (kapalı, hemen üretim/sevk başlar)
+    const contractId = 'F-OFF-' + uid();
+    state.contracts.push({
+      id: contractId,
+      customerId: e.customerId,
+      customerName: cust.name,
+      items: factoryOfferItems.map(x => ({ productId: x.productId, qty: x.qty })),
+      total: totalPrice,
+      estimatedCost: totalCost,
+      createdDay: state.day,
+      dueDay: state.day + 14,
+      delivered: false,
+      paid: false,
+      deliveries: [],
+      isFactoryOffer: true,
+      factoryOfferItems
+    });
+    // Satış uzmanlarına XP
+    factoryOfferItems.forEach(x => {
+      const f = state.factories.find(ff => ff.id === x.factoryId);
+      if (f && f.staff?.salesRep > 0) {
+        // Bu fabrikanın satış uzmanlarına işlem değeri × küçük katsayı XP
+        // (basitlik için sadece toplam takip eder)
+        f.totalRevenue = (f.totalRevenue || 0) + (x.unitPrice * x.qty);
+      }
+    });
+    toast(`✅ ${cust.name} fabrika teklifini KABUL ETTİ! Sözleşme oluşturuldu (${fmt(totalPrice)})`, 'success');
+    state.agenda.push(`🏭 ${cust.name}: Fabrika teklifi kabul edildi · ${fmt(totalPrice)}`);
+    addXP(50, 'fabrika teklifi kabul');
+  } else {
+    state.archive.push({ ...e, status: 'rejected-factory-offer' });
+    toast(`❌ ${cust.name} fabrika teklifini reddetti. Fiyat çok yüksekti.`, 'error');
+    state.agenda.push(`🏭 ${cust.name}: Fabrika teklifi reddedildi`);
+  }
+
+  state.selectedEmail = null;
+  closeModal();
   render();
 }
 
@@ -16952,10 +17252,26 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.74';
+const CURRENT_VERSION = 'v1.75';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.75',
+    date: '23 Mayıs 2026',
+    title: 'FABRİKADAN MÜŞTERİYE DİREKT TEKLİF',
+    items: [
+      { cat: 'major', text: '💼 <strong>Satış uzmanı aktif</strong> — fabrikalar müşteri ihalelerine direkt teklif verir' },
+      { cat: 'feature', text: 'İhale mailinde "🏭 FABRİKADAN TEKLİF VER" butonu (sadece fabrika ürünü olan ihalelerde)' },
+      { cat: 'feature', text: 'Sadece satış uzmanı olan fabrikalardan teklif çıkar' },
+      { cat: 'feature', text: 'Sistem her kalem için maliyet hesabı yapar, varsayılan kâr marjı %40 önerir' },
+      { cat: 'feature', text: 'Birim fiyatları düzenleyebilirsin → toplam ve kâr canlı güncellenir' },
+      { cat: 'feature', text: 'Kabul oranı: maliyetin <1.3x = %92, <1.5x = %78, <1.8x = %55, <2.2x = %30, >2.2x = %10' },
+      { cat: 'feature', text: 'Müşteri güveni ve itibar kabul şansını etkiler (+/- %20-30)' },
+      { cat: 'feature', text: 'Kabul edilirse otomatik sözleşme oluşturulur (isFactoryOffer:true), 14 gün termin' },
+      { cat: 'feature', text: 'Fabrika ürünü olmayan kalemler için ayrı normal teklif vermelisin' }
+    ]
+  },
   {
     version: 'v1.74',
     date: '23 Mayıs 2026',

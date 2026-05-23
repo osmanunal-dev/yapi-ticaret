@@ -1275,6 +1275,37 @@
     letter-spacing: 2px;
     text-transform: uppercase;
   }
+  /* Açılır-kapanır iş kolu başlığı */
+  .nav-branch {
+    padding: 11px 14px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 13px;
+    letter-spacing: 1.5px;
+    background: linear-gradient(180deg, rgba(244,160,32,0.04), transparent);
+    margin-top: 6px;
+    border-top: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .nav-branch:hover { background: var(--panel-2); }
+  .nav-branch .arrow { font-size: 10px; color: var(--ink-dim); transition: transform 0.15s; }
+  .nav-branch.collapsed .arrow { transform: rotate(-90deg); }
+  .nav-branch-items {
+    overflow: hidden;
+    transition: max-height 0.18s ease-out;
+    max-height: 800px;
+  }
+  .nav-branch-items.collapsed {
+    max-height: 0;
+  }
+  .nav-branch-items .nav-item {
+    padding-left: 28px;
+  }
   .nav-item {
     padding: 9px 16px;
     cursor: pointer;
@@ -2642,54 +2673,110 @@
         <span>MENÜ</span>
         <span class="sheet-close" onclick="toggleDrawer()" style="color: #1a1610;">✕</span>
       </div>
-      <div class="nav-section">Operasyon</div>
+      <div class="nav-section">Ana Sayfa</div>
       <div class="nav-item active" data-view="inbox" onclick="setView('inbox')">
         <span>📨 Gelen Kutusu</span><span class="badge" id="badge-inbox" style="display:none">0</span>
-      </div>
-      <div class="nav-item" data-view="market" onclick="setView('market')">
-        <span>🛒 Malzeme Piyasası</span>
-      </div>
-      <div class="nav-item" data-view="suppliers" onclick="setView('suppliers')">
-        <span>🚚 Tedarikçiler</span>
-      </div>
-      <div class="nav-item" data-view="contracts" onclick="setView('contracts')">
-        <span>📋 Sözleşmeler</span><span class="badge" id="badge-contracts" style="display:none">0</span>
-      </div>
-
-      <div class="nav-section">Lojistik & Personel</div>
-      <div class="nav-item" data-view="fleet" onclick="setView('fleet')">
-        <span>🚛 Filo & Sevkiyat</span><span class="badge info" id="badge-fleet" style="display:none">0</span>
-      </div>
-      <div class="nav-item" data-view="hr" onclick="setView('hr')">
-        <span>👷 Personel</span>
-      </div>
-
-      <div class="nav-section">Müşteri & Pazarlama</div>
-      <div class="nav-item" data-view="customers" onclick="setView('customers')">
-        <span>🏢 Müşteriler / Cari</span>
-      </div>
-      <div class="nav-item" data-view="visits" onclick="setView('visits')">
-        <span>📍 Saha Ziyaretleri</span>
-      </div>
-
-      <div class="nav-section">Finans</div>
-      <div class="nav-item" data-view="bank" onclick="setView('bank')">
-        <span>🏦 Banka</span><span class="badge warn" id="badge-bank" style="display:none">!</span>
-      </div>
-      <div class="nav-item" data-view="investment" onclick="setView('investment')">
-        <span>💎 Yatırım</span>
-      </div>
-      <div class="nav-item" data-view="dealerships" onclick="setView('dealerships')">
-        <span>🏭 Bayilik</span>
-      </div>
-      <div class="nav-item" data-view="accounting" onclick="setView('accounting')">
-        <span>📊 Muhasebe</span>
       </div>
       <div class="nav-item" data-view="lands" onclick="setView('lands')">
         <span>🏞 Arsa & Gayrimenkul</span>
       </div>
-      <div class="nav-item" data-view="archive" onclick="setView('archive')">
-        <span>📁 Arşiv</span>
+
+      <!-- 🏪 MAĞAZA İŞ KOLU -->
+      <div class="nav-branch" id="branch-store" onclick="toggleBranch('store')">
+        <span>🏪 MAĞAZA</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="nav-branch-items" id="branch-store-items">
+        <div class="nav-item" data-view="market" onclick="setView('market')">
+          <span>🛒 Malzeme Piyasası</span>
+        </div>
+        <div class="nav-item" data-view="suppliers" onclick="setView('suppliers')">
+          <span>🚚 Tedarikçiler</span>
+        </div>
+        <div class="nav-item" data-view="contracts" onclick="setView('contracts')">
+          <span>📋 Sözleşmeler</span><span class="badge" id="badge-contracts" style="display:none">0</span>
+        </div>
+        <div class="nav-item" data-view="customers" onclick="setView('customers')">
+          <span>🏢 Müşteriler / Cari</span>
+        </div>
+        <div class="nav-item" data-view="visits" onclick="setView('visits')">
+          <span>📍 Saha Ziyaretleri</span>
+        </div>
+        <div class="nav-item" data-view="hr" onclick="setView('hr')">
+          <span>👷 Personel</span>
+        </div>
+        <div class="nav-item" data-view="fleet" onclick="setView('fleet')">
+          <span>🚛 Filo & Sevkiyat</span><span class="badge info" id="badge-fleet" style="display:none">0</span>
+        </div>
+      </div>
+
+      <!-- 🏗 İNŞAAT İŞ KOLU -->
+      <div class="nav-branch" id="branch-construction" onclick="toggleBranch('construction')">
+        <span>🏗 İNŞAAT & KENTSEL DÖNÜŞÜM</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="nav-branch-items" id="branch-construction-items">
+        <div class="nav-item" data-view="construction-projects" onclick="setView('construction-projects')">
+          <span>🏗 Devam Eden Projeler</span>
+        </div>
+        <div class="nav-item" data-view="construction-contracts" onclick="setView('construction-contracts')">
+          <span>📋 İç Şantiye Sözleşmeleri</span>
+        </div>
+        <div class="nav-item" data-view="construction-mail" onclick="setView('construction-mail')">
+          <span>📨 KD Teklifleri / Mail</span>
+        </div>
+        <div class="nav-item" data-view="construction-hr" onclick="setView('construction-hr')">
+          <span>👷 Şantiye Personeli</span>
+        </div>
+        <div class="nav-item" data-view="construction-cari" onclick="setView('construction-cari')">
+          <span>🏢 KD Müşterileri / Cari</span>
+        </div>
+      </div>
+
+      <!-- 🏭 FABRİKA İŞ KOLU (sadece fabrika varsa) -->
+      <div class="nav-branch" id="branch-factory" onclick="toggleBranch('factory')" style="display:none;">
+        <span>🏭 FABRİKA <span id="factory-count-pill" style="font-size: 9px; background: var(--accent); color: #000; padding: 1px 6px; border-radius: 8px; margin-left: 4px;">0</span></span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="nav-branch-items" id="branch-factory-items" style="display:none;">
+        <div class="nav-item" data-view="factory-list" onclick="setView('factory-list')">
+          <span>🏭 Fabrikalarım</span>
+        </div>
+        <div class="nav-item" data-view="factory-orders" onclick="setView('factory-orders')">
+          <span>📋 Üretim Sözleşmeleri</span>
+        </div>
+        <div class="nav-item" data-view="factory-mail" onclick="setView('factory-mail')">
+          <span>📨 Fabrika Teklifleri</span>
+        </div>
+        <div class="nav-item" data-view="factory-hr" onclick="setView('factory-hr')">
+          <span>👷 Fabrika Personeli</span>
+        </div>
+        <div class="nav-item" data-view="factory-cari" onclick="setView('factory-cari')">
+          <span>🏢 Fabrika Müşterileri</span>
+        </div>
+      </div>
+
+      <!-- 💰 FİNANS -->
+      <div class="nav-branch" id="branch-finance" onclick="toggleBranch('finance')">
+        <span>💰 FİNANS & YATIRIM</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="nav-branch-items" id="branch-finance-items">
+        <div class="nav-item" data-view="bank" onclick="setView('bank')">
+          <span>🏦 Banka</span><span class="badge warn" id="badge-bank" style="display:none">!</span>
+        </div>
+        <div class="nav-item" data-view="investment" onclick="setView('investment')">
+          <span>💎 Yatırım</span>
+        </div>
+        <div class="nav-item" data-view="dealerships" onclick="setView('dealerships')">
+          <span>🏭 Bayilik</span>
+        </div>
+        <div class="nav-item" data-view="accounting" onclick="setView('accounting')">
+          <span>📊 Muhasebe</span>
+        </div>
+        <div class="nav-item" data-view="archive" onclick="setView('archive')">
+          <span>📁 Arşiv</span>
+        </div>
       </div>
 
       <div class="nav-section">Topluluk</div>
@@ -9072,6 +9159,41 @@ function setView(v) {
   render();
 }
 
+// İş kolu açıp kapatma
+window._branchCollapsed = window._branchCollapsed || { store: false, construction: true, factory: false, finance: true };
+function toggleBranch(branchId) {
+  const items = document.getElementById(`branch-${branchId}-items`);
+  const header = document.getElementById(`branch-${branchId}`);
+  if (!items || !header) return;
+  const isCollapsed = items.classList.contains('collapsed');
+  if (isCollapsed) {
+    items.classList.remove('collapsed');
+    header.classList.remove('collapsed');
+    window._branchCollapsed[branchId] = false;
+  } else {
+    items.classList.add('collapsed');
+    header.classList.add('collapsed');
+    window._branchCollapsed[branchId] = true;
+  }
+}
+
+// Fabrika varsa fabrika branch'ini göster
+function updateFactoryBranchVisibility() {
+  const factoryCount = (state.factories || []).length;
+  const branch = document.getElementById('branch-factory');
+  const items = document.getElementById('branch-factory-items');
+  const countPill = document.getElementById('factory-count-pill');
+  if (!branch || !items) return;
+  if (factoryCount > 0) {
+    branch.style.display = '';
+    items.style.display = '';
+    if (countPill) countPill.textContent = factoryCount;
+  } else {
+    branch.style.display = 'none';
+    items.style.display = 'none';
+  }
+}
+
 // Mobile drawer (sidebar) controls
 function toggleDrawer() {
   const sb = $('sidebar');
@@ -9180,6 +9302,9 @@ function _renderInner() {
   renderAgenda();
 
   // Center
+  // Fabrika branch'inin görünürlüğünü güncelle
+  updateFactoryBranchVisibility();
+
   if (state.selectedEmail) renderEmailDetail();
   else if (state.view === 'inbox') renderInbox();
   else if (state.view === 'market') renderMarket();
@@ -9196,6 +9321,17 @@ function _renderInner() {
   else if (state.view === 'dealerships') renderDealerships();
   else if (state.view === 'archive') renderArchive();
   else if (state.view === 'profile') renderProfile();
+  // ===== YENİ İŞ KOLU SAYFALARI (Aşama 1 — UI placeholder) =====
+  else if (state.view === 'construction-projects') renderConstructionProjects();
+  else if (state.view === 'construction-contracts') renderConstructionContracts();
+  else if (state.view === 'construction-mail') renderConstructionMail();
+  else if (state.view === 'construction-hr') renderConstructionHR();
+  else if (state.view === 'construction-cari') renderConstructionCari();
+  else if (state.view === 'factory-list') renderFactoryList();
+  else if (state.view === 'factory-orders') renderFactoryOrders();
+  else if (state.view === 'factory-mail') renderFactoryMail();
+  else if (state.view === 'factory-hr') renderFactoryHR();
+  else if (state.view === 'factory-cari') renderFactoryCari();
   else if (state.view === 'leaderboard') renderLeaderboard();
   else if (state.view === 'changelog') renderChangelog();
   else if (state.view === 'admin') renderAdmin();
@@ -14659,6 +14795,197 @@ function reopenReceipt(receiptNo) {
   showReceiptModal(fakeCt, cust);
 }
 
+// ============================================================
+// İŞ KOLU SAYFALARI (Aşama 1 — Mevcut veriyi filtreli gösterir)
+// İleride veri yapısı ayrılınca bunlar gerçek ayrı sayfalar olur
+// ============================================================
+
+function _renderBranchHeader(branchName, icon, color) {
+  return `<div style="margin-bottom: 14px; padding: 14px 18px; background: linear-gradient(180deg, ${color}22, transparent); border-left: 4px solid ${color};">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 24px;">${icon}</span>
+      <div>
+        <h2 style="margin: 0; color: ${color}; font-family: 'Bebas Neue'; letter-spacing: 2px;">${branchName}</h2>
+        <div style="font-size: 11px; color: var(--ink-dim); margin-top: 2px;">İş kolu — sözleşmeler, mail, personel ve cari ayrı</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// 🏗 İNŞAAT İŞ KOLU
+function renderConstructionProjects() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('İnşaat & Kentsel Dönüşüm Projeleri', '🏗', '#a855f7') + '<div id="branch-body"></div>';
+  // Mevcut renderLands'i kullan, sadece projects sekmesini aç
+  window._landTab = 'projects';
+  const body = $('branch-body');
+  // Geçici çözüm: lands sayfasına yönlendir
+  body.innerHTML = `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7; margin-bottom: 14px;">
+    🏗 <strong>Devam eden inşaat ve kentsel dönüşüm projelerin Arsa & Gayrimenkul sayfasında.</strong><br>
+    Bu sekme bu aşamada Arsa sayfasına yönlendirir. Sonraki sürümlerde tam ayrı sayfa olacak.
+    <br><br>
+    <button class="btn primary" onclick="setView('lands'); window._landTab='projects'; setTimeout(render,10);">🏞 ARSA SAYFASINA GİT</button>
+  </div>`;
+}
+
+function renderConstructionContracts() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('İç Şantiye Sözleşmeleri', '🏗', '#a855f7');
+  const internalContracts = state.contracts.filter(c => c.isInternalConstruction);
+  if (internalContracts.length === 0) {
+    c.innerHTML += '<div class="empty">Şu an aktif iç şantiye sözleşmesi yok. İnşaat başlattığında otomatik oluşur.</div>';
+    return;
+  }
+  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px; margin-bottom: 14px;">
+    İnşaat halindeki binalarda her şantiyenin <strong>iç sözleşmesi</strong> burada. ${internalContracts.length} aktif şantiye sözleşmesi var.
+    <br><br>
+    <button class="btn primary" onclick="setView('contracts')">📋 SÖZLEŞMELER SAYFASINA GİT</button>
+  </div>`;
+}
+
+function renderConstructionMail() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Kentsel Dönüşüm Teklifleri', '🏗', '#a855f7');
+  // KD/inşaat ile ilgili mailler
+  const kdMails = state.inbox.filter(e => e.type === 'urban-renewal' || e.subject?.toLowerCase().includes('kentsel'));
+  if (kdMails.length === 0) {
+    c.innerHTML += '<div class="empty">Kentsel dönüşüm veya inşaat teklifi gelmemiş.</div>';
+    return;
+  }
+  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px;">
+    <strong>${kdMails.length} kentsel dönüşüm/inşaat maili</strong> var.
+    <br><br>
+    <button class="btn primary" onclick="setView('inbox')">📨 GELEN KUTUSUNA GİT</button>
+  </div>`;
+}
+
+function renderConstructionHR() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Şantiye Personeli', '🏗', '#a855f7');
+  c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px; line-height: 1.7;">
+    🏗 Şantiye personeli (inşaat ustaları, mühendisler, şantiye şefleri) <strong>sonraki sürümde</strong> eklenecek.
+    <br>Şu an mevcut personel için <strong>Mağaza → Personel</strong> sayfasına bak.
+    <br><br>
+    <button class="btn primary" onclick="setView('hr')">👷 PERSONELE GİT</button>
+  </div>`;
+}
+
+function renderConstructionCari() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('KD Müşterileri / Cari', '🏗', '#a855f7');
+  c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px; line-height: 1.7;">
+    🏗 Kentsel dönüşüm projelerinde anlaştığın müşteriler ve cari bakiyeleri burada listelenecek (sonraki sürüm).
+    <br><br>
+    <button class="btn primary" onclick="setView('customers')">🏢 TÜM CARİLERE GİT</button>
+  </div>`;
+}
+
+// 🏭 FABRİKA İŞ KOLU
+function renderFactoryList() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Fabrikalarım', '🏭', 'var(--accent)');
+  const factories = state.factories || [];
+  if (factories.length === 0) {
+    c.innerHTML += `<div class="empty">Henüz fabrika satın almadın. <a onclick="setView('dealerships')" style="color: var(--accent); cursor:pointer; text-decoration: underline;">Bayilik sayfasından satın al</a></div>`;
+    return;
+  }
+  // Bayilik sayfasındaki fabrikalarım kısmıyla aynı render
+  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; margin-bottom: 14px;">
+    <strong>${factories.length} fabrikan var.</strong> Tam yönetim Bayilik sayfasında — sonraki sürümlerde bu sekme tam ayrı olacak.
+    <br><br>
+    <button class="btn primary" onclick="setView('dealerships')">🏭 BAYİLİK SAYFASINA GİT</button>
+  </div>`;
+}
+
+function renderFactoryOrders() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Üretim Sözleşmeleri', '🏭', 'var(--accent)');
+  const factoryContracts = state.contracts.filter(c => c.isFactoryOffer);
+  if (factoryContracts.length === 0) {
+    c.innerHTML += '<div class="empty">Fabrika üretim sözleşmesi yok. Müşteri ihalelerinde "🏭 FABRİKADAN TEKLİF VER" butonu ile teklif verebilirsin.</div>';
+    return;
+  }
+  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px;">
+    <strong>${factoryContracts.length} fabrika sözleşmesi</strong> aktif.
+    <br><br>
+    <button class="btn primary" onclick="setView('contracts')">📋 TÜM SÖZLEŞMELERE GİT</button>
+  </div>`;
+}
+
+function renderFactoryMail() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Fabrika Teklifleri', '🏭', 'var(--accent)');
+  c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+    🏭 Fabrika satış uzmanlarının çektiği müşteri teklifleri burada listelenecek (sonraki sürüm).
+    <br>Şu an müşteri ihale mailleri Gelen Kutusu'nda.
+    <br><br>
+    <button class="btn primary" onclick="setView('inbox')">📨 GELEN KUTUSUNA GİT</button>
+  </div>`;
+}
+
+function renderFactoryHR() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Fabrika Personeli', '🏭', 'var(--accent)');
+  const factories = state.factories || [];
+  if (factories.length === 0) {
+    c.innerHTML += '<div class="empty">Henüz fabrika yok.</div>';
+    return;
+  }
+  // Fabrika kadrolarını listele
+  let bodyHtml = `<div class="grid-2">`;
+  factories.forEach(f => {
+    const b = BRANDS[f.brandId];
+    const p = PRODUCTS[f.productId];
+    if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+    bodyHtml += `<div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+        <div>
+          <h3 style="margin: 0;">🏭 ${b.name}</h3>
+          <div style="font-size: 10px; color: var(--ink-dim);">${p.name} üretimi · Sv ${f.level}</div>
+        </div>
+      </div>
+      <div style="padding: 8px; background: var(--panel-2); font-size: 11px; line-height: 1.8;">
+        <div>🔧 İşçiler: <strong>${f.staff.workers}</strong> kişi (₺${(f.staff.workers * 25000).toLocaleString('tr-TR')}/ay)</div>
+        <div>🚚 Satın Alma: <strong>${f.staff.purchaser}</strong> kişi (₺${(f.staff.purchaser * 50000).toLocaleString('tr-TR')}/ay)</div>
+        <div>💼 Satış Uzmanı: <strong>${f.staff.salesRep}</strong> kişi (₺${(f.staff.salesRep * 60000).toLocaleString('tr-TR')}/ay)</div>
+        <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">Toplam Maaş: <strong style="color: var(--red);">${fmt(f.staff.workers * 25000 + f.staff.purchaser * 50000 + f.staff.salesRep * 60000)}/ay</strong></div>
+      </div>
+      <button class="btn small primary" style="width: 100%; margin-top: 8px;" onclick="openFactoryStaffModal('${f.id}')">👥 KADRO YÖNET</button>
+    </div>`;
+  });
+  bodyHtml += `</div>`;
+  c.innerHTML += bodyHtml;
+}
+
+function renderFactoryCari() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Fabrika Müşterileri / Cari', '🏭', 'var(--accent)');
+  // Fabrika teklifiyle gelen sözleşmelerin müşterileri
+  const factoryContractsActive = state.contracts.filter(c => c.isFactoryOffer);
+  const customerIds = [...new Set(factoryContractsActive.map(c => c.customerId))];
+  if (customerIds.length === 0) {
+    c.innerHTML += '<div class="empty">Henüz fabrika müşterisi yok. Müşteri ihalelerine fabrikadan teklif vermeyi dene.</div>';
+    return;
+  }
+  let bodyHtml = `<div class="grid-2">`;
+  customerIds.forEach(cid => {
+    const cust = getCustomer(cid);
+    if (!cust) return;
+    const customerContracts = factoryContractsActive.filter(c => c.customerId === cid);
+    const totalOpen = customerContracts.filter(c => !c.paid).reduce((s, c) => s + c.total, 0);
+    bodyHtml += `<div class="card">
+      <h3 style="margin: 0 0 4px 0;">${cust.name}</h3>
+      <div style="font-size: 11px; color: var(--ink-dim);">${ILCELER[cust.ilce]?.name || ''}</div>
+      <div style="margin-top: 8px; padding: 8px; background: var(--panel-2); font-size: 12px;">
+        <div>Aktif fabrika sözleşmesi: <strong>${customerContracts.filter(c => !c.paid).length}</strong></div>
+        <div>Toplam bekleyen alacak: <strong style="color: var(--accent);">${fmt(totalOpen)}</strong></div>
+      </div>
+    </div>`;
+  });
+  bodyHtml += `</div>`;
+  c.innerHTML += bodyHtml;
+}
+
 function renderArchive() {
   const c = $('center');
   if (state.archive.length === 0) {
@@ -17252,10 +17579,26 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.75';
+const CURRENT_VERSION = 'v1.76';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.76',
+    date: '23 Mayıs 2026',
+    title: 'İŞ KOLLARI MENÜSÜ (1. AŞAMA)',
+    items: [
+      { cat: 'major', text: '📂 <strong>Yan menü 3 iş koluna ayrıldı</strong>: 🏪 Mağaza · 🏗 İnşaat & KD · 🏭 Fabrika' },
+      { cat: 'feature', text: 'Açılır/kapanır iş kolu başlıkları — istediğin sekmeyi katlayabilirsin' },
+      { cat: 'feature', text: 'Mağaza: Piyasa, Tedarikçiler, Sözleşmeler, Müşteriler, Saha Ziyaretleri, Personel, Filo' },
+      { cat: 'feature', text: 'İnşaat: Devam Eden Projeler, İç Sözleşmeler, KD Teklifleri, Şantiye Personeli, KD Müşterileri' },
+      { cat: 'feature', text: 'Fabrika sekmesi <strong>sadece fabrika varsa</strong> görünür (sayı rozetiyle)' },
+      { cat: 'feature', text: 'Fabrika: Fabrikalarım, Üretim Sözleşmeleri, Teklifler, Kadro, Müşteriler' },
+      { cat: 'feature', text: 'Yeni Finans bölümü: Banka, Yatırım, Bayilik, Muhasebe, Arşiv' },
+      { cat: 'info', text: '⚠️ Bu sürüm sadece <strong>UI yapısı</strong>. Sözleşmeler/Mailler/Personel veri olarak hâlâ ortak.' },
+      { cat: 'info', text: '🔜 Sonraki aşamada: maillerin iş koluna göre filtrelenmesi, sonra personel ayırma, sonra cari ayırma' }
+    ]
+  },
   {
     version: 'v1.75',
     date: '23 Mayıs 2026',

@@ -16439,10 +16439,24 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.69';
+const CURRENT_VERSION = 'v1.70';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.70',
+    date: '23 Mayıs 2026',
+    title: '1MB AŞIM HATASI ÇÖZÜLDÜ',
+    items: [
+      { cat: 'major', text: '🛠️ <strong>"The value of property data is longer than 1048487 bytes" hatası çözüldü</strong>' },
+      { cat: 'feature', text: 'Limit 900KB → 750KB (Firebase 1MB sınırının çok altı, güvenli marj)' },
+      { cat: 'feature', text: '<strong>Tamamlanmış binaların materialsNeeded HER ZAMAN silinir</strong> (zaten tüketildi)' },
+      { cat: 'feature', text: 'Arşivlik binalar (tüm daireleri satılmış) sadece <strong>özet</strong> olarak tutulur — apartments dizisi temizlenir' },
+      { cat: 'feature', text: 'Özet: { total, sold, customer, subContractor } sayımları korunur' },
+      { cat: 'feature', text: 'Aktif daireleri olan binalarda satılmış olanların geçmişi temizlenir' },
+      { cat: 'feature', text: 'Tamamlanmış binaların totalCost ve startDay da silinir (istatistik)' }
+    ]
+  },
   {
     version: 'v1.69',
     date: '23 Mayıs 2026',
@@ -17642,14 +17656,27 @@ function serializeState() {
     copy.agenda = copy.agenda.slice(-30);
   }
 
-  // 8) LANDS: satılmış dairelerden gereksiz alanları temizle
+  // 8) LANDS: HER ZAMAN tamamlanmış binaların ağır alanlarını sıkıştır
   if (Array.isArray(copy.lands)) {
     copy.lands.forEach(l => {
+      if (l.building?.status === 'completed') {
+        // Tamamlanmış inşaatın malzeme listesi gereksiz (zaten tüketildi)
+        delete l.building.materialsNeeded;
+        delete l.building.missingMaterials;
+        delete l.building.totalCost;  // sadece istatistik
+      }
       if (l.building?.apartments) {
         l.building.apartments.forEach(a => {
+          // Satılmış/teslim edilmiş dairelerden tüm geçmişi sil
           if (a.status === 'sold' || a.status === 'delivered-to-customer' || a.status === 'delivered-to-subcontractor') {
             delete a.deliveredToList;
             delete a.tenantHistory;
+            delete a.rentHistory;
+            delete a.actualSalePrice; // sadece istatistik (orig salePrice kalır)
+          }
+          // Kirada dairelerin geçmiş kira sayacını kısalt
+          if (a.status === 'rented' && Array.isArray(a.rentHistory) && a.rentHistory.length > 6) {
+            a.rentHistory = a.rentHistory.slice(-6);
           }
         });
       }
@@ -17657,7 +17684,8 @@ function serializeState() {
   }
 
   // ============ BOYUT KONTROL ============
-  const FIRESTORE_LIMIT = 900000;
+  // Firebase 1 MB sınırı (1048576 bytes). 750 KB güvenli marj.
+  const FIRESTORE_LIMIT = 750000;
   let estSize = JSON.stringify(copy).length;
 
   // Detaylı boyut analizi (500KB üstü ise)
@@ -17712,23 +17740,42 @@ function serializeState() {
       copy.inbox = copy.inbox.filter(e => !e.answered);
       if (copy.inbox.length > 15) copy.inbox = copy.inbox.slice(-15);
     }
-    // Acil 8: tamamlanmış binaların materialsNeeded sil + satılmış daire detayları sil
+    // Acil 8: tamamlanmış binaların ağır alanlarını sil + satılmış daireleri özetle
     if (Array.isArray(copy.lands)) {
       copy.lands.forEach(l => {
         if (l.building?.status === 'completed') {
           delete l.building.materialsNeeded;
           delete l.building.missingMaterials;
+          delete l.building.totalCost;
+          delete l.building.startDay;
         }
         if (l.building?.apartments) {
-          l.building.apartments.forEach(a => {
-            if (a.status === 'sold' || a.status === 'delivered-to-customer' || a.status === 'delivered-to-subcontractor') {
-              delete a.deliveredToList;
-              delete a.tenantHistory;
-              delete a.tenantName;
-              delete a.rentStartDay;
-              delete a.lastRentDay;
-            }
-          });
+          // Aktif daireler varsa onları koru, arşivlik dairleri özet et
+          const hasActive = l.building.apartments.some(a =>
+            a.status === 'unsold' || a.status === 'listed' || a.status === 'rented'
+          );
+          if (!hasActive) {
+            // Tüm daireler satılmış/teslim — sadece sayım tut
+            const archivedCount = l.building.apartments.length;
+            const soldCount = l.building.apartments.filter(a => a.status === 'sold').length;
+            const customerCount = l.building.apartments.filter(a => a.status === 'delivered-to-customer').length;
+            const subContrCount = l.building.apartments.filter(a => a.status === 'delivered-to-subcontractor').length;
+            l.building._archivedSummary = { total: archivedCount, sold: soldCount, customer: customerCount, subContractor: subContrCount };
+            l.building.apartments = []; // tüm daire detayları silinir
+          } else {
+            // Aktif daireler varsa, sadece arşivlik dairelerin detayını sil
+            l.building.apartments.forEach(a => {
+              if (a.status === 'sold' || a.status === 'delivered-to-customer' || a.status === 'delivered-to-subcontractor') {
+                delete a.deliveredToList;
+                delete a.tenantHistory;
+                delete a.tenantName;
+                delete a.rentStartDay;
+                delete a.lastRentDay;
+                delete a.actualSalePrice;
+                delete a.soldDay;
+              }
+            });
+          }
         }
       });
     }

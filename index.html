@@ -3752,7 +3752,119 @@ function upgradeFactory(factoryId) {
 }
 
 // Fabrika sat
-// Fabrika için hammadde alma modalı
+// Fabrika kadrosu modalı (işçi, satın alma sorumlusu)
+function openFactoryStaffModal(factoryId) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) return;
+  if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+  const b = BRANDS[f.brandId];
+  const p = PRODUCTS[f.productId];
+
+  const workerSalary = 25_000;
+  const purchaserSalary = 50_000;
+  const salesRepSalary = 60_000;
+
+  const totalMonthlySalary =
+    (f.staff.workers || 0) * workerSalary +
+    (f.staff.purchaser || 0) * purchaserSalary +
+    (f.staff.salesRep || 0) * salesRepSalary;
+
+  // İşçi başına günlük üretim kapasitesi (8 işçi = aylık kapasite tam)
+  const workerRatio = (f.staff.workers || 0) / 8;
+  const dailyCapacity = Math.floor((f.monthlyCapacity / 30) * workerRatio);
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 620px;">
+      <h2>👥 FABRİKA KADROSU — ${b.name}</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 14px;">
+        ${p.name} üretimi için kadro yönetimi
+      </p>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--blue); margin-bottom: 14px; font-size: 12px; line-height: 1.7;">
+        <strong>📊 KADRO ÖZETİ</strong><br>
+        Toplam aylık maaş: <strong style="color: var(--red);">${fmt(totalMonthlySalary)}</strong><br>
+        Günlük otomatik üretim: <strong style="color: var(--green);">${dailyCapacity.toLocaleString('tr-TR')} ${p.unit}</strong>
+        ${(f.staff.purchaser || 0) > 0 ? '<br>✓ Hammadde otomatik tedarik ediliyor (2 haftalık eşik altında)' : '<br><span style="color: var(--ink-dim);">⚠️ Satın alma sorumlusu yok — hammadde manuel alınmalı</span>'}
+      </div>
+
+      <!-- İŞÇİLER -->
+      <div style="padding: 12px; background: var(--panel); border: 1px solid var(--border); margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div>
+            <strong style="color: var(--accent);">🔧 İŞÇİLER: ${f.staff.workers || 0}</strong>
+            <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Her işçi standart kapasitenin 1/8'ini üretir · ₺${workerSalary.toLocaleString('tr-TR')}/ay maaş</div>
+          </div>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn small" onclick="changeFactoryStaff('${factoryId}', 'workers', -1)">−</button>
+            <button class="btn small primary" onclick="changeFactoryStaff('${factoryId}', 'workers', 1)">+</button>
+          </div>
+        </div>
+        <div style="font-size: 10px; color: var(--ink-dim);">
+          Önerilen: 8 işçi (tam kapasite) · Mevcut günlük üretim: ${dailyCapacity.toLocaleString('tr-TR')} ${p.unit}
+        </div>
+      </div>
+
+      <!-- SATIN ALMA SORUMLUSU -->
+      <div style="padding: 12px; background: var(--panel); border: 1px solid var(--border); margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div>
+            <strong style="color: var(--purple);">🚚 SATIN ALMA SORUMLUSU: ${f.staff.purchaser || 0}</strong>
+            <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Hammadde stoğu 2 haftalık eşiğin altına düşünce otomatik alır · ₺${purchaserSalary.toLocaleString('tr-TR')}/ay maaş</div>
+          </div>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn small" onclick="changeFactoryStaff('${factoryId}', 'purchaser', -1)">−</button>
+            <button class="btn small primary" onclick="changeFactoryStaff('${factoryId}', 'purchaser', 1)">+</button>
+          </div>
+        </div>
+        <div style="font-size: 10px; color: var(--ink-dim);">
+          Maks 1 sorumlu yeterli (otomasyon için) · Şu an: ${f.staff.purchaser > 0 ? '✓ Otomatik tedarik AÇIK' : 'Manuel tedarik'}
+        </div>
+      </div>
+
+      <!-- SATIŞ UZMANI (gelecek özellik için) -->
+      <div style="padding: 12px; background: var(--panel); border: 1px solid var(--border); margin-bottom: 10px; opacity: 0.6;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong style="color: var(--green);">💼 SATIŞ UZMANI: ${f.staff.salesRep || 0}</strong>
+            <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Müşteri ihalelerinden fabrikaya teklif çeker (yakında aktif olacak) · ₺${salesRepSalary.toLocaleString('tr-TR')}/ay maaş</div>
+          </div>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn small" onclick="changeFactoryStaff('${factoryId}', 'salesRep', -1)" disabled>−</button>
+            <button class="btn small" onclick="changeFactoryStaff('${factoryId}', 'salesRep', 1)" disabled>+</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; text-align: right;">
+        <button class="btn" onclick="closeModal()">KAPAT</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+}
+
+// Kadro sayısı değiştir (+1/-1)
+function changeFactoryStaff(factoryId, role, delta) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) return;
+  if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+  const current = f.staff[role] || 0;
+  const newVal = current + delta;
+  if (newVal < 0) { toast('Daha az olamaz', 'error'); return; }
+  // Üst limitler
+  const max = role === 'workers' ? 30 : role === 'purchaser' ? 1 : 3;
+  if (newVal > max) { toast(`Maksimum ${max}`, 'error'); return; }
+  f.staff[role] = newVal;
+  const roleName = role === 'workers' ? 'işçi' : role === 'purchaser' ? 'satın alma sorumlusu' : 'satış uzmanı';
+  if (delta > 0) {
+    toast(`+1 ${roleName} işe alındı`, 'success');
+  } else {
+    toast(`-1 ${roleName} çıkarıldı`, 'info');
+  }
+  openFactoryStaffModal(factoryId); // yeniden render
+}
+
+
 function openFactoryStockModal(factoryId) {
   const f = (state.factories || []).find(x => x.id === factoryId);
   if (!f) return;
@@ -13070,7 +13182,10 @@ function renderLands() {
   const isArchived = (l) => {
     if (!l.building || l.building.status !== 'completed') return false;
     const apts = l.building.apartments || [];
-    if (apts.length === 0) return false;
+    // Acil budama sonrası: apartments = [] ve _archivedSummary varsa → arşivlik
+    if (apts.length === 0 && l.building._archivedSummary) return true;
+    // Boş ama özet de yoksa → varsayılan arşivlik (eski state'lerden gelmiş olabilir)
+    if (apts.length === 0) return true;
     // Hâlâ satılabilir veya kirada daire varsa aktif
     const hasActive = apts.some(a =>
       a.status === 'unsold' || a.status === 'listed' || a.status === 'rented'
@@ -13143,7 +13258,8 @@ function renderMyLandsFiltered(filter) {
   const isArchived = (l) => {
     if (!l.building || l.building.status !== 'completed') return false;
     const apts = l.building.apartments || [];
-    if (apts.length === 0) return false;
+    if (apts.length === 0 && l.building._archivedSummary) return true;
+    if (apts.length === 0) return true;
     const hasActive = apts.some(a =>
       a.status === 'unsold' || a.status === 'listed' || a.status === 'rented'
     );
@@ -13216,11 +13332,29 @@ function renderLandCard(l) {
     const sold = b.apartments.filter(a => a.status === 'sold').length;
     const rented = b.apartments.filter(a => a.status === 'rented').length;
     const customerDelivered = b.apartments.filter(a => a.status === 'delivered-to-customer').length;
+
+    // Acil budama yapılmışsa apartments=[] ve _archivedSummary var
+    const isArchivedBuilding = b.apartments.length === 0;
+    let summaryText;
+    if (isArchivedBuilding) {
+      if (b._archivedSummary) {
+        const s = b._archivedSummary;
+        summaryText = `📁 Arşiv: ${s.total} daire · ${s.sold} satılmış${s.customer ? ' · ' + s.customer + ' müşteride' : ''}${s.subContractor ? ' · ' + s.subContractor + ' taşeronda' : ''}`;
+      } else {
+        summaryText = '📁 Arşiv (geçmiş daire detayları temizlendi)';
+      }
+    } else {
+      summaryText = `${b.apartments.length} daire · ${unsold} satılık · ${sold} satılmış · ${rented} kirada${customerDelivered > 0 ? ' · ' + customerDelivered + ' müşteride' : ''}`;
+    }
+
     buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--green);">
       <strong style="color: var(--green);">✅ ${BUILDING_TYPES[b.type].name} tamamlandı${isUrban ? ' (Kentsel Dönüşüm)' : ''}</strong><br>
-      <span style="font-size: 10px; color: var(--ink-dim);">${b.apartments.length} daire · ${unsold} satılık · ${sold} satılmış · ${rented} kirada${customerDelivered > 0 ? ' · ' + customerDelivered + ' müşteride' : ''}</span>
+      <span style="font-size: 10px; color: var(--ink-dim);">${summaryText}</span>
     </div>`;
-    actions = `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
+    // Arşiv binası: sadece bilgi göster, yönetim butonu gerekmiyor
+    actions = isArchivedBuilding
+      ? '<span style="font-size: 10px; color: var(--ink-dim);">📁 Tüm daireler satıldı/teslim edildi</span>'
+      : `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
   } else if (b.status === 'demolition') {
     const demoDay = Math.abs(b.daysPassed);
     const demoTotal = 6;
@@ -13862,11 +13996,23 @@ function renderDealerships() {
                   ${minProducable === 0 ? '<br><span style="color: var(--red);">⚠️ Hammadde yok — üretim yapamazsın</span>' : ''}
                 </div>`;
               })()}
+              ${(() => {
+                if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+                const workerRatio = (f.staff.workers || 0) / 8;
+                const dailyCap = Math.floor((f.monthlyCapacity / 30) * workerRatio);
+                const staffSalary = (f.staff.workers||0) * 25000 + (f.staff.purchaser||0) * 50000 + (f.staff.salesRep||0) * 60000;
+                return `<div style="margin-top: 4px; padding: 6px 8px; background: rgba(59, 130, 246, 0.08); border-left: 2px solid var(--blue); font-size: 10px; line-height: 1.5;">
+                  👥 Kadro: <strong>${f.staff.workers||0} işçi</strong>${f.staff.purchaser ? ' · 🚚 sorumlu' : ''}
+                  · Günlük otomatik üretim: <strong style="color: var(--blue);">${dailyCap.toLocaleString('tr-TR')} ${p.unit}</strong>
+                  <br>Maaş: ${fmt(staffSalary)}/ay
+                </div>`;
+              })()}
             </div>
             <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
               <button class="btn small primary" style="flex: 1; background: var(--accent); border-color: var(--accent); color: #000;" onclick="openProductionModal('${f.id}')" ${remaining <= 0 ? 'disabled' : ''}>🏭 ÜRET (${remaining.toLocaleString('tr-TR')})</button>
-              <button class="btn small" style="background: #f59e0b; border-color: #f59e0b; color: #000; font-weight: 700;" onclick="openFactoryStockModal('${f.id}')" title="Hammadde tedarik et">🚚 HAMMADDE AL</button>
-              ${f.level < 3 ? `<button class="btn small" style="background: var(--blue); border-color: var(--blue); color: #fff;" onclick="upgradeFactory('${f.id}')" title="Sv ${f.level + 1}: kapasite artar, maliyet düşer">⬆️ GELİŞTİR</button>` : ''}
+              <button class="btn small" style="background: #f59e0b; border-color: #f59e0b; color: #000; font-weight: 700;" onclick="openFactoryStockModal('${f.id}')" title="Hammadde tedarik et">🚚 HAMMADDE</button>
+              <button class="btn small" style="background: var(--blue); border-color: var(--blue); color: #fff;" onclick="openFactoryStaffModal('${f.id}')" title="İşçi, satın alma sorumlusu işe al">👥 KADRO</button>
+              ${f.level < 3 ? `<button class="btn small" style="background: var(--purple); border-color: var(--purple); color: #fff;" onclick="upgradeFactory('${f.id}')" title="Sv ${f.level + 1}: kapasite artar, maliyet düşer">⬆️ GELİŞTİR</button>` : ''}
               <button class="btn small danger" onclick="sellFactory('${f.id}')" title="%30 değer kaybıyla sat">SAT</button>
             </div>
           </div>`;
@@ -15548,19 +15694,122 @@ function _nextDayInner() {
     }
   }
 
-  // 5b) Fabrika işletme giderleri — 30 günde bir
+  // 5b) Fabrika işletme — Aylık opex + maaş + otomatik üretim + otomatik hammadde
   if (state.factories && state.factories.length > 0) {
     state.factories.forEach(f => {
       if (!f.lastOpexDay) f.lastOpexDay = f.purchaseDay || state.day;
+      if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+      if (!f.rawStock) f.rawStock = {};
+
+      // --- Aylık opex + kadro maaşları (30 günde bir) ---
       if (state.day - f.lastOpexDay >= 30) {
-        const opex = factoryMonthlyOpex(f.brandId, f.level);
-        spend(opex, 'fabrika-isletme');
+        const baseOpex = factoryMonthlyOpex(f.brandId, f.level);
+        const workerSalary = (f.staff.workers || 0) * 25_000;     // ₺25K/işçi/ay
+        const purchaserSalary = (f.staff.purchaser || 0) * 50_000;// ₺50K/sorumlu/ay
+        const salesRepSalary = (f.staff.salesRep || 0) * 60_000;  // ₺60K/satış uzmanı/ay
+        const totalOpex = baseOpex + workerSalary + purchaserSalary + salesRepSalary;
+        spend(totalOpex, 'fabrika-isletme');
         f.lastOpexDay = state.day;
         // Üretim sayacı ay başına sıfırlanır
         f.currentProduction = 0;
         f.productionMonthStartDay = state.day;
         const b = BRANDS[f.brandId];
-        state.agenda.push(`🏭 ${b?.name || 'Fabrika'} aylık işletme: -${fmt(opex)}`);
+        const breakdown = `(opex ${fmt(baseOpex)} + maaş ${fmt(workerSalary + purchaserSalary + salesRepSalary)})`;
+        state.agenda.push(`🏭 ${b?.name || 'Fabrika'} aylık: -${fmt(totalOpex)} ${breakdown}`);
+      }
+
+      // --- Otomatik hammadde alımı (satın alma sorumlusu varsa) ---
+      if ((f.staff.purchaser || 0) > 0) {
+        const recipe = PRODUCT_RECIPES[f.productId] || {};
+        const rawIds = Object.keys(recipe);
+        if (rawIds.length > 0) {
+          // Her hammadde için: 2 haftalık kapasiteye yetecek minimum eşik
+          const purchases = [];
+          let totalCost = 0;
+          rawIds.forEach(rid => {
+            const perUnit = recipe[rid];
+            const twoWeekNeed = perUnit * (f.monthlyCapacity / 2); // 2 hafta
+            const have = f.rawStock[rid] || 0;
+            if (have < twoWeekNeed) {
+              const buyQty = twoWeekNeed - have + perUnit * (f.monthlyCapacity / 2); // 1 ay tamamla
+              // En ucuz tedarikçi
+              const sellers = SUPPLIERS.filter(s => s.products.includes(rid));
+              if (sellers.length > 0) {
+                let bestSupplier = sellers[0];
+                let bestPrice = supplierPrice(sellers[0], rid);
+                for (const s of sellers) {
+                  const pr = supplierPrice(s, rid);
+                  if (pr < bestPrice) { bestPrice = pr; bestSupplier = s; }
+                }
+                const cost = bestPrice * buyQty;
+                purchases.push({ rid, qty: buyQty, cost, supplier: bestSupplier });
+                totalCost += cost;
+              }
+            }
+          });
+
+          // Kasada yeterli para varsa satın al
+          if (purchases.length > 0 && state.cash >= totalCost) {
+            spend(totalCost, 'hammadde-oto');
+            purchases.forEach(p => {
+              f.rawStock[p.rid] = (f.rawStock[p.rid] || 0) + p.qty;
+            });
+            const b = BRANDS[f.brandId];
+            state.agenda.push(`🚚 ${b?.name || 'Fabrika'} satın alma: ${purchases.length} hammadde toplam ${fmt(totalCost)}`);
+          }
+        }
+      }
+
+      // --- Otomatik üretim (işçi varsa) ---
+      if ((f.staff.workers || 0) > 0 && f.productId) {
+        const remaining = f.monthlyCapacity - (f.currentProduction || 0);
+        if (remaining > 0) {
+          // Günlük kapasite = aylık / 30 × (işçi sayısı / 8) — 8 işçi standart kabul
+          const workerRatio = (f.staff.workers || 8) / 8;
+          const dailyCapacity = Math.floor((f.monthlyCapacity / 30) * workerRatio);
+          let produceQty = Math.min(dailyCapacity, remaining);
+
+          // Reçeteye göre hammadde sınırı
+          const recipe = PRODUCT_RECIPES[f.productId] || {};
+          const rawIds = Object.keys(recipe);
+          if (rawIds.length > 0) {
+            const maxByRaw = Math.min(...rawIds.map(rid => {
+              const have = f.rawStock[rid] || 0;
+              const perUnit = recipe[rid];
+              return perUnit > 0 ? Math.floor(have / perUnit) : Infinity;
+            }));
+            produceQty = Math.min(produceQty, maxByRaw);
+          }
+
+          // Stok overflow kontrolü — stoktaki bu üründen aylık kapasite × 2'den fazla varsa durdur
+          const currentStock = state.inventory[f.productId] || 0;
+          const stockCeiling = f.monthlyCapacity * 2;
+          if (currentStock >= stockCeiling) {
+            produceQty = 0; // dur
+          } else {
+            // Stok tavanına yetecek kadar üret
+            produceQty = Math.min(produceQty, stockCeiling - currentStock);
+          }
+
+          if (produceQty > 0) {
+            // İşçilik maliyeti
+            const unitLabor = Math.round(factoryProductionCost(f.id) * 0.30);
+            const laborCost = unitLabor * produceQty;
+            if (state.cash >= laborCost) {
+              spend(laborCost, 'uretim-iscilik');
+              // Hammadde tüket
+              if (rawIds.length > 0) {
+                rawIds.forEach(rid => {
+                  f.rawStock[rid] = (f.rawStock[rid] || 0) - recipe[rid] * produceQty;
+                });
+              }
+              state.inventory[f.productId] = currentStock + produceQty;
+              f.currentProduction = (f.currentProduction || 0) + produceQty;
+              f.totalProduced = (f.totalProduced || 0) + produceQty;
+              f.totalRevenue = (f.totalRevenue || 0) + laborCost;
+            }
+          }
+        }
       }
     });
   }
@@ -16703,10 +16952,38 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.72';
+const CURRENT_VERSION = 'v1.74';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.74',
+    date: '23 Mayıs 2026',
+    title: 'ARŞİV SINIFLANDIRMA HATASI DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '📁 <strong>Boşaltılmış binalar artık doğru sınıflandırılıyor</strong>' },
+      { cat: 'feature', text: 'v1.70 acil budama "apartments = []" yapıyordu ama isArchived bunu "arşiv değil" olarak işaretliyordu' },
+      { cat: 'feature', text: 'Düzeltme: apartments.length === 0 ise artık ARŞİVLİK kabul edilir' },
+      { cat: 'feature', text: 'Arşivlenmiş binanın kartında özet görünür: "📁 Arşiv: X daire · Y satılmış · Z müşteride"' },
+      { cat: 'feature', text: 'Arşiv binalarında "DAİRELERİ YÖNET" butonu yerine bilgi metni: "Tüm daireler satıldı"' }
+    ]
+  },
+  {
+    version: 'v1.73',
+    date: '23 Mayıs 2026',
+    title: 'FABRİKA KADROSU + OTOMATİK ÜRETİM',
+    items: [
+      { cat: 'major', text: '👥 <strong>Her fabrikanın kendi kadrosu olur</strong>: işçi, satın alma sorumlusu' },
+      { cat: 'feature', text: '<strong>İşçiler</strong>: her gün otomatik üretim yaparlar (8 işçi = tam kapasite)' },
+      { cat: 'feature', text: '<strong>Satın alma sorumlusu</strong>: hammadde stoğu 2 hafta altına düşünce otomatik alır (1 sorumlu yeter)' },
+      { cat: 'feature', text: '<strong>Satış uzmanı</strong>: müşteri ihale teklifleri için (sonraki sürümde aktif olacak)' },
+      { cat: 'feature', text: 'Aylık maaşlar: işçi ₺25K, satın alma ₺50K, satış ₺60K' },
+      { cat: 'feature', text: 'Stok tavanı: aylık kapasite × 2 — overproduction otomatik durur' },
+      { cat: 'feature', text: 'Fabrika kartında kadro durumu görünür: "8 işçi · 🚚 sorumlu · Günlük: X birim"' },
+      { cat: 'feature', text: '👥 KADRO butonu ile +/- işçi ekleme/çıkarma' },
+      { cat: 'feature', text: 'Tüm yeni fabrikalar varsayılan 8 işçi ile başlar (yeterli kapasite için)' }
+    ]
+  },
   {
     version: 'v1.72',
     date: '23 Mayıs 2026',

@@ -15777,7 +15777,19 @@ async function doAutoSave() {
     showCloudIndicator(`☁ Kaydedildi (${slotId.replace('slot', 'Slot ')})`, 'success');
   } catch (err) {
     console.error('Auto-save error:', err);
-    showCloudIndicator('Otomatik kayıt hatası', 'error');
+    // Detaylı hata mesajı kullanıcıya
+    const code = err.code || '';
+    let msg = 'Otomatik kayıt hatası';
+    if (code === 'permission-denied') {
+      msg = 'Bulut izni reddedildi (oturum açık mı?)';
+    } else if (code === 'unavailable' || code === 'deadline-exceeded') {
+      msg = 'Bağlantı sorunu — internet?';
+    } else if (err.message && /too large|maximum/i.test(err.message)) {
+      msg = 'Kayıt boyutu çok büyük (1MB+)';
+    } else if (err.message) {
+      msg = 'Kayıt hatası: ' + err.message.slice(0, 60);
+    }
+    showCloudIndicator(msg, 'error');
   } finally {
     state.cloudSaving = false;
   }
@@ -16427,10 +16439,42 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.67';
+const CURRENT_VERSION = 'v1.69';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.69',
+    date: '23 Mayıs 2026',
+    title: '1MB SINIR HATASI: AGRESİF BUDAMA',
+    items: [
+      { cat: 'major', text: '💾 <strong>serializeState temelden yeniden yazıldı</strong> — her zaman sıkı sınırlar uygulanır' },
+      { cat: 'feature', text: 'Sıkı sınırlar: arşiv 50, inbox 30, kapalı sözleşme 20, deliveries 10' },
+      { cat: 'feature', text: 'Cevaplanmış maillerin body 200 karaktere indirildi (eskiden tam tutuluyordu)' },
+      { cat: 'feature', text: 'Satılmış dairelerin deliveredToList ve tenantHistory alanları silindi' },
+      { cat: 'feature', text: 'Boyut 500KB üstüne çıkınca console\'a en büyük 8 alan listesi yazılır' },
+      { cat: 'feature', text: 'Limit 900 KB\'a düşürüldü (1 MB sınırının altında güvenli marj)' },
+      { cat: 'feature', text: 'Acil eylemde 10 farklı budama adımı: arşiv/ledger/inbox/lands tamamen sıkıştırılır' },
+      { cat: 'feature', text: 'Tamamlanmış inşaatın materialsNeeded ve missingMaterials silinir' }
+    ]
+  },
+  {
+    version: 'v1.68',
+    date: '17 Mayıs 2026',
+    title: 'OTOMATİK KAYIT HATASI + AGRESİF BUDAMA',
+    items: [
+      { cat: 'major', text: '☁ <strong>"Otomatik kayıt hatası" mesajı artık detay veriyor</strong>' },
+      { cat: 'feature', text: 'Permission denied → "Bulut izni reddedildi"' },
+      { cat: 'feature', text: 'Unavailable → "Bağlantı sorunu — internet?"' },
+      { cat: 'feature', text: 'Too large → "Kayıt boyutu çok büyük (1MB+)"' },
+      { cat: 'feature', text: 'Diğer hatalarda gerçek mesajın ilk 60 karakteri görünür' },
+      { cat: 'major', text: '📦 <strong>Yeni budama alanları: dailyLedger, receipts, investmentHistory, assetPriceHistory</strong>' },
+      { cat: 'feature', text: 'dailyLedger: max 90 gün (1MB+ ise 30 gün)' },
+      { cat: 'feature', text: 'receipts: max 100 (1MB+ ise 30)' },
+      { cat: 'feature', text: 'investmentHistory: max 100 işlem (1MB+ ise 30)' },
+      { cat: 'feature', text: 'assetPriceHistory: her varlık 90 gün (1MB+ ise 30)' }
+    ]
+  },
   {
     version: 'v1.67',
     date: '17 Mayıs 2026',
@@ -17501,6 +17545,8 @@ async function doSignOut() {
 function serializeState() {
   // Kopya al, gereksiz alanları çıkar
   const copy = JSON.parse(JSON.stringify(state));
+
+  // ============ GEÇİCİ UI ALANLARI ============
   delete copy.user;
   delete copy.cloudSaving;
   delete copy.selectedEmail;
@@ -17509,78 +17555,199 @@ function serializeState() {
   delete copy._pendingPurchase;
   delete copy._pendingUrbanRenewal;
   delete copy._pendingRejectUrban;
+  delete copy._pendingCancelLand;
+  delete copy._pendingFactoryBuy;
+  delete copy.hasUnsavedChanges;
 
-  // ARŞİV BUDAMA — Firebase 1MB sınırı için
-  // En fazla son 100 arşiv kaydı tutulur, eskiler düşürülür
-  if (Array.isArray(copy.archive) && copy.archive.length > 100) {
-    copy.archive = copy.archive.slice(-100);
+  // ============ HER ZAMAN SIKI BUDA ============
+
+  // 1) ARŞİV: max 50
+  if (Array.isArray(copy.archive) && copy.archive.length > 50) {
+    copy.archive = copy.archive.slice(-50);
   }
-
-  // ARŞİVDEKİ İŞ DETAYLARINI BUDAMA — eski iş kayıtları büyük
-  // Her arşiv mailinin items/purchases/plan gibi ağır alanlarını sıkıştır
+  // Arşivdeki ağır alanları temizle
   if (Array.isArray(copy.archive)) {
     copy.archive = copy.archive.map(e => {
       const slim = { ...e };
-      // Body, purchases, plan, items detaylarını arşivde tutmaya gerek yok (status + özet yeterli)
       delete slim.body;
       delete slim.purchases;
       delete slim.plan;
       delete slim.items;
       delete slim.unitPrices;
+      delete slim.deliveries;
+      delete slim.materialsNeeded;
       return slim;
     });
   }
 
-  // INBOX BUDAMA — geçmişe takılı maillerin body alanlarını küçültme yok, hepsi okunmalı
+  // 2) INBOX: max 30 mail
+  if (Array.isArray(copy.inbox) && copy.inbox.length > 30) {
+    copy.inbox = copy.inbox.slice(-30);
+  }
+  // Cevaplanmış maillerin body'sini kısalt
+  if (Array.isArray(copy.inbox)) {
+    copy.inbox.forEach(e => {
+      if (e.answered && e.body && e.body.length > 200) {
+        e.body = e.body.slice(0, 200) + '...';
+      }
+    });
+  }
 
-  // KAPALI SÖZLEŞMELER BUDAMA — paid + delivered olanlardan en fazla 30'u tutulur (en yeniler)
+  // 3) SÖZLEŞMELER: kapalı max 20, deliveries max 10
   if (Array.isArray(copy.contracts)) {
     const active = copy.contracts.filter(c => !c.paid);
-    const closed = copy.contracts.filter(c => c.paid).sort((a, b) => (b.startedDay || 0) - (a.startedDay || 0));
-    copy.contracts = active.concat(closed.slice(0, 30));
-
-    // Kapalı sözleşmelerin teslimat tablolarını budama (irsaliyeler içeriğini azalt)
+    const closed = copy.contracts.filter(c => c.paid)
+      .sort((a, b) => (b.startedDay || b.createdDay || 0) - (a.startedDay || a.createdDay || 0));
+    copy.contracts = active.concat(closed.slice(0, 20));
     copy.contracts.forEach(ct => {
-      if (ct.paid && Array.isArray(ct.deliveries) && ct.deliveries.length > 5) {
-        // Sadece son 5 teslimatın detaylarını tut
-        const lastDeliveries = ct.deliveries.slice(-5);
-        const olderCount = ct.deliveries.length - 5;
-        ct.deliveries = lastDeliveries;
-        ct._truncatedDeliveryCount = olderCount;
+      if (Array.isArray(ct.deliveries) && ct.deliveries.length > 10) {
+        const truncated = ct.deliveries.length - 10;
+        ct.deliveries = ct.deliveries.slice(-10);
+        ct._truncatedDeliveryCount = (ct._truncatedDeliveryCount || 0) + truncated;
       }
     });
   }
 
-  // PRICE HISTORY BUDAMA — eğer çok uzunsa son 60 günü tut
+  // 4) MUHASEBE: dailyLedger 60, receipts 60
+  if (Array.isArray(copy.dailyLedger) && copy.dailyLedger.length > 60) {
+    copy.dailyLedger = copy.dailyLedger.slice(-60);
+  }
+  if (Array.isArray(copy.receipts) && copy.receipts.length > 60) {
+    copy.receipts = copy.receipts.slice(-60);
+  }
+
+  // 5) YATIRIM: assetPriceHistory her varlık 60 gün, investmentHistory 60
+  if (copy.assetPriceHistory && typeof copy.assetPriceHistory === 'object') {
+    Object.keys(copy.assetPriceHistory).forEach(k => {
+      if (Array.isArray(copy.assetPriceHistory[k]) && copy.assetPriceHistory[k].length > 60) {
+        copy.assetPriceHistory[k] = copy.assetPriceHistory[k].slice(-60);
+      }
+    });
+  }
+  if (Array.isArray(copy.investmentHistory) && copy.investmentHistory.length > 60) {
+    copy.investmentHistory = copy.investmentHistory.slice(-60);
+  }
+
+  // 6) PRICE HISTORY (tedarikçi): 30 gün
   if (copy.priceHistory && typeof copy.priceHistory === 'object') {
     Object.keys(copy.priceHistory).forEach(k => {
-      if (Array.isArray(copy.priceHistory[k]) && copy.priceHistory[k].length > 60) {
-        copy.priceHistory[k] = copy.priceHistory[k].slice(-60);
+      if (Array.isArray(copy.priceHistory[k]) && copy.priceHistory[k].length > 30) {
+        copy.priceHistory[k] = copy.priceHistory[k].slice(-30);
       }
     });
   }
 
-  // BOYUT KONTROL — sınıra yaklaşıyorsa daha agresif buda
-  const FIRESTORE_LIMIT = 1000000; // 1 MB güvenli sınır
+  // 7) AGENDA: son 30 satır
+  if (Array.isArray(copy.agenda) && copy.agenda.length > 30) {
+    copy.agenda = copy.agenda.slice(-30);
+  }
+
+  // 8) LANDS: satılmış dairelerden gereksiz alanları temizle
+  if (Array.isArray(copy.lands)) {
+    copy.lands.forEach(l => {
+      if (l.building?.apartments) {
+        l.building.apartments.forEach(a => {
+          if (a.status === 'sold' || a.status === 'delivered-to-customer' || a.status === 'delivered-to-subcontractor') {
+            delete a.deliveredToList;
+            delete a.tenantHistory;
+          }
+        });
+      }
+    });
+  }
+
+  // ============ BOYUT KONTROL ============
+  const FIRESTORE_LIMIT = 900000;
   let estSize = JSON.stringify(copy).length;
+
+  // Detaylı boyut analizi (500KB üstü ise)
+  if (estSize > 500000) {
+    const sizeMap = {};
+    Object.keys(copy).forEach(k => {
+      try { sizeMap[k] = JSON.stringify(copy[k]).length; } catch { sizeMap[k] = 0; }
+    });
+    const sorted = Object.entries(sizeMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    console.log(`[serializeState] Boyut: ${(estSize/1024).toFixed(0)} KB. En büyük alanlar:`);
+    sorted.forEach(([k, v]) => console.log(`  ${k}: ${(v/1024).toFixed(1)} KB`));
+  } else {
+    console.log(`[serializeState] Boyut: ${(estSize/1024).toFixed(0)} KB`);
+  }
+
   if (estSize > FIRESTORE_LIMIT) {
-    console.warn(`[serializeState] Kayıt boyutu büyük (${(estSize / 1024).toFixed(0)} KB), agresif budama`);
-    // 1. Arşivi 30'a düşür
-    if (copy.archive && copy.archive.length > 30) copy.archive = copy.archive.slice(-30);
-    // 2. Kapalı sözleşmeleri 10'a düşür
+    console.warn(`[serializeState] LİMİT AŞIM (${(estSize/1024).toFixed(0)} KB), ACİL BUDAMA`);
+
+    // Acil eylem 1: Arşiv tamamen sil
+    copy.archive = [];
+    // Acil 2: dailyLedger 14
+    if (Array.isArray(copy.dailyLedger) && copy.dailyLedger.length > 14) copy.dailyLedger = copy.dailyLedger.slice(-14);
+    if (Array.isArray(copy.receipts) && copy.receipts.length > 14) copy.receipts = copy.receipts.slice(-14);
+    if (Array.isArray(copy.investmentHistory) && copy.investmentHistory.length > 14) copy.investmentHistory = copy.investmentHistory.slice(-14);
+    if (copy.assetPriceHistory) {
+      Object.keys(copy.assetPriceHistory).forEach(k => {
+        if (Array.isArray(copy.assetPriceHistory[k]) && copy.assetPriceHistory[k].length > 14) {
+          copy.assetPriceHistory[k] = copy.assetPriceHistory[k].slice(-14);
+        }
+      });
+    }
+    // Acil 3: priceHistory sil
+    copy.priceHistory = {};
+    // Acil 4: kapalı sözleşmeleri 5'e düşür
     if (copy.contracts) {
       const active = copy.contracts.filter(c => !c.paid);
-      const closed = copy.contracts.filter(c => c.paid);
-      copy.contracts = active.concat(closed.slice(0, 10));
+      const closed = copy.contracts.filter(c => c.paid).slice(-5);
+      copy.contracts = active.concat(closed);
     }
-    // 3. Agenda'yı son 20'ye düşür
-    if (Array.isArray(copy.agenda) && copy.agenda.length > 20) copy.agenda = copy.agenda.slice(-20);
+    // Acil 5: tüm sözleşmelerde deliveries 3 ile sınırla
+    if (Array.isArray(copy.contracts)) {
+      copy.contracts.forEach(ct => {
+        if (Array.isArray(ct.deliveries) && ct.deliveries.length > 3) {
+          ct.deliveries = ct.deliveries.slice(-3);
+        }
+      });
+    }
+    // Acil 6: agenda 5
+    if (Array.isArray(copy.agenda) && copy.agenda.length > 5) copy.agenda = copy.agenda.slice(-5);
+    // Acil 7: cevaplanmış mailleri sil
+    if (Array.isArray(copy.inbox)) {
+      copy.inbox = copy.inbox.filter(e => !e.answered);
+      if (copy.inbox.length > 15) copy.inbox = copy.inbox.slice(-15);
+    }
+    // Acil 8: tamamlanmış binaların materialsNeeded sil + satılmış daire detayları sil
+    if (Array.isArray(copy.lands)) {
+      copy.lands.forEach(l => {
+        if (l.building?.status === 'completed') {
+          delete l.building.materialsNeeded;
+          delete l.building.missingMaterials;
+        }
+        if (l.building?.apartments) {
+          l.building.apartments.forEach(a => {
+            if (a.status === 'sold' || a.status === 'delivered-to-customer' || a.status === 'delivered-to-subcontractor') {
+              delete a.deliveredToList;
+              delete a.tenantHistory;
+              delete a.tenantName;
+              delete a.rentStartDay;
+              delete a.lastRentDay;
+            }
+          });
+        }
+      });
+    }
 
-    estSize = JSON.stringify(copy).length;
-    if (estSize > FIRESTORE_LIMIT) {
-      // Son çare: arşivi tamamen sil
+    const newSize = JSON.stringify(copy).length;
+    console.warn(`[serializeState] Acil budama sonrası: ${(newSize/1024).toFixed(0)} KB`);
+
+    // Son çare
+    if (newSize > FIRESTORE_LIMIT) {
+      console.error('[serializeState] HALA BÜYÜK! Tüm geçmiş siliniyor.');
+      copy.inbox = [];
       copy.archive = [];
-      console.warn(`[serializeState] Arşiv silindi, yeni boyut: ${(JSON.stringify(copy).length / 1024).toFixed(0)} KB`);
+      copy.dailyLedger = [];
+      copy.receipts = [];
+      copy.investmentHistory = [];
+      copy.assetPriceHistory = {};
+      copy.priceHistory = {};
+      copy.agenda = [];
+      try { toast('⚠️ Kayıt boyutu aşıldı, geçmiş veriler temizlendi', 'error'); } catch {}
     }
   }
 

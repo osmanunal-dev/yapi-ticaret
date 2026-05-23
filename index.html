@@ -3204,7 +3204,21 @@ const PRODUCTS = {
   pprc:      { name: 'PPRC Boru',         unit: 'metre', cat: 'tesisat',  weight: 0.6   },
   kablo:     { name: 'Elektrik Kablosu',  unit: 'metre', cat: 'elektrik', weight: 0.3   },
   pano:      { name: 'Sigorta Panosu',    unit: 'adet',  cat: 'elektrik', weight: 8     },
-  cam:       { name: 'Cam (4mm)',         unit: 'm²',    cat: 'kaplama',  weight: 10    }
+  cam:       { name: 'Cam (4mm)',         unit: 'm²',    cat: 'kaplama',  weight: 10    },
+
+  // ============ HAMMADDELER (fabrika üretimi için) ============
+  klinker:   { name: 'Klinker',           unit: 'ton',   cat: 'hammadde', weight: 1000, isRaw: true },
+  alci_ham:  { name: 'Alçıtaşı',          unit: 'ton',   cat: 'hammadde', weight: 1000, isRaw: true },
+  demir_filiz: { name: 'Demir Filizi',    unit: 'ton',   cat: 'hammadde', weight: 1000, isRaw: true },
+  hurda:     { name: 'Hurda Demir',       unit: 'ton',   cat: 'hammadde', weight: 1000, isRaw: true },
+  komur:     { name: 'Kok Kömür',         unit: 'ton',   cat: 'hammadde', weight: 1000, isRaw: true },
+  kil:       { name: 'Kil',               unit: 'ton',   cat: 'hammadde', weight: 1500, isRaw: true },
+  pigment:   { name: 'Pigment & Reçine',  unit: 'kg',    cat: 'hammadde', weight: 1,    isRaw: true },
+  ham_plastik: { name: 'Ham Plastik (PVC)', unit: 'ton', cat: 'hammadde', weight: 1000, isRaw: true },
+  bakir:     { name: 'Bakır',             unit: 'ton',   cat: 'hammadde', weight: 1000, isRaw: true },
+  silika:    { name: 'Silika Kumu',       unit: 'ton',   cat: 'hammadde', weight: 1500, isRaw: true },
+  alci_pano: { name: 'Alçıpan Levha (ham)', unit: 'adet', cat: 'hammadde', weight: 20, isRaw: true },
+  selüloz:   { name: 'Selüloz Lifi',      unit: 'ton',   cat: 'hammadde', weight: 800,  isRaw: true }
 };
 
 // Gerçekçi 2026 İstanbul piyasa fiyatları (toptan, KDV dahil yaklaşık)
@@ -3217,7 +3231,41 @@ const BASE_PRICE = {
   plaster: 220, alcipan: 350,
   pipe: 95, pprc: 85,
   kablo: 55, pano: 2500,
-  cam: 550
+  cam: 550,
+  // Hammaddeler (ton/kg/adet bazında)
+  klinker: 1800, alci_ham: 1200, demir_filiz: 8500, hurda: 12000,
+  komur: 6500, kil: 850, pigment: 180, ham_plastik: 25000,
+  bakir: 45000, silika: 950, alci_pano: 35, selüloz: 3200
+};
+
+// ============================================================
+// ÜRETİM REÇETELERİ — Her ürünün 1 BİRİM üretimi için hammadde
+// ============================================================
+const PRODUCT_RECIPES = {
+  cement:   { klinker: 0.07, alci_ham: 0.005, komur: 0.01 },         // 1 çuval 50kg çimento
+  brick:    { kil: 0.003 },                                          // 1 adet tuğla 2.5kg
+  briket:   { kil: 0.012, cement: 0.001 },                           // 1 adet briket 14kg (kompozit)
+  rebar:    { demir_filiz: 1.05, hurda: 0.2, komur: 0.35 },           // 1 ton demir
+  hasir:    { demir_filiz: 0.08, hurda: 0.015, komur: 0.025 },       // 1 rulo hasır 80kg
+  profil:   { demir_filiz: 0.006, hurda: 0.0012, komur: 0.002 },      // 1 metre profil 6kg
+  tile:     { kil: 0.025, silika: 0.005, pigment: 0.01 },             // 1 m² seramik 22kg
+  granit:   { silika: 0.04, pigment: 0.02 },                          // 1 m² granit 60kg
+  parke:    { selüloz: 0.005, pigment: 0.008 },                       // 1 m² parke 8kg
+  paint:    { pigment: 0.8, ham_plastik: 0.015 },                    // 1 kova boya 18kg
+  discephe: { pigment: 1.0, ham_plastik: 0.020 },                     // 1 kova dış cephe 20kg
+  vernik:   { pigment: 0.2, ham_plastik: 0.003 },                     // 1 kutu vernik 4kg
+  insul:    { ham_plastik: 0.002, pigment: 0.001 },                   // 1 m² XPS 1.5kg
+  taşyunu:  { silika: 0.012, kil: 0.005 },                            // 1 paket taş yünü
+  membran:  { ham_plastik: 0.035 },                                   // 1 rulo membran
+  plaster:  { alci_ham: 0.026 },                                     // 1 çuval alçı 25kg
+  alcipan:  { alci_pano: 1.0, selüloz: 0.002 },                       // 1 levha alçıpan
+  pipe:     { ham_plastik: 0.0012 },                                  // 1 metre PVC boru
+  pprc:     { ham_plastik: 0.0006 },                                  // 1 metre PPRC boru
+  kablo:    { bakir: 0.00025, ham_plastik: 0.00012 },                 // 1 metre kablo
+  pano:     { ham_plastik: 0.003, bakir: 0.0008 },                    // 1 adet pano
+  cam:      { silika: 0.012 },                                        // 1 m² cam 10kg
+  sand:     null,    // hammadde değil, doğa kaynağı — fabrika yok
+  gravel:   null     // aynı
 };
 
 // İstanbul ilçeleri ve mesafeleri (depodan ~ km olarak; merkez = Maltepe varsayım)
@@ -3285,104 +3333,104 @@ const CUSTOMERS_INIT = [
 // monthlyFee: aylık aidat
 const BRANDS = {
   // ÇİMENTO
-  akcansa:   { name: 'Akçansa',         tier: 'premium',  productId: 'cement',  discount: 0.22, repGate: 75, teminat: 3500000, desc: 'Sabancı + Heidelberg ortak girişimi, lider çimento markası' },
-  oyak:      { name: 'OYAK Çimento',    tier: 'standart', productId: 'cement',  discount: 0.18, repGate: 55, teminat: 1800000, desc: 'OYAK iştiraki, geniş yaygın çimento ağı' },
-  cimsa:     { name: 'Çimsa',           tier: 'standart', productId: 'cement',  discount: 0.16, repGate: 50, teminat: 1400000, desc: 'Sabancı, beyaz çimentoda lider' },
+  akcansa:   { name: 'Akçansa',         tier: 'premium',  productId: 'cement',  discount: 0.22, repGate: 75, teminat: 350000000, desc: 'Sabancı + Heidelberg ortak girişimi, lider çimento markası' },
+  oyak:      { name: 'OYAK Çimento',    tier: 'standart', productId: 'cement',  discount: 0.18, repGate: 55, teminat: 180000000, desc: 'OYAK iştiraki, geniş yaygın çimento ağı' },
+  cimsa:     { name: 'Çimsa',           tier: 'standart', productId: 'cement',  discount: 0.16, repGate: 50, teminat: 140000000, desc: 'Sabancı, beyaz çimentoda lider' },
 
   // DEMİR
-  icdas:     { name: 'İçdaş',           tier: 'premium',  productId: 'rebar',   discount: 0.20, repGate: 78, teminat: 5500000, desc: 'Türkiye\'nin en büyük inşaat demiri üreticisi' },
-  habas:     { name: 'Habaş',           tier: 'standart', productId: 'rebar',   discount: 0.17, repGate: 60, teminat: 3200000, desc: 'Köklü demir-çelik üreticisi' },
-  kardemir:  { name: 'Kardemir',        tier: 'standart', productId: 'rebar',   discount: 0.15, repGate: 55, teminat: 2400000, desc: 'Karabük Demir-Çelik, devlet işbirliğiyle' },
+  icdas:     { name: 'İçdaş',           tier: 'premium',  productId: 'rebar',   discount: 0.20, repGate: 78, teminat: 550000000, desc: 'Türkiye\'nin en büyük inşaat demiri üreticisi' },
+  habas:     { name: 'Habaş',           tier: 'standart', productId: 'rebar',   discount: 0.17, repGate: 60, teminat: 320000000, desc: 'Köklü demir-çelik üreticisi' },
+  kardemir:  { name: 'Kardemir',        tier: 'standart', productId: 'rebar',   discount: 0.15, repGate: 55, teminat: 240000000, desc: 'Karabük Demir-Çelik, devlet işbirliğiyle' },
 
   // HASIR ÇELİK
-  ekinciler: { name: 'Ekinciler Demir', tier: 'standart', productId: 'hasir',   discount: 0.18, repGate: 50, teminat: 1500000, desc: 'Hasır çelik ve profil uzmanı' },
-  mmk:       { name: 'MMK Atakaş',      tier: 'standart', productId: 'hasir',   discount: 0.16, repGate: 55, teminat: 1800000, desc: 'Rus-Türk ortaklık, modern tesisler' },
+  ekinciler: { name: 'Ekinciler Demir', tier: 'standart', productId: 'hasir',   discount: 0.18, repGate: 50, teminat: 150000000, desc: 'Hasır çelik ve profil uzmanı' },
+  mmk:       { name: 'MMK Atakaş',      tier: 'standart', productId: 'hasir',   discount: 0.16, repGate: 55, teminat: 180000000, desc: 'Rus-Türk ortaklık, modern tesisler' },
 
   // PROFİL DEMİR
-  erdemir:   { name: 'Erdemir',         tier: 'premium',  productId: 'profil',  discount: 0.20, repGate: 75, teminat: 3000000, desc: 'Ereğli Demir-Çelik, kalite standardı' },
-  borusan:   { name: 'Borusan Mannesmann', tier: 'standart', productId: 'profil', discount: 0.16, repGate: 55, teminat: 1700000, desc: 'Profil ve boru sektöründe köklü marka' },
+  erdemir:   { name: 'Erdemir',         tier: 'premium',  productId: 'profil',  discount: 0.20, repGate: 75, teminat: 300000000, desc: 'Ereğli Demir-Çelik, kalite standardı' },
+  borusan:   { name: 'Borusan Mannesmann', tier: 'standart', productId: 'profil', discount: 0.16, repGate: 55, teminat: 170000000, desc: 'Profil ve boru sektöründe köklü marka' },
 
   // TUĞLA
-  wienerberger: { name: 'Wienerberger',  tier: 'premium',  productId: 'brick',   discount: 0.22, repGate: 70, teminat: 1400000, desc: 'Avusturya menşeli, dünya devi tuğla üreticisi' },
-  kale:      { name: 'Kale Tuğla',      tier: 'standart', productId: 'brick',   discount: 0.18, repGate: 50, teminat: 850000,  desc: 'Yerli üretim, geniş ürün yelpazesi' },
-  turktugla: { name: 'Türk Tuğla',      tier: 'ekonomik', productId: 'brick',   discount: 0.14, repGate: 35, teminat: 500000,  desc: 'Uygun fiyatlı standart tuğla' },
+  wienerberger: { name: 'Wienerberger',  tier: 'premium',  productId: 'brick',   discount: 0.22, repGate: 70, teminat: 140000000, desc: 'Avusturya menşeli, dünya devi tuğla üreticisi' },
+  kale:      { name: 'Kale Tuğla',      tier: 'standart', productId: 'brick',   discount: 0.18, repGate: 50, teminat: 100000000,  desc: 'Yerli üretim, geniş ürün yelpazesi' },
+  turktugla: { name: 'Türk Tuğla',      tier: 'ekonomik', productId: 'brick',   discount: 0.14, repGate: 35, teminat: 100000000,  desc: 'Uygun fiyatlı standart tuğla' },
 
   // BRİKET
-  besler:    { name: 'Besler Briket',   tier: 'standart', productId: 'briket',  discount: 0.16, repGate: 45, teminat: 700000,  desc: 'Kaliteli briket üreticisi' },
+  besler:    { name: 'Besler Briket',   tier: 'standart', productId: 'briket',  discount: 0.16, repGate: 45, teminat: 100000000,  desc: 'Kaliteli briket üreticisi' },
 
   // SERAMİK
-  kalebodur: { name: 'Kalebodur',       tier: 'premium',  productId: 'tile',    discount: 0.20, repGate: 70, teminat: 1800000, desc: 'Türkiye\'nin lider seramik markası' },
-  vitra:     { name: 'VitrA',           tier: 'premium',  productId: 'tile',    discount: 0.20, repGate: 75, teminat: 2100000, desc: 'Eczacıbaşı, premium seramik' },
-  graniser:  { name: 'Graniser',        tier: 'standart', productId: 'tile',    discount: 0.16, repGate: 50, teminat: 1000000, desc: 'Uygun fiyatlı kaliteli seramik' },
+  kalebodur: { name: 'Kalebodur',       tier: 'premium',  productId: 'tile',    discount: 0.20, repGate: 70, teminat: 180000000, desc: 'Türkiye\'nin lider seramik markası' },
+  vitra:     { name: 'VitrA',           tier: 'premium',  productId: 'tile',    discount: 0.20, repGate: 75, teminat: 210000000, desc: 'Eczacıbaşı, premium seramik' },
+  graniser:  { name: 'Graniser',        tier: 'standart', productId: 'tile',    discount: 0.16, repGate: 50, teminat: 100000000, desc: 'Uygun fiyatlı kaliteli seramik' },
 
   // GRANİT
-  yurtbay:   { name: 'Yurtbay Seramik', tier: 'standart', productId: 'granit',  discount: 0.17, repGate: 55, teminat: 1200000, desc: 'Granit ve seramik uzmanı' },
-  ege:       { name: 'Ege Seramik',     tier: 'standart', productId: 'granit',  discount: 0.16, repGate: 52, teminat: 1100000, desc: 'Granit serisinde geniş seçenek' },
+  yurtbay:   { name: 'Yurtbay Seramik', tier: 'standart', productId: 'granit',  discount: 0.17, repGate: 55, teminat: 120000000, desc: 'Granit ve seramik uzmanı' },
+  ege:       { name: 'Ege Seramik',     tier: 'standart', productId: 'granit',  discount: 0.16, repGate: 52, teminat: 110000000, desc: 'Granit serisinde geniş seçenek' },
 
   // PARKE
-  camsan:    { name: 'Çamsan Parke',    tier: 'standart', productId: 'parke',   discount: 0.18, repGate: 50, teminat: 850000,  desc: 'Türkiye\'nin en büyük parke üreticisi' },
-  agt:       { name: 'AGT',             tier: 'premium',  productId: 'parke',   discount: 0.21, repGate: 70, teminat: 1500000, desc: 'Premium laminat ve panel ürünleri' },
+  camsan:    { name: 'Çamsan Parke',    tier: 'standart', productId: 'parke',   discount: 0.18, repGate: 50, teminat: 100000000,  desc: 'Türkiye\'nin en büyük parke üreticisi' },
+  agt:       { name: 'AGT',             tier: 'premium',  productId: 'parke',   discount: 0.21, repGate: 70, teminat: 150000000, desc: 'Premium laminat ve panel ürünleri' },
 
   // İÇ CEPHE BOYA
-  marshall:  { name: 'Marshall',        tier: 'premium',  productId: 'paint',   discount: 0.20, repGate: 65, teminat: 1000000, desc: 'AkzoNobel grubu, premium boya' },
-  filli:     { name: 'Filli Boya',      tier: 'standart', productId: 'paint',   discount: 0.17, repGate: 50, teminat: 700000,  desc: 'Köklü Türk boya markası' },
-  dyo:       { name: 'DYO',             tier: 'standart', productId: 'paint',   discount: 0.16, repGate: 52, teminat: 800000,  desc: 'Yaşar Holding, geniş boya yelpazesi' },
+  marshall:  { name: 'Marshall',        tier: 'premium',  productId: 'paint',   discount: 0.20, repGate: 65, teminat: 100000000, desc: 'AkzoNobel grubu, premium boya' },
+  filli:     { name: 'Filli Boya',      tier: 'standart', productId: 'paint',   discount: 0.17, repGate: 50, teminat: 100000000,  desc: 'Köklü Türk boya markası' },
+  dyo:       { name: 'DYO',             tier: 'standart', productId: 'paint',   discount: 0.16, repGate: 52, teminat: 100000000,  desc: 'Yaşar Holding, geniş boya yelpazesi' },
 
   // DIŞ CEPHE BOYA
-  jotun:     { name: 'Jotun',           tier: 'premium',  productId: 'discephe', discount: 0.22, repGate: 75, teminat: 1800000, desc: 'Norveç menşeli, dayanıklı dış cephe' },
-  kaleboya:  { name: 'Kale Boya',       tier: 'standart', productId: 'discephe', discount: 0.18, repGate: 55, teminat: 950000,  desc: 'Yerli üretim dış cephe boyası' },
+  jotun:     { name: 'Jotun',           tier: 'premium',  productId: 'discephe', discount: 0.22, repGate: 75, teminat: 180000000, desc: 'Norveç menşeli, dayanıklı dış cephe' },
+  kaleboya:  { name: 'Kale Boya',       tier: 'standart', productId: 'discephe', discount: 0.18, repGate: 55, teminat: 100000000,  desc: 'Yerli üretim dış cephe boyası' },
 
   // VERNİK
-  hemel:     { name: 'Hemel',           tier: 'standart', productId: 'vernik',  discount: 0.17, repGate: 45, teminat: 450000,  desc: 'Su bazlı ve solvent bazlı vernik' },
+  hemel:     { name: 'Hemel',           tier: 'standart', productId: 'vernik',  discount: 0.17, repGate: 45, teminat: 100000000,  desc: 'Su bazlı ve solvent bazlı vernik' },
 
   // XPS YALITIM
-  austrotherm: { name: 'Austrotherm',   tier: 'premium',  productId: 'insul',   discount: 0.21, repGate: 70, teminat: 1300000, desc: 'Avusturya menşeli yalıtım markası' },
-  dow:       { name: 'Dow Styrofoam',   tier: 'premium',  productId: 'insul',   discount: 0.22, repGate: 75, teminat: 1600000, desc: 'XPS yalıtım dünya devi' },
-  bauer:     { name: 'Bauer',           tier: 'standart', productId: 'insul',   discount: 0.17, repGate: 50, teminat: 700000,  desc: 'Uygun fiyat XPS' },
+  austrotherm: { name: 'Austrotherm',   tier: 'premium',  productId: 'insul',   discount: 0.21, repGate: 70, teminat: 130000000, desc: 'Avusturya menşeli yalıtım markası' },
+  dow:       { name: 'Dow Styrofoam',   tier: 'premium',  productId: 'insul',   discount: 0.22, repGate: 75, teminat: 160000000, desc: 'XPS yalıtım dünya devi' },
+  bauer:     { name: 'Bauer',           tier: 'standart', productId: 'insul',   discount: 0.17, repGate: 50, teminat: 100000000,  desc: 'Uygun fiyat XPS' },
 
   // TAŞ YÜNÜ
-  izocam:    { name: 'İzocam',          tier: 'premium',  productId: 'taşyunu', discount: 0.20, repGate: 65, teminat: 1000000, desc: 'Yalıtım sektörünün öncüsü' },
-  rockwool:  { name: 'Rockwool',        tier: 'premium',  productId: 'taşyunu', discount: 0.22, repGate: 75, teminat: 1500000, desc: 'Danimarka menşeli, dünya lideri' },
+  izocam:    { name: 'İzocam',          tier: 'premium',  productId: 'taşyunu', discount: 0.20, repGate: 65, teminat: 100000000, desc: 'Yalıtım sektörünün öncüsü' },
+  rockwool:  { name: 'Rockwool',        tier: 'premium',  productId: 'taşyunu', discount: 0.22, repGate: 75, teminat: 150000000, desc: 'Danimarka menşeli, dünya lideri' },
 
   // SU YALITIM
-  basf:      { name: 'BASF Master',     tier: 'premium',  productId: 'membran', discount: 0.21, repGate: 70, teminat: 1200000, desc: 'Alman kimya devi, kaliteli membran' },
-  fix:       { name: 'Fix Kimya',       tier: 'standart', productId: 'membran', discount: 0.17, repGate: 50, teminat: 600000,  desc: 'Türk üretimi su yalıtım' },
+  basf:      { name: 'BASF Master',     tier: 'premium',  productId: 'membran', discount: 0.21, repGate: 70, teminat: 120000000, desc: 'Alman kimya devi, kaliteli membran' },
+  fix:       { name: 'Fix Kimya',       tier: 'standart', productId: 'membran', discount: 0.17, repGate: 50, teminat: 100000000,  desc: 'Türk üretimi su yalıtım' },
 
   // ALÇI
-  knauf:     { name: 'Knauf',           tier: 'premium',  productId: 'plaster', discount: 0.20, repGate: 65, teminat: 900000,  desc: 'Alman alçı devi' },
-  abs:       { name: 'ABS Yapı',        tier: 'standart', productId: 'plaster', discount: 0.16, repGate: 48, teminat: 500000,  desc: 'Yerli alçı üreticisi' },
+  knauf:     { name: 'Knauf',           tier: 'premium',  productId: 'plaster', discount: 0.20, repGate: 65, teminat: 100000000,  desc: 'Alman alçı devi' },
+  abs:       { name: 'ABS Yapı',        tier: 'standart', productId: 'plaster', discount: 0.16, repGate: 48, teminat: 100000000,  desc: 'Yerli alçı üreticisi' },
 
   // ALÇIPAN
-  knaufalcipan: { name: 'Knauf Plaka',  tier: 'premium',  productId: 'alcipan', discount: 0.21, repGate: 70, teminat: 1100000, desc: 'Knauf alçıpan, kalite standardı' },
-  rigips:    { name: 'Rigips',          tier: 'standart', productId: 'alcipan', discount: 0.17, repGate: 52, teminat: 700000,  desc: 'Saint-Gobain, geniş ürün' },
+  knaufalcipan: { name: 'Knauf Plaka',  tier: 'premium',  productId: 'alcipan', discount: 0.21, repGate: 70, teminat: 110000000, desc: 'Knauf alçıpan, kalite standardı' },
+  rigips:    { name: 'Rigips',          tier: 'standart', productId: 'alcipan', discount: 0.17, repGate: 52, teminat: 100000000,  desc: 'Saint-Gobain, geniş ürün' },
 
   // PVC BORU
-  pimas:     { name: 'Pimaş',           tier: 'premium',  productId: 'pipe',    discount: 0.20, repGate: 65, teminat: 850000,  desc: 'PVC boru sektörünün lideri' },
-  firat:     { name: 'Fırat Plastik',   tier: 'standart', productId: 'pipe',    discount: 0.17, repGate: 50, teminat: 550000,  desc: 'Geniş plastik ürün yelpazesi' },
+  pimas:     { name: 'Pimaş',           tier: 'premium',  productId: 'pipe',    discount: 0.20, repGate: 65, teminat: 100000000,  desc: 'PVC boru sektörünün lideri' },
+  firat:     { name: 'Fırat Plastik',   tier: 'standart', productId: 'pipe',    discount: 0.17, repGate: 50, teminat: 100000000,  desc: 'Geniş plastik ürün yelpazesi' },
 
   // PPRC BORU
-  hakan:     { name: 'Hakan Plastik',   tier: 'standart', productId: 'pprc',    discount: 0.18, repGate: 50, teminat: 620000,  desc: 'PPRC boru uzmanı' },
-  kratis:    { name: 'Kratis',          tier: 'premium',  productId: 'pprc',    discount: 0.21, repGate: 70, teminat: 1050000, desc: 'Premium PPRC sistemleri' },
+  hakan:     { name: 'Hakan Plastik',   tier: 'standart', productId: 'pprc',    discount: 0.18, repGate: 50, teminat: 100000000,  desc: 'PPRC boru uzmanı' },
+  kratis:    { name: 'Kratis',          tier: 'premium',  productId: 'pprc',    discount: 0.21, repGate: 70, teminat: 105000000, desc: 'Premium PPRC sistemleri' },
 
   // ELEKTRİK KABLOSU
-  hes:       { name: 'HES Kablo',       tier: 'premium',  productId: 'kablo',   discount: 0.20, repGate: 70, teminat: 1200000, desc: 'Türkiye\'nin önde gelen kablo üreticisi' },
-  prysmian:  { name: 'Prysmian',        tier: 'premium',  productId: 'kablo',   discount: 0.22, repGate: 78, teminat: 1800000, desc: 'İtalyan menşeli, küresel kablo devi' },
-  turkpirelli: { name: 'Türk Pirelli',  tier: 'standart', productId: 'kablo',   discount: 0.17, repGate: 55, teminat: 800000,  desc: 'Köklü kablo markası' },
+  hes:       { name: 'HES Kablo',       tier: 'premium',  productId: 'kablo',   discount: 0.20, repGate: 70, teminat: 120000000, desc: 'Türkiye\'nin önde gelen kablo üreticisi' },
+  prysmian:  { name: 'Prysmian',        tier: 'premium',  productId: 'kablo',   discount: 0.22, repGate: 78, teminat: 180000000, desc: 'İtalyan menşeli, küresel kablo devi' },
+  turkpirelli: { name: 'Türk Pirelli',  tier: 'standart', productId: 'kablo',   discount: 0.17, repGate: 55, teminat: 100000000,  desc: 'Köklü kablo markası' },
 
   // SİGORTA PANOSU
-  schneider: { name: 'Schneider Electric', tier: 'premium', productId: 'pano',  discount: 0.21, repGate: 75, teminat: 1400000, desc: 'Fransız elektrik devi' },
-  abb:       { name: 'ABB',             tier: 'premium',  productId: 'pano',    discount: 0.22, repGate: 78, teminat: 1600000, desc: 'İsveç-İsviçre teknoloji şirketi' },
-  legrand:   { name: 'Legrand',         tier: 'standart', productId: 'pano',    discount: 0.18, repGate: 58, teminat: 1000000, desc: 'Fransız elektrik tesisat ürünleri' },
+  schneider: { name: 'Schneider Electric', tier: 'premium', productId: 'pano',  discount: 0.21, repGate: 75, teminat: 140000000, desc: 'Fransız elektrik devi' },
+  abb:       { name: 'ABB',             tier: 'premium',  productId: 'pano',    discount: 0.22, repGate: 78, teminat: 160000000, desc: 'İsveç-İsviçre teknoloji şirketi' },
+  legrand:   { name: 'Legrand',         tier: 'standart', productId: 'pano',    discount: 0.18, repGate: 58, teminat: 100000000, desc: 'Fransız elektrik tesisat ürünleri' },
 
   // CAM
-  sisecam:   { name: 'Şişecam',         tier: 'premium',  productId: 'cam',     discount: 0.21, repGate: 75, teminat: 1900000, desc: 'Türkiye\'nin cam devi' },
-  trakyacam: { name: 'Trakya Cam',      tier: 'standart', productId: 'cam',     discount: 0.17, repGate: 55, teminat: 1100000, desc: 'Düz cam ve kaplama uzmanı' },
+  sisecam:   { name: 'Şişecam',         tier: 'premium',  productId: 'cam',     discount: 0.21, repGate: 75, teminat: 190000000, desc: 'Türkiye\'nin cam devi' },
+  trakyacam: { name: 'Trakya Cam',      tier: 'standart', productId: 'cam',     discount: 0.17, repGate: 55, teminat: 110000000, desc: 'Düz cam ve kaplama uzmanı' },
 
   // KUM
-  kumcu:     { name: 'BSK Beton',       tier: 'standart', productId: 'sand',    discount: 0.15, repGate: 45, teminat: 550000,  desc: 'Kum, çakıl ve agrega tedariği' },
+  kumcu:     { name: 'BSK Beton',       tier: 'standart', productId: 'sand',    discount: 0.15, repGate: 45, teminat: 100000000,  desc: 'Kum, çakıl ve agrega tedariği' },
 
   // ÇAKIL
-  agrega:    { name: 'Akdağlar Agrega', tier: 'standart', productId: 'gravel',  discount: 0.16, repGate: 47, teminat: 650000,  desc: 'İnşaat agregaları' }
+  agrega:    { name: 'Akdağlar Agrega', tier: 'standart', productId: 'gravel',  discount: 0.16, repGate: 47, teminat: 100000000,  desc: 'İnşaat agregaları' }
 };
 
 // Bir ürün için mevcut markaları döndür
@@ -3411,13 +3459,13 @@ function brandFactoryBuyPrice(brandId) {
   const b = BRANDS[brandId];
   if (!b) return 0;
   const base = (BASE_PRICE[b.productId] || 0);
-  // Tier çarpanları
-  const tierMult = { premium: 2.5, standart: 1.5, ekonomik: 0.8 }[b.tier] || 1;
+  // Tier çarpanları (yükseltildi: premium fabrikalar çok pahalı olsun)
+  const tierMult = { premium: 5, standart: 3, ekonomik: 2 }[b.tier] || 2;
   // Ürün başına ortalama × kapasite × tier
-  // Premium pano fabrikası: 12000 × 2.5 × 8000 = ~₺240M
-  // Ekonomik tuğla: 8 × 0.8 × 8000 = ~₺50K (çok düşük, minimum koyalım)
-  const price = Math.round(base * tierMult * 8000);
-  return Math.max(50_000_000, price); // min ₺50M
+  // Premium pano fabrikası: 12000 × 5 × 25000 = ~₺1.5B
+  // Premium çimento: 300 × 5 × 25000 = ~₺37.5M → min ₺1B uygulanır
+  const price = Math.round(base * tierMult * 25000);
+  return Math.max(1_000_000_000, price); // min ₺1 MİLYAR
 }
 
 // Sahip olunan fabrikanın üretim maliyeti — piyasa fiyatının ~%45'i (bayilikten de ucuz)
@@ -3446,7 +3494,8 @@ function factoryMonthlyCapacity(brandId, level) {
 function factoryMonthlyOpex(brandId, level) {
   const b = BRANDS[brandId];
   if (!b) return 0;
-  const tierOpex = { premium: 1_200_000, standart: 750_000, ekonomik: 350_000 }[b.tier] || 500_000;
+  // Ölçeklendi: fabrika ₺1B+ olduğu için işletme giderleri de yüksek
+  const tierOpex = { premium: 8_000_000, standart: 5_000_000, ekonomik: 2_500_000 }[b.tier] || 3_000_000;
   const levelOpex = [1, 1.4, 1.9][Math.min(2, (level || 1) - 1)] || 1;
   return Math.round(tierOpex * levelOpex);
 }
@@ -3598,7 +3647,11 @@ function confirmFactoryPurchase(brandId) {
     productionMonthStartDay: state.day,
     level: 1,
     totalProduced: 0,
-    totalRevenue: 0
+    totalRevenue: 0,
+    // YENİ: Hammadde stoğu (üretim için gerekli)
+    rawStock: {},
+    // YENİ: Fabrika kadrosu (sonraki sürümde kullanılacak)
+    staff: { workers: 8, purchaser: 0, salesRep: 0 }
   });
 
   closeModal();
@@ -3608,7 +3661,7 @@ function confirmFactoryPurchase(brandId) {
   render();
 }
 
-// Fabrikadan üretim yap (stoğa ekle)
+// Fabrikadan üretim yap (stoğa ekle) — HAMMADDE TÜKETİR
 function produceFromFactory(factoryId, qty) {
   const f = (state.factories || []).find(x => x.id === factoryId);
   if (!f) { toast('Fabrika bulunamadı', 'error'); return; }
@@ -3628,20 +3681,50 @@ function produceFromFactory(factoryId, qty) {
   }
 
   qty = Math.min(qty, remaining);
-  const cost = factoryProductionCost(factoryId) * qty;
-  if (state.cash < cost) {
-    toast(`Üretim maliyeti ${fmt(cost)}, kasada yeterli yok`, 'error');
+
+  // HAMMADDE KONTROLÜ — reçeteye göre yeterli mi?
+  if (!f.rawStock) f.rawStock = {};
+  const recipe = PRODUCT_RECIPES[f.productId];
+  if (recipe && Object.keys(recipe).length > 0) {
+    const shortages = [];
+    Object.entries(recipe).forEach(([rawId, perUnit]) => {
+      const needed = perUnit * qty;
+      const have = f.rawStock[rawId] || 0;
+      if (have < needed) {
+        const rawName = PRODUCTS[rawId]?.name || rawId;
+        const rawUnit = PRODUCTS[rawId]?.unit || '';
+        shortages.push(`${rawName}: ${(needed - have).toFixed(2)} ${rawUnit} eksik (stokta ${have.toFixed(2)})`);
+      }
+    });
+    if (shortages.length > 0) {
+      toast(`⚠️ Hammadde yetmiyor: ${shortages.slice(0, 2).join(', ')}${shortages.length > 2 ? ' ...' : ''}`, 'error');
+      return;
+    }
+  }
+
+  // İşçilik + enerji maliyeti (eski production cost'un %30'u)
+  const laborCost = Math.round(factoryProductionCost(factoryId) * 0.30 * qty);
+  if (state.cash < laborCost) {
+    toast(`İşçilik + enerji maliyeti ${fmt(laborCost)}, kasada yeterli yok`, 'error');
     return;
   }
 
-  spend(cost, 'uretim');
+  // Hammadde tüket
+  if (recipe) {
+    Object.entries(recipe).forEach(([rawId, perUnit]) => {
+      f.rawStock[rawId] = (f.rawStock[rawId] || 0) - perUnit * qty;
+    });
+  }
+
+  // Maliyet öde + üretim stoğa ekle
+  spend(laborCost, 'uretim-iscilik');
   state.inventory[f.productId] = (state.inventory[f.productId] || 0) + qty;
   f.currentProduction += qty;
   f.totalProduced = (f.totalProduced || 0) + qty;
-  f.totalRevenue = (f.totalRevenue || 0) + cost;
+  f.totalRevenue = (f.totalRevenue || 0) + laborCost;
 
   const b = BRANDS[f.brandId];
-  toast(`🏭 ${b.name}: ${qty.toLocaleString('tr-TR')} ${p.unit} üretildi · Maliyet: ${fmt(cost)}`, 'success');
+  toast(`🏭 ${b.name}: ${qty.toLocaleString('tr-TR')} ${p.unit} üretildi · İşçilik: ${fmt(laborCost)}`, 'success');
   addXP(qty / 100, 'üretim');
   render();
 }
@@ -3669,6 +3752,154 @@ function upgradeFactory(factoryId) {
 }
 
 // Fabrika sat
+// Fabrika için hammadde alma modalı
+function openFactoryStockModal(factoryId) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) return;
+  const b = BRANDS[f.brandId];
+  const p = PRODUCTS[f.productId];
+  const recipe = PRODUCT_RECIPES[f.productId] || {};
+  const rawIds = Object.keys(recipe);
+
+  if (rawIds.length === 0) {
+    toast('Bu ürün için hammadde tanımı yok', 'info');
+    return;
+  }
+
+  if (!f.rawStock) f.rawStock = {};
+
+  // Her hammadde için en uygun tedarikçi + fiyat
+  const rows = rawIds.map(rawId => {
+    const rp = PRODUCTS[rawId];
+    if (!rp) return '';
+    const sellers = SUPPLIERS.filter(s => s.products.includes(rawId));
+    if (sellers.length === 0) return `<tr><td>${rp.name}</td><td colspan="4" style="color: var(--red); font-size: 11px;">⚠️ Hiç tedarikçi bulunamadı</td></tr>`;
+
+    // En ucuz
+    let best = null;
+    let bestPrice = Infinity;
+    sellers.forEach(s => {
+      const price = supplierPrice(s, rawId);
+      if (price < bestPrice) { bestPrice = price; best = s; }
+    });
+
+    const stock = f.rawStock[rawId] || 0;
+    const perUnit = recipe[rawId];
+    // Tam kapasitenin yetmesi için gereken miktar
+    const neededForMonth = perUnit * f.monthlyCapacity;
+    const suggested = Math.max(0, Math.ceil(neededForMonth - stock));
+
+    return `<tr>
+      <td><strong>${rp.name}</strong><br><span style="font-size: 10px; color: var(--ink-dim);">${rp.unit} · ${perUnit} per ${p.unit}</span></td>
+      <td class="num">${stock.toFixed(2)} ${rp.unit}</td>
+      <td class="num">${fmt(bestPrice)}<br><span style="font-size: 10px; color: var(--ink-dim);">${best.name}</span></td>
+      <td><input type="number" min="0" id="raw-qty-${rawId}" value="${suggested}" style="width: 90px; padding: 6px; background: var(--panel-2); border: 1px solid var(--border); color: var(--ink); border-radius: 3px;" oninput="updateRawTotal()"></td>
+      <td class="num" id="raw-line-${rawId}" data-price="${bestPrice}" data-supplier="${best.id}">${fmt(bestPrice * suggested)}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 820px; max-height: 90vh; overflow-y: auto;">
+      <h2>🚚 HAMMADDE TEDARİĞİ — ${b.name}</h2>
+      <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 12px;">
+        ${p.name} üretimi için gerekli hammaddeler · Önerilen miktar: 1 aylık kapasiteye yetecek kadar
+      </p>
+
+      <div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--blue); margin-bottom: 12px; font-size: 11px; line-height: 1.6;">
+        💡 Hammaddeler en uygun fiyatlı tedarikçilerden alınıyor. Yeterli stok varsa fabrika üretim yapabilir.
+        Şu an aylık kapasiten: <strong>${f.monthlyCapacity.toLocaleString('tr-TR')} ${p.unit}</strong>
+      </div>
+
+      <div class="table-scroll" style="max-height: 400px;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Hammadde</th>
+              <th class="num">Mevcut Stok</th>
+              <th class="num">Birim Fiyat (en uygun)</th>
+              <th>Miktar</th>
+              <th class="num">Tutar</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+
+      <div style="margin-top: 14px; padding: 12px 14px; background: var(--panel-2); display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 14px;">TOPLAM:</span>
+        <strong id="raw-total" style="color: var(--accent); font-size: 18px;">₺0</strong>
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-top: 14px;">
+        <button class="btn primary" style="flex: 1; padding: 12px; background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;" onclick="confirmBuyRawForFactory('${factoryId}')">✓ HAMMADDELERİ AL</button>
+        <button class="btn" style="padding: 12px;" onclick="closeModal()">VAZGEÇ</button>
+      </div>
+    </div>
+  </div>`;
+  $('modals').innerHTML = html;
+  // İlk total hesapla
+  updateRawTotal();
+}
+
+// Toplam tutarı güncelle (input değişince çağrılır)
+function updateRawTotal() {
+  let total = 0;
+  document.querySelectorAll('[id^="raw-qty-"]').forEach(input => {
+    const rawId = input.id.replace('raw-qty-', '');
+    const qty = parseFloat(input.value) || 0;
+    const lineEl = document.getElementById(`raw-line-${rawId}`);
+    if (!lineEl) return;
+    const price = parseFloat(lineEl.dataset.price) || 0;
+    const line = price * qty;
+    lineEl.textContent = fmt(line);
+    total += line;
+  });
+  const totalEl = document.getElementById('raw-total');
+  if (totalEl) totalEl.textContent = fmt(total);
+}
+
+// Hammadde alımını onayla
+function confirmBuyRawForFactory(factoryId) {
+  const f = (state.factories || []).find(x => x.id === factoryId);
+  if (!f) { closeModal(); return; }
+  if (!f.rawStock) f.rawStock = {};
+
+  // Tüm seçilen hammaddeleri topla
+  const purchases = [];
+  let totalCost = 0;
+  document.querySelectorAll('[id^="raw-qty-"]').forEach(input => {
+    const rawId = input.id.replace('raw-qty-', '');
+    const qty = parseFloat(input.value) || 0;
+    if (qty <= 0) return;
+    const lineEl = document.getElementById(`raw-line-${rawId}`);
+    if (!lineEl) return;
+    const price = parseFloat(lineEl.dataset.price) || 0;
+    const supplierId = lineEl.dataset.supplier;
+    totalCost += price * qty;
+    purchases.push({ rawId, qty, price, supplierId });
+  });
+
+  if (purchases.length === 0) { toast('Hiç hammadde seçmedin', 'error'); return; }
+  if (state.cash < totalCost) {
+    toast(`Yetersiz bakiye: ${fmt(totalCost)} gerekli, kasada ${fmt(state.cash)} var`, 'error');
+    return;
+  }
+
+  spend(totalCost, 'hammadde');
+  purchases.forEach(p => {
+    f.rawStock[p.rawId] = (f.rawStock[p.rawId] || 0) + p.qty;
+    // Tedarikçi sadakati
+    if (!state.supplierLoyalty) state.supplierLoyalty = {};
+    state.supplierLoyalty[p.supplierId] = Math.min(100, (state.supplierLoyalty[p.supplierId] || 0) + 2);
+  });
+
+  const b = BRANDS[f.brandId];
+  closeModal();
+  toast(`🚚 ${b.name} fabrikasına ${purchases.length} kalem hammadde geldi · Toplam: ${fmt(totalCost)}`, 'success');
+  addXP(15, 'hammadde alımı');
+  render();
+}
+
 function sellFactory(factoryId) {
   const f = (state.factories || []).find(x => x.id === factoryId);
   if (!f) return;
@@ -4456,7 +4687,21 @@ const SUPPLIERS = [
   { id: 'asya',      name: 'Asya Yapı Toptan',          ilce: 'atasehir', priceMod: 0.99,
     products: ['cement','tile','plaster','alcipan','paint','pipe'] },
   { id: 'butik',     name: 'Butik Dekor',               ilce: 'besiktas', priceMod: 1.20,
-    products: ['parke','granit','vernik','cam'] }
+    products: ['parke','granit','vernik','cam'] },
+
+  // ============ HAMMADDE TEDARİKÇİLERİ (fabrikalar için) ============
+  { id: 'maden1',    name: 'Ege Madencilik A.Ş.',        ilce: 'tuzla',    priceMod: 1.02,
+    products: ['klinker','alci_ham','kil','silika'] },
+  { id: 'maden2',    name: 'Anadolu Hammadde',           ilce: 'gebze',    priceMod: 0.95,
+    products: ['klinker','demir_filiz','hurda','komur'] },
+  { id: 'demir_ham', name: 'Karadeniz Cevher A.Ş.',      ilce: 'pendik',   priceMod: 0.92,
+    products: ['demir_filiz','hurda','komur','bakir'] },
+  { id: 'kimya1',    name: 'Petrokimya Toptan',          ilce: 'esenyurt', priceMod: 1.05,
+    products: ['ham_plastik','pigment','selüloz'] },
+  { id: 'kimya2',    name: 'Marmara Kimya San.',         ilce: 'bagcilar', priceMod: 0.98,
+    products: ['ham_plastik','pigment','silika'] },
+  { id: 'maden3',    name: 'Trakya Mineral',             ilce: 'esenyurt', priceMod: 1.00,
+    products: ['kil','alci_ham','silika','alci_pano','selüloz'] }
 ];
 
 // Araç tipleri - 2026 İstanbul ticari araç piyasası
@@ -13599,9 +13844,28 @@ function renderDealerships() {
               <div style="margin-top: 6px;">Bu Ay Üretim: <strong>${currentProd.toLocaleString('tr-TR')}</strong> / ${f.monthlyCapacity.toLocaleString('tr-TR')} ${p.unit}</div>
               <div class="progress-bar" style="margin: 4px 0;"><div class="progress-fill" style="width: ${pct}%; background: var(--accent);"></div></div>
               <div style="font-size: 10px; color: var(--ink-dim);">Toplam üretilen: ${(f.totalProduced || 0).toLocaleString('tr-TR')} ${p.unit}</div>
+              ${(() => {
+                const recipe = PRODUCT_RECIPES[f.productId] || {};
+                const rawIds = Object.keys(recipe);
+                if (rawIds.length === 0) return '';
+                if (!f.rawStock) f.rawStock = {};
+                // Hammadde durumu: her hammadde için kaç birim üretim destekliyor?
+                const possibleProductions = rawIds.map(rid => {
+                  const have = f.rawStock[rid] || 0;
+                  const perUnit = recipe[rid];
+                  return perUnit > 0 ? Math.floor(have / perUnit) : Infinity;
+                });
+                const minProducable = possibleProductions.length > 0 ? Math.min(...possibleProductions) : 0;
+                const color = minProducable === 0 ? 'var(--red)' : minProducable < f.monthlyCapacity / 4 ? 'var(--accent)' : 'var(--green)';
+                return `<div style="margin-top: 6px; padding: 6px 8px; background: rgba(244,160,32,0.08); border-left: 2px solid ${color}; font-size: 10px;">
+                  📦 Hammadde stoğu: <strong style="color: ${color};">${minProducable.toLocaleString('tr-TR')} ${p.unit}</strong> üretim için yeterli
+                  ${minProducable === 0 ? '<br><span style="color: var(--red);">⚠️ Hammadde yok — üretim yapamazsın</span>' : ''}
+                </div>`;
+              })()}
             </div>
             <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
               <button class="btn small primary" style="flex: 1; background: var(--accent); border-color: var(--accent); color: #000;" onclick="openProductionModal('${f.id}')" ${remaining <= 0 ? 'disabled' : ''}>🏭 ÜRET (${remaining.toLocaleString('tr-TR')})</button>
+              <button class="btn small" style="background: #f59e0b; border-color: #f59e0b; color: #000; font-weight: 700;" onclick="openFactoryStockModal('${f.id}')" title="Hammadde tedarik et">🚚 HAMMADDE AL</button>
               ${f.level < 3 ? `<button class="btn small" style="background: var(--blue); border-color: var(--blue); color: #fff;" onclick="upgradeFactory('${f.id}')" title="Sv ${f.level + 1}: kapasite artar, maliyet düşer">⬆️ GELİŞTİR</button>` : ''}
               <button class="btn small danger" onclick="sellFactory('${f.id}')" title="%30 değer kaybıyla sat">SAT</button>
             </div>
@@ -16439,10 +16703,42 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.70';
+const CURRENT_VERSION = 'v1.72';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.72',
+    date: '23 Mayıs 2026',
+    title: 'FABRİKA HAMMADDE SİSTEMİ',
+    items: [
+      { cat: 'major', text: '🚚 <strong>Fabrikalarda hammadde tedariği</strong> — üretim için hammadde gerekli' },
+      { cat: 'feature', text: 'Yeni 12 hammadde: Klinker, Demir Filizi, Hurda, Kömür, Kil, Pigment, Ham Plastik, Bakır vs' },
+      { cat: 'feature', text: '6 yeni hammadde tedarikçisi: Ege Madencilik, Anadolu Hammadde, Petrokimya vs' },
+      { cat: 'feature', text: 'Her ürünün reçetesi var (örn: 1 ton demir = 1.05 ton demir filizi + 0.2 ton hurda + 0.35 ton kömür)' },
+      { cat: 'feature', text: 'Fabrika kartında hammadde stoğu durumu görünür ("X adet üretim için yeterli")' },
+      { cat: 'feature', text: '🚚 HAMMADDE AL butonu: 1 aylık kapasiteye yetecek miktar önerir, tek tıkla tüm hammaddeleri en uygun tedarikçilerden al' },
+      { cat: 'feature', text: 'Hammadde yetmediğinde üretim hata verir + eksik miktarı söyler' },
+      { cat: 'feature', text: 'Üretim maliyeti artık sadece işçilik + enerji (~%30) — hammadde ayrı alım' },
+      { cat: 'feature', text: 'Eski fabrikalara otomatik rawStock + staff alanı eklenir (yüklemede)' },
+      { cat: 'info', text: 'Sonraki sürümde: Fabrika kadrosu (işçi, satın alma sorumlusu) + müşteri ihalelerine fabrika teklifi' }
+    ]
+  },
+  {
+    version: 'v1.71',
+    date: '23 Mayıs 2026',
+    title: 'BAYİLİK & FABRİKA FİYATLARI YÜKSELDİ',
+    items: [
+      { cat: 'major', text: '💰 <strong>Bayilik teminatları: artık min ₺100 milyon</strong> (eskiden ₺450K-5.5M)' },
+      { cat: 'feature', text: 'Premium markalar ₺200M-550M civarı (eski × 100, min ₺100M)' },
+      { cat: 'major', text: '🏭 <strong>Fabrika satın alma: artık min ₺1 milyar</strong> (eskiden ₺50M)' },
+      { cat: 'feature', text: 'Premium fabrikalar ₺1B-2.25B (Schneider Pano: ₺1.5B, İçdaş Demir: ₺2.25B)' },
+      { cat: 'feature', text: 'Tier çarpanları büyütüldü: premium 5x, standart 3x, ekonomik 2x' },
+      { cat: 'major', text: '🏭 <strong>Aylık fabrika işletme gideri yükseldi</strong>' },
+      { cat: 'feature', text: 'Premium: ₺8M/ay, Standart: ₺5M/ay, Ekonomik: ₺2.5M/ay (eski ₺350K-1.2M)' },
+      { cat: 'feature', text: 'Endgame para çukurları daha anlamlı oldu — birikmiş para harcanır' }
+    ]
+  },
   {
     version: 'v1.70',
     date: '23 Mayıs 2026',
@@ -17935,6 +18231,14 @@ function sanitizeLoadedState() {
         state.contracts = state.contracts.filter(c => !closedContracts.includes(c));
         console.log(`Sanitize: ${closedContracts.length} kapanmış sözleşme arşive geçirildi`);
       }
+    }
+
+    // 10) Eski fabrikalara rawStock ve staff alanları ekle (geriye uyumluluk)
+    if (Array.isArray(state.factories)) {
+      state.factories.forEach(f => {
+        if (!f.rawStock) f.rawStock = {};
+        if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+      });
     }
   } catch (e) {
     console.error('Sanitize hatası (önemsiz):', e);

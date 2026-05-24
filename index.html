@@ -11999,14 +11999,22 @@ function buyFromSupplier(sid, pid) {
 function renderContractsView() {
   const c = $('center');
   // 🏪 Mağaza sözleşmeleri: müşteri sözleşmeleri (şantiye iç sözleşmeleri ayrı sekmede)
-  // Fabrika sözleşmeleri de buraya dahil — müşteriyle yapılan teslim
-  const storeContracts = state.contracts.filter(ct => ct.branch !== 'construction' && !ct.isInternalConstruction);
-  const internalCount = state.contracts.filter(ct => ct.branch === 'construction' || ct.isInternalConstruction).length;
+  // Sadece kapanmamış (paid+delivered ikisi de true değil) sözleşmeler
+  const storeContracts = state.contracts.filter(ct =>
+    ct.branch !== 'construction' && !ct.isInternalConstruction &&
+    !(ct.delivered === true && ct.paid === true)
+  );
+  const internalCount = state.contracts.filter(ct =>
+    (ct.branch === 'construction' || ct.isInternalConstruction) &&
+    !(ct.delivered === true && ct.paid === true)
+  ).length;
+  // Arşivdeki tamamlanmışları say (sadece müşteri/fabrika sözleşmeleri)
+  const archivedCount = (state.archive || []).filter(a => (a.type === 'contract' || a.type === 'factory') && a.status === 'completed').length;
 
   if (storeContracts.length === 0) {
     c.innerHTML = `<h2>🏪 MAĞAZA SÖZLEŞMELERİ</h2>
       <div class="subtitle">Kazandığın işler · Sevkiyatla teslim et</div>
-      <div class="empty">Aktif müşteri sözleşmesi yok.${internalCount > 0 ? `<br><br>İç şantiye sözleşmelerin için <a onclick="setView('construction-contracts')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">🏗 İnşaat → İç Sözleşmeler</a></br>` : ''}</div>`;
+      <div class="empty">Aktif müşteri sözleşmesi yok.${internalCount > 0 ? `<br><br>İç şantiye sözleşmelerin için <a onclick="setView('construction-contracts')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">🏗 İnşaat → İç Sözleşmeler</a></br>` : ''}${archivedCount > 0 ? `<br><br>📁 Arşivde <strong>${archivedCount}</strong> tamamlanmış sözleşme · <a onclick="setView('archive')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">Arşive git</a>` : ''}</div>`;
     return;
   }
   const dispatcherCount = (state.dispatchers || []).length;
@@ -12019,7 +12027,7 @@ function renderContractsView() {
       </div>`;
 
   c.innerHTML = `<h2>🏪 MAĞAZA SÖZLEŞMELERİ</h2>
-    <div class="subtitle">${storeContracts.length} müşteri sözleşmesi${internalCount > 0 ? ` · <a onclick="setView('construction-contracts')" style="color: var(--purple); cursor: pointer; text-decoration: underline;">${internalCount} şantiye sözleşmesi →</a>` : ''}</div>
+    <div class="subtitle">${storeContracts.length} aktif müşteri sözleşmesi${internalCount > 0 ? ` · <a onclick="setView('construction-contracts')" style="color: var(--purple); cursor: pointer; text-decoration: underline;">${internalCount} şantiye sözleşmesi →</a>` : ''}${archivedCount > 0 ? ` · <a onclick="setView('archive')" style="color: var(--ink-dim); cursor: pointer; text-decoration: underline;">📁 ${archivedCount} tamamlanmış</a>` : ''}</div>
     ${dispatcherInfo}
 
     <div class="email-list">
@@ -15772,14 +15780,22 @@ function renderConstructionProjects() {
 function renderConstructionContracts() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('İç Şantiye Sözleşmeleri', '🏗', '#a855f7');
-  const internalContracts = state.contracts.filter(ct => ct.branch === 'construction' || ct.isInternalConstruction);
+  // Sadece kapanmamış (paid=false veya delivered=false) iç sözleşmeler
+  const internalContracts = state.contracts.filter(ct =>
+    (ct.branch === 'construction' || ct.isInternalConstruction) &&
+    !(ct.delivered === true && ct.paid === true)
+  );
+  // Arşivdeki tamamlanmışları say
+  const archivedCount = (state.archive || []).filter(a => a.type === 'internal-construction' && a.status === 'completed').length;
+
   if (internalContracts.length === 0) {
-    c.innerHTML += '<div class="empty">Şu an aktif iç şantiye sözleşmesi yok. İnşaat başlattığında otomatik oluşur.</div>';
+    c.innerHTML += `<div class="empty">Şu an aktif iç şantiye sözleşmesi yok. İnşaat başlattığında otomatik oluşur.${archivedCount > 0 ? `<br><br>Arşivde <strong>${archivedCount}</strong> tamamlanmış iç şantiye sözleşmesi var. <a onclick="setView('archive')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">📁 Arşive git</a>` : ''}</div>`;
     return;
   }
   const dispatcherCount = (state.dispatchers || []).length;
   c.innerHTML += `<div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 14px; font-size: 11px;">
     💡 İnşaat ve kentsel dönüşüm projelerin için <strong>kendi şantiyene</strong> yapılan iç sözleşmeler. Stoktan günlük tüketim otomatiktir.
+    ${archivedCount > 0 ? `<br>📁 Arşivde <strong>${archivedCount}</strong> tamamlanmış sözleşme · <a onclick="setView('archive')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">Arşive git</a>` : ''}
   </div>
   <div class="subtitle" style="margin-bottom: 14px;">${internalContracts.length} aktif şantiye sözleşmesi</div>
   <div class="email-list">
@@ -16236,12 +16252,19 @@ function renderFactoryList() {
 function renderFactoryOrders() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('Üretim Sözleşmeleri', '🏭', 'var(--accent)');
-  const factoryContracts = state.contracts.filter(ct => ct.branch === 'factory' || ct.isFactoryOffer);
+  // Sadece kapanmamış fabrika sözleşmeleri
+  const factoryContracts = state.contracts.filter(ct =>
+    (ct.branch === 'factory' || ct.isFactoryOffer) &&
+    !(ct.delivered === true && ct.paid === true)
+  );
+  const archivedCount = (state.archive || []).filter(a => a.type === 'factory' && a.status === 'completed').length;
+
   if (factoryContracts.length === 0) {
     c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
       🏭 Fabrika üretim sözleşmesi yok.
       <br><br>
       Müşteri ihalelerinde "🏭 FABRİKADAN TEKLİF VER" butonu ile teklif verebilirsin. Kabul edilirse buraya gelir.
+      ${archivedCount > 0 ? `<br><br>📁 Arşivde <strong>${archivedCount}</strong> tamamlanmış fabrika sözleşmesi var. <a onclick="setView('archive')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">Arşive git</a>` : ''}
       <br><br>
       <button class="btn primary" onclick="setView('inbox'); window._inboxBranchFilter='store';">📨 MÜŞTERİ İHALELERİNE GİT</button>
     </div>`;
@@ -16250,6 +16273,7 @@ function renderFactoryOrders() {
   const dispatcherCount = (state.dispatchers || []).length;
   c.innerHTML += `<div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 11px;">
     💡 Fabrika satış uzmanı tarafından çekilen ve müşterinin kabul ettiği sözleşmeler. Fabrika üretimi + sevkiyat ile teslim edilir.
+    ${archivedCount > 0 ? `<br>📁 Arşivde <strong>${archivedCount}</strong> tamamlanmış sözleşme · <a onclick="setView('archive')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">Arşive git</a>` : ''}
   </div>
   <div class="subtitle" style="margin-bottom: 14px;">${factoryContracts.length} aktif üretim sözleşmesi</div>
   <div class="email-list">
@@ -19023,10 +19047,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.91';
+const CURRENT_VERSION = 'v1.92';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.92',
+    date: '24 Mayıs 2026',
+    title: 'KAPANMIŞ SÖZLEŞMELER OTOMATİK ARŞİVE',
+    items: [
+      { cat: 'major', text: '🗂 <strong>Teslim+ödeme tamamlanmış sözleşmeler artık aktif listede görünmüyor</strong>' },
+      { cat: 'feature', text: '🏪 Mağaza, 🏗 İnşaat, 🏭 Fabrika sözleşme sayfalarında filtre: <code>!(delivered && paid)</code>' },
+      { cat: 'feature', text: 'Her sayfanın başlığında "📁 X tamamlanmış" linki — direkt arşive götürür' },
+      { cat: 'feature', text: 'Sanitize: eski kayıtlardaki kilitli (paid+delivered) sözleşmeler otomatik arşive geçer' },
+      { cat: 'feature', text: 'Arşivdeki tip etiketleri: <code>contract</code>, <code>internal-construction</code>, <code>factory</code>' },
+      { cat: 'info', text: 'Resimde "✓ Ödeme alındı, sözleşme kapandı" yazan iç şantiye sözleşmeleri artık listede yer kaplamayacak' }
+    ]
+  },
   {
     version: 'v1.91',
     date: '24 Mayıs 2026',
@@ -20894,6 +20931,28 @@ function sanitizeLoadedState() {
       });
       if (releasedCount > 0) {
         console.log(`Sanitize: ${releasedCount} şantiye personeli kilitli şantiyeden boşa çıkarıldı`);
+      }
+    }
+
+    // 16) state.contracts içinde delivered=true & paid=true olan sözleşmeleri arşive geçir
+    // (Eski sürümde kilitli kalmış olabilir)
+    if (Array.isArray(state.contracts)) {
+      const toArchive = state.contracts.filter(ct => ct.delivered === true && ct.paid === true);
+      if (toArchive.length > 0) {
+        if (!Array.isArray(state.archive)) state.archive = [];
+        toArchive.forEach(ct => {
+          const archiveType = ct.isInternalConstruction || ct.branch === 'construction' ? 'internal-construction'
+            : ct.isFactoryOffer || ct.branch === 'factory' ? 'factory'
+            : 'contract';
+          state.archive.push({
+            ...ct,
+            type: archiveType,
+            status: 'completed',
+            completedDay: ct.collectedDay || ct.completedDay || state.day
+          });
+        });
+        state.contracts = state.contracts.filter(ct => !(ct.delivered === true && ct.paid === true));
+        console.log(`Sanitize: ${toArchive.length} kapanmış sözleşme arşive geçirildi`);
       }
     }
   } catch (e) {

@@ -9682,100 +9682,112 @@ function renderInbox() {
     ${filterChips}
     <div class="email-list">
       ${filteredMails.map(e => {
-        const cust = getCustomer(e.customerId);
-        const expIn = e.expiresDay - state.day;
+        try {
+          const cust = getCustomer(e.customerId);
+          const expIn = e.expiresDay - state.day;
 
-        if (e.type === 'fs-proposal') {
-          // Saha satış personelinden gelen iş önerisi
-          if (!cust) return ''; // güvenlik
-          const profitPct = (e.profitMargin * 100).toFixed(0);
-          const profit = e.total - e.estimatedCost;
-          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
+          if (e.type === 'fs-proposal') {
+            // Saha satış personelinden gelen iş önerisi
+            if (!cust) return ''; // güvenlik
+            const profitPct = (e.profitMargin * 100).toFixed(0);
+            const profit = e.total - e.estimatedCost;
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
+              <div class="top">
+                <span class="from">🤝 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">→ ${cust.name}</span></span>
+                <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce]?.name || ''}</span>
+              </div>
+              <div class="subject">${e.subject}</div>
+              <div class="preview">${(e.items || []).length} kalem · ${fmt(e.total)} · Kâr: <strong style="color: var(--green);">${fmt(profit)} (%${profitPct})</strong></div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
+          if (e.type === 'purchase-proposal') {
+            // Satın alma sorumlusundan gelen alış önerisi
+            const totalItems = (e.purchases || []).reduce((s, p) => s + (p.items || []).length, 0);
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--accent);">
+              <div class="top">
+                <span class="from">🛒 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Satın Alma</span></span>
+                <span class="date">Gün ${e.receivedDay}</span>
+              </div>
+              <div class="subject">${e.subject}</div>
+              <div class="preview">${(e.purchases || []).length} tedarikçi · ${totalItems} kalem · Toplam: ${fmt(e.totalCost || 0)}${e.totalSavings > 0 ? ` · Tasarruf: <strong style="color: var(--green);">${fmt(e.totalSavings)}</strong>` : ''}</div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
+          if (e.type === 'dispatch-plan') {
+            // Sevkiyat sorumlusundan gelen sevkiyat planı
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--red);">
+              <div class="top">
+                <span class="from">🚛 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Sevkiyat</span></span>
+                <span class="date">Gün ${e.receivedDay}</span>
+              </div>
+              <div class="subject">${e.subject}</div>
+              <div class="preview">${(e.plan || []).length} sevkiyat · Yakıt: ${fmt(e.totalFuelCost || 0)}</div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
+          if (e.type === 'urban-renewal') {
+            // Kentsel dönüşüm teklifi
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--purple);">
+              <div class="top">
+                <span class="from">🏚 ${e.customerName || 'Müşteri'} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Kentsel Dönüşüm</span></span>
+                <span class="date">Gün ${e.receivedDay}${e.ilce ? ' · ' + (ILCELER[e.ilce]?.name || '') : ''}</span>
+              </div>
+              <div class="subject">${e.subject}</div>
+              <div class="preview">Bize ${e.ourShare} daire, müşteriye ${e.theirShare} · Tahmini kâr: <strong style="color: ${e.estProfit >= 0 ? 'var(--green)' : 'var(--red)'};">${e.estProfit >= 0 ? '+' : ''}${fmt(e.estProfit)}</strong></div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
+          if (e.type === 'raw-offer') {
+            // Hammadde tedarikçisinden fabrikaya özel teklif
+            const factory = (state.factories || []).find(f => f.id === e.factoryId);
+            const b = factory ? BRANDS[factory.brandId] : null;
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
+              <div class="top">
+                <span class="from">🚚 ${e.supplierName || 'Tedarikçi'} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Hammadde Teklifi</span></span>
+                <span class="date">Gün ${e.receivedDay}</span>
+              </div>
+              <div class="subject">${e.subject || 'Hammadde Teklifi'}</div>
+              <div class="preview">${(e.items || []).length} hammadde · Toplam: <strong style="color: var(--accent);">${fmt(e.totalDeal || 0)}</strong>${b ? ` · Hedef: ${b.name}` : ''}</div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
+          // Varsayılan: tender (müşteri ihalesi) — cust null kontrolü
+          if (!cust) {
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
+              <div class="top">
+                <span class="from">⚠️ Bilinmeyen gönderici</span>
+                <span class="date">Gün ${e.receivedDay}</span>
+              </div>
+              <div class="subject">${e.subject || 'Mail'}</div>
+              <div class="preview">${(e.items || []).length} kalem</div>
+            </div>`;
+          }
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
             <div class="top">
-              <span class="from">🤝 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">→ ${cust.name}</span></span>
+              <span class="from">${cust.name}</span>
               <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce]?.name || ''}</span>
             </div>
             <div class="subject">${e.subject}</div>
-            <div class="preview">${(e.items || []).length} kalem · ${fmt(e.total)} · Kâr: <strong style="color: var(--green);">${fmt(profit)} (%${profitPct})</strong></div>
+            <div class="preview">${(e.items || []).length} kalem · Termin: Gün ${e.deadline} · Güven: ${Math.round(cust.trust)}/100</div>
             <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
           </div>`;
-        }
-
-        if (e.type === 'purchase-proposal') {
-          // Satın alma sorumlusundan gelen alış önerisi
-          const totalItems = e.purchases.reduce((s, p) => s + p.items.length, 0);
-          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--accent);">
+        } catch (err) {
+          console.warn('[renderInbox] Mail render hatası:', err, e);
+          return `<div class="email" style="border-left: 3px solid var(--red); opacity: 0.6;">
             <div class="top">
-              <span class="from">🛒 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Satın Alma</span></span>
-              <span class="date">Gün ${e.receivedDay}</span>
-            </div>
-            <div class="subject">${e.subject}</div>
-            <div class="preview">${e.purchases.length} tedarikçi · ${totalItems} kalem · Toplam: ${fmt(e.totalCost)}${e.totalSavings > 0 ? ` · Tasarruf: <strong style="color: var(--green);">${fmt(e.totalSavings)}</strong>` : ''}</div>
-            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
-          </div>`;
-        }
-
-        if (e.type === 'dispatch-plan') {
-          // Sevkiyat sorumlusundan gelen sevkiyat planı
-          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--red);">
-            <div class="top">
-              <span class="from">🚛 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Sevkiyat</span></span>
-              <span class="date">Gün ${e.receivedDay}</span>
-            </div>
-            <div class="subject">${e.subject}</div>
-            <div class="preview">${e.plan.length} sevkiyat · Yakıt: ${fmt(e.totalFuelCost)}</div>
-            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
-          </div>`;
-        }
-
-        if (e.type === 'urban-renewal') {
-          // Kentsel dönüşüm teklifi
-          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--purple);">
-            <div class="top">
-              <span class="from">🏚 ${e.customerName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Kentsel Dönüşüm</span></span>
-              <span class="date">Gün ${e.receivedDay} · ${ILCELER[e.ilce]?.name || ''}</span>
-            </div>
-            <div class="subject">${e.subject}</div>
-            <div class="preview">Bize ${e.ourShare} daire, müşteriye ${e.theirShare} · Tahmini kâr: <strong style="color: ${e.estProfit >= 0 ? 'var(--green)' : 'var(--red)'};">${e.estProfit >= 0 ? '+' : ''}${fmt(e.estProfit)}</strong></div>
-            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
-          </div>`;
-        }
-
-        if (e.type === 'raw-offer') {
-          // Hammadde tedarikçisinden fabrikaya özel teklif
-          const factory = (state.factories || []).find(f => f.id === e.factoryId);
-          const b = factory ? BRANDS[factory.brandId] : null;
-          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
-            <div class="top">
-              <span class="from">🚚 ${e.supplierName || 'Tedarikçi'} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Hammadde Teklifi</span></span>
-              <span class="date">Gün ${e.receivedDay}</span>
-            </div>
-            <div class="subject">${e.subject}</div>
-            <div class="preview">${(e.items || []).length} hammadde · Toplam: <strong style="color: var(--accent);">${fmt(e.totalDeal || 0)}</strong>${b ? ` · Hedef: ${b.name}` : ''}</div>
-            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
-          </div>`;
-        }
-
-        // Varsayılan: tender (müşteri ihalesi) — cust null kontrolü
-        if (!cust) {
-          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
-            <div class="top">
-              <span class="from">⚠️ Bilinmeyen gönderici</span>
-              <span class="date">Gün ${e.receivedDay}</span>
+              <span class="from">⚠️ Hatalı mail (ID: ${e.id || '?'})</span>
+              <span class="date">Gün ${e.receivedDay || '?'}</span>
             </div>
             <div class="subject">${e.subject || 'Mail'}</div>
-            <div class="preview">${(e.items || []).length} kalem</div>
+            <div class="preview" style="color: var(--red);">Bu mail bozuk — atlayıp devam edebilirsin</div>
           </div>`;
         }
-        return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
-          <div class="top">
-            <span class="from">${cust.name}</span>
-            <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce]?.name || ''}</span>
-          </div>
-          <div class="subject">${e.subject}</div>
-          <div class="preview">${(e.items || []).length} kalem · Termin: Gün ${e.deadline} · Güven: ${Math.round(cust.trust)}/100</div>
-          <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
-        </div>`;
       }).join('')}
     </div>`;
 }
@@ -18693,10 +18705,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.85';
+const CURRENT_VERSION = 'v1.86';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.86',
+    date: '24 Mayıs 2026',
+    title: 'GELEN KUTUSU SAVUNMA — BOZUK MAİL ATLA',
+    items: [
+      { cat: 'major', text: '🛡️ <strong>Mail render hatası sayfayı kilitlemiyor</strong>: her mail kendi try-catch\'inde' },
+      { cat: 'feature', text: 'Bir mail patlarsa sadece o mail kırmızı uyarı kartıyla görünür, diğerleri normal' },
+      { cat: 'feature', text: 'Console\'da hangi mail patladı bilgisi (F12 ile detay)' },
+      { cat: 'feature', text: 'urban-renewal customerName/ilce undefined olabilir → varsayılan değerler' },
+      { cat: 'feature', text: 'purchase-proposal items/purchases dizileri eksik olsa bile render eder' },
+      { cat: 'feature', text: 'dispatch-plan plan dizisi yoksa 0 sevkiyat gösterir' }
+    ]
+  },
   {
     version: 'v1.85',
     date: '24 Mayıs 2026',

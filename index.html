@@ -9687,15 +9687,16 @@ function renderInbox() {
 
         if (e.type === 'fs-proposal') {
           // Saha satış personelinden gelen iş önerisi
+          if (!cust) return ''; // güvenlik
           const profitPct = (e.profitMargin * 100).toFixed(0);
           const profit = e.total - e.estimatedCost;
           return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
             <div class="top">
               <span class="from">🤝 ${e.repName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">→ ${cust.name}</span></span>
-              <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce].name}</span>
+              <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce]?.name || ''}</span>
             </div>
             <div class="subject">${e.subject}</div>
-            <div class="preview">${e.items.length} kalem · ${fmt(e.total)} · Kâr: <strong style="color: var(--green);">${fmt(profit)} (%${profitPct})</strong></div>
+            <div class="preview">${(e.items || []).length} kalem · ${fmt(e.total)} · Kâr: <strong style="color: var(--green);">${fmt(profit)} (%${profitPct})</strong></div>
             <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
           </div>`;
         }
@@ -9732,7 +9733,7 @@ function renderInbox() {
           return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--purple);">
             <div class="top">
               <span class="from">🏚 ${e.customerName} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Kentsel Dönüşüm</span></span>
-              <span class="date">Gün ${e.receivedDay} · ${ILCELER[e.ilce].name}</span>
+              <span class="date">Gün ${e.receivedDay} · ${ILCELER[e.ilce]?.name || ''}</span>
             </div>
             <div class="subject">${e.subject}</div>
             <div class="preview">Bize ${e.ourShare} daire, müşteriye ${e.theirShare} · Tahmini kâr: <strong style="color: ${e.estProfit >= 0 ? 'var(--green)' : 'var(--red)'};">${e.estProfit >= 0 ? '+' : ''}${fmt(e.estProfit)}</strong></div>
@@ -9740,14 +9741,39 @@ function renderInbox() {
           </div>`;
         }
 
-        // Varsayılan: tender (müşteri ihalesi)
+        if (e.type === 'raw-offer') {
+          // Hammadde tedarikçisinden fabrikaya özel teklif
+          const factory = (state.factories || []).find(f => f.id === e.factoryId);
+          const b = factory ? BRANDS[factory.brandId] : null;
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
+            <div class="top">
+              <span class="from">🚚 ${e.supplierName || 'Tedarikçi'} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Hammadde Teklifi</span></span>
+              <span class="date">Gün ${e.receivedDay}</span>
+            </div>
+            <div class="subject">${e.subject}</div>
+            <div class="preview">${(e.items || []).length} hammadde · Toplam: <strong style="color: var(--accent);">${fmt(e.totalDeal || 0)}</strong>${b ? ` · Hedef: ${b.name}` : ''}</div>
+            <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+          </div>`;
+        }
+
+        // Varsayılan: tender (müşteri ihalesi) — cust null kontrolü
+        if (!cust) {
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
+            <div class="top">
+              <span class="from">⚠️ Bilinmeyen gönderici</span>
+              <span class="date">Gün ${e.receivedDay}</span>
+            </div>
+            <div class="subject">${e.subject || 'Mail'}</div>
+            <div class="preview">${(e.items || []).length} kalem</div>
+          </div>`;
+        }
         return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
           <div class="top">
             <span class="from">${cust.name}</span>
-            <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce].name}</span>
+            <span class="date">Gün ${e.receivedDay} · ${ILCELER[cust.ilce]?.name || ''}</span>
           </div>
           <div class="subject">${e.subject}</div>
-          <div class="preview">${e.items.length} kalem · Termin: Gün ${e.deadline} · Güven: ${Math.round(cust.trust)}/100</div>
+          <div class="preview">${(e.items || []).length} kalem · Termin: Gün ${e.deadline} · Güven: ${Math.round(cust.trust)}/100</div>
           <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
         </div>`;
       }).join('')}
@@ -18667,10 +18693,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.84';
+const CURRENT_VERSION = 'v1.85';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.85',
+    date: '24 Mayıs 2026',
+    title: 'GELEN KUTUSU RENDER HATASI DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '🛠️ <strong>Gelen kutusunda hammadde teklifi (raw-offer) render hatası giderildi</strong>' },
+      { cat: 'feature', text: 'raw-offer maillerinde customerId yok → tender varsayılana düşüp cust.name patlatıyordu' },
+      { cat: 'feature', text: 'Raw-offer için özel mail kartı eklendi (yeşil border, hedef fabrika gösterir)' },
+      { cat: 'feature', text: 'fs-proposal ve tender mail kartlarında cust null kontrolü' },
+      { cat: 'feature', text: 'ILCELER[ilce]?.name güvenli erişim (eski ilçe ID\'leri patlatmayacak)' },
+      { cat: 'feature', text: 'e.items undefined olsa bile preview\'da \'0 kalem\' gösterir, hata vermez' }
+    ]
+  },
   {
     version: 'v1.84',
     date: '24 Mayıs 2026',

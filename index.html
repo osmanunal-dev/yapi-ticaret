@@ -6672,6 +6672,17 @@ function handleBuildingCompleted(land) {
   state.agenda.push(`✅ ${ILCELER[land.ilce].name} ${t.name} inşaatı tamamlandı!`);
   addXP(200 + b.apartments.length * 5, 'inşaat tamamlama');
 
+  // 🦺 Bu şantiyede atanmış olan tüm personeli BOŞA çıkar
+  // Şantiye bittiği için artık etki vermeyecekler, yeni şantiyeye atanabilirler
+  if (Array.isArray(state.constructionStaff)) {
+    const released = state.constructionStaff.filter(s => s.assignedLandId === land.id);
+    released.forEach(s => { s.assignedLandId = null; });
+    if (released.length > 0) {
+      state.agenda.push(`🦺 ${released.length} şantiye personeli boşa çıktı (${ILCELER[land.ilce].name} bitti) — yeni şantiyeye ata`);
+      toast(`🦺 ${released.length} şantiye personeli boşa çıktı — yeni şantiyeye atayabilirsin`, 'info');
+    }
+  }
+
   // Taşeron daire payı (daireyle ödeme yapılmışsa)
   // Önce taşeron payı ayrılır — en küçük dairelerden
   let availableApartments = b.apartments.slice();
@@ -18953,10 +18964,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.87';
+const CURRENT_VERSION = 'v1.88';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.88',
+    date: '24 Mayıs 2026',
+    title: 'ŞANTİYE BİTİNCE PERSONEL OTOMATİK BOŞA ÇIKAR',
+    items: [
+      { cat: 'major', text: '🦺 <strong>İnşaat tamamlanınca o şantiyedeki tüm personel otomatik boşa çıkar</strong>' },
+      { cat: 'feature', text: 'Şantiye bittiğinde personel "kilitli" kalmıyor — yeni şantiyeye atayabilirsin' },
+      { cat: 'feature', text: 'Toast bildirimi: "🦺 X şantiye personeli boşa çıktı — yeni şantiyeye atayabilirsin"' },
+      { cat: 'feature', text: 'Agenda kaydı: "X personel boşa çıktı (Maltepe bitti)"' },
+      { cat: 'feature', text: 'Sanitize: yüklenen state\'te tamamlanmış/kayıp şantiyelere atanmış personel otomatik boşa çıkar (geriye uyumluluk)' },
+      { cat: 'info', text: 'Mevcut kayıt yüklenince eski "kilitli" personeller otomatik temizlenir' }
+    ]
+  },
   {
     version: 'v1.87',
     date: '24 Mayıs 2026',
@@ -20756,6 +20780,24 @@ function sanitizeLoadedState() {
         if (e.branch) return;
         e.branch = (typeof CATEGORY_BRANCH !== 'undefined' && CATEGORY_BRANCH[e.category]) || 'store';
       });
+    }
+
+    // 15) Tamamlanmış veya kayıp şantiyelere atanmış personeli boşa çıkar
+    // Bu, şantiye bittiği halde personelin "kilitli" kalmasını önler
+    if (Array.isArray(state.constructionStaff)) {
+      let releasedCount = 0;
+      state.constructionStaff.forEach(s => {
+        if (!s.assignedLandId) return;
+        const land = (state.lands || []).find(l => l.id === s.assignedLandId);
+        // Arsa yoksa VEYA bina yoksa VEYA bina tamamlanmışsa → boşa çıkar
+        if (!land || !land.building || land.building.status === 'completed') {
+          s.assignedLandId = null;
+          releasedCount++;
+        }
+      });
+      if (releasedCount > 0) {
+        console.log(`Sanitize: ${releasedCount} şantiye personeli kilitli şantiyeden boşa çıkarıldı`);
+      }
     }
   } catch (e) {
     console.error('Sanitize hatası (önemsiz):', e);

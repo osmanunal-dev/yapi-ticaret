@@ -3377,6 +3377,7 @@ const ILCELER = {
   beylikd:    { name: 'Beylikdüzü',     side: 'V', km: 52, m2Price: 25000  },
   esenyurt:   { name: 'Esenyurt',       side: 'V', km: 54, m2Price: 18000  },
   basaksehir: { name: 'Başakşehir',     side: 'V', km: 48, m2Price: 35000  },
+  bagcilar:   { name: 'Bağcılar',       side: 'V', km: 38, m2Price: 32000  },
   sariyer:    { name: 'Sarıyer',        side: 'V', km: 38, m2Price: 110000 },
   maslak:     { name: 'Maslak',         side: 'V', km: 30, m2Price: 220000 },
   zeytinburnu:{ name: 'Zeytinburnu',    side: 'V', km: 30, m2Price: 70000  },
@@ -8588,11 +8589,15 @@ function contractDemand(productId) {
   let pending = 0;
   for (const ct of state.contracts) {
     if (ct.delivered) continue;
+    if (!Array.isArray(ct.items)) continue;
     for (const it of ct.items) {
-      if (it.productId !== productId) continue;
-      const delivered = ct.deliveries.reduce((s, d) =>
-        s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
-      pending += Math.max(0, it.qty - delivered);
+      if (!it || it.productId !== productId) continue;
+      const deliveries = Array.isArray(ct.deliveries) ? ct.deliveries : [];
+      const delivered = deliveries.reduce((s, d) => {
+        if (!d || !Array.isArray(d.items)) return s;
+        return s + (d.items.find(x => x && x.productId === it.productId)?.qty || 0);
+      }, 0);
+      pending += Math.max(0, (it.qty || 0) - delivered);
     }
   }
   return pending;
@@ -8611,17 +8616,21 @@ function contractDemandDetails(productId) {
   const details = [];
   for (const ct of state.contracts) {
     if (ct.delivered) continue;
+    if (!Array.isArray(ct.items)) continue;
     for (const it of ct.items) {
-      if (it.productId !== productId) continue;
-      const delivered = ct.deliveries.reduce((s, d) =>
-        s + (d.items.find(x => x.productId === it.productId)?.qty || 0), 0);
-      const remaining = it.qty - delivered;
+      if (!it || it.productId !== productId) continue;
+      const deliveries = Array.isArray(ct.deliveries) ? ct.deliveries : [];
+      const delivered = deliveries.reduce((s, d) => {
+        if (!d || !Array.isArray(d.items)) return s;
+        return s + (d.items.find(x => x && x.productId === it.productId)?.qty || 0);
+      }, 0);
+      const remaining = (it.qty || 0) - delivered;
       if (remaining > 0) {
-        const cust = getCustomer(ct.customerId);
+        const cust = ct.customerId ? getCustomer(ct.customerId) : null;
         details.push({
           contractId: ct.id,
-          customerName: cust ? cust.name : '?',
-          deadline: ct.deadline,
+          customerName: cust ? cust.name : (ct.customerName || '?'),
+          deadline: ct.deadline || ct.dueDay || state.day,
           remaining
         });
       }
@@ -11401,6 +11410,11 @@ function renderSuppliers() {
           <div class="loc">📍 ${ILCELER[s.ilce].name} · ${s.priceMod < 0.95 ? 'Ekonomik' : s.priceMod > 1.08 ? 'Premium' : 'Standart'} · ×${s.priceMod.toFixed(2)}</div>
           ${productsToShow.length === 0 ? '<div style="font-size: 11px; color: var(--ink-dim); padding: 6px 0;">Bu tedarikçinin eşleşen ürünü yok.</div>' : ''}
           ${productsToShow.map(pid => {
+            // Güvenlik: tanımsız ürün ID'lerini atla (eski state veya yanlış tedarikçi listesi)
+            if (!PRODUCTS[pid]) {
+              console.warn('[renderSuppliers] Tanımsız ürün ID:', pid, 'tedarikçi:', s.id);
+              return '';
+            }
             const price = supplierPrice(s, pid);
             const trend = priceTrend(pid);
             const arr = trend === 'up' ? '<span class="price-trend up">▲</span>' : trend === 'down' ? '<span class="price-trend down">▼</span>' : '';
@@ -18209,10 +18223,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.82';
+const CURRENT_VERSION = 'v1.83';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.83',
+    date: '24 Mayıs 2026',
+    title: 'TEDARİKÇİLER SAYFASI RENDER HATASI DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '🛠️ <strong>"Cannot read properties of undefined (reading \'name\')" hatası çözüldü</strong>' },
+      { cat: 'feature', text: 'v1.72\'de eklenen <strong>"Marmara Kimya San."</strong> hammadde tedarikçisi <code>bagcilar</code> ilçesinde tanımlı ama ILCELER\'de Bağcılar yoktu' },
+      { cat: 'feature', text: '<strong>Bağcılar ilçesi ILCELER\'e eklendi</strong> (side: V, km: 38, m2Price: ₺32K)' },
+      { cat: 'feature', text: 'renderSuppliers\'da PRODUCTS[pid] undefined kontrolü eklendi (gelecek hatalar için savunma)' },
+      { cat: 'feature', text: 'contractDemand ve contractDemandDetails\'a güvenli array kontrolleri eklendi' },
+      { cat: 'feature', text: 'Bozulmuş sözleşmelerin items/deliveries undefined olsa bile render patlamayacak' }
+    ]
+  },
   {
     version: 'v1.82',
     date: '24 Mayıs 2026',

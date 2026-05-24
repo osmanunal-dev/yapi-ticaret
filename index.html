@@ -6028,7 +6028,7 @@ function confirmBuyLand(listingId) {
   });
   state.landMarket.splice(idx, 1);
   closeModal();
-  toast(`✓ ${ILCELER[l.ilce].name}'da ${l.m2} m² arsa alındı: ${fmt(l.price)}`, 'success');
+  toast(`✓ ${(ILCELER[l.ilce]?.name || 'bilinmeyen')}'da ${l.m2} m² arsa alındı: ${fmt(l.price)}`, 'success');
   addXP(20, 'arsa alımı');
   render();
 }
@@ -6162,7 +6162,7 @@ function confirmSellLand(landId, method) {
     land.forSaleDay = state.day;
     land.forSalePrice = marketValue;
     closeModal();
-    toast(`🏘 ${ILCELER[land.ilce].name}'daki arsa piyasaya çıkarıldı. Alıcı bulunması bekleniyor...`, 'success');
+    toast(`🏘 ${(ILCELER[land.ilce]?.name || 'bilinmeyen')}'daki arsa piyasaya çıkarıldı. Alıcı bulunması bekleniyor...`, 'success');
     addXP(5, 'arsa listeleme');
   }
   render();
@@ -6175,7 +6175,7 @@ function unlistLand(landId) {
   land.forSale = false;
   land.forSaleDay = null;
   land.forSalePrice = null;
-  toast(`${ILCELER[land.ilce].name} arsası satıştan çekildi.`, 'info');
+  toast(`${(ILCELER[land.ilce]?.name || 'bilinmeyen')} arsası satıştan çekildi.`, 'info');
   render();
 }
 
@@ -6267,7 +6267,7 @@ function startConstruction(landId, buildingType) {
   if (!land) { toast('Arsa bulunamadı', 'error'); return; }
   if (land.building) { toast('Bu arsada zaten inşaat var', 'error'); return; }
   if (!canBuild(buildingType, land.m2)) {
-    toast(`Bu arsa ${BUILDING_TYPES[buildingType].name} için uygun değil`, 'error');
+    toast(`Bu arsa ${(BUILDING_TYPES[buildingType]?.name || 'Bina')} için uygun değil`, 'error');
     return;
   }
 
@@ -6296,7 +6296,7 @@ function startConstruction(landId, buildingType) {
     <div class="receipt-modal" onclick="event.stopPropagation()">
       <div class="receipt-header">
         <div class="r-company">📜 İNŞAAT MALZEME SÖZLEŞMESİ</div>
-        <div class="r-tagline">İç Şantiye Sevkiyat Planı · ${ILCELER[land.ilce].name}</div>
+        <div class="r-tagline">İç Şantiye Sevkiyat Planı · ${(ILCELER[land.ilce]?.name || 'bilinmeyen')}</div>
       </div>
 
       <div class="receipt-title-bar">
@@ -6316,7 +6316,7 @@ function startConstruction(landId, buildingType) {
         </div>
         <div class="ri-section">
           <div class="ri-label">İnşaat Alanı</div>
-          <div class="ri-val">${ILCELER[land.ilce].name}<br>
+          <div class="ri-val">${(ILCELER[land.ilce]?.name || 'bilinmeyen')}<br>
             <span style="font-weight: 400; font-size: 10px; color: #5a5048;">${land.m2} m² arsa · ${totalArea.toFixed(0)} m² inşaat alanı</span>
           </div>
         </div>
@@ -6481,7 +6481,7 @@ function createInternalConstructionContract(land) {
   const newContract = {
     id: contractId,
     customerId: ourCompanyId,
-    customerName: `🏗 ${state.company?.name || 'Şantiyem'} (${ILCELER[land.ilce].name})`,
+    customerName: `🏗 ${state.company?.name || 'Şantiyem'} (${(ILCELER[land.ilce]?.name || 'bilinmeyen')})`,
     items,
     total: estTotal,
     estimatedCost: estTotal,
@@ -6523,8 +6523,8 @@ function progressConstruction(land) {
     if (b.daysPassed >= 0) {
       // Yıkım bitti, inşaat başlıyor
       b.status = 'building';
-      state.agenda.push(`🏗 ${ILCELER[land.ilce].name} kentsel dönüşüm: yıkım tamam, inşaat başlıyor`);
-      toast(`🏗 ${ILCELER[land.ilce].name} yıkım tamam, inşaat başlıyor!`, 'info');
+      state.agenda.push(`🏗 ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} kentsel dönüşüm: yıkım tamam, inşaat başlıyor`);
+      toast(`🏗 ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} yıkım tamam, inşaat başlıyor!`, 'info');
     }
     return;
   }
@@ -6563,7 +6563,7 @@ function progressConstruction(land) {
           const pu = PRODUCTS[x.productId]?.unit || '';
           return `${pn} (${x.short} ${pu} eksik)`;
         }).join(', ');
-        state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} (TAŞERON) inşaatı malzeme bekliyor: ${detail}`);
+        state.agenda.push(`⚠️ ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} (TAŞERON) inşaatı malzeme bekliyor: ${detail}`);
         toast(`⚠️ Taşeron inşaatı malzeme bekliyor: ${detail}`, 'error');
       }
       return;
@@ -6627,8 +6627,8 @@ function progressConstruction(land) {
         const pu = PRODUCTS[x.productId]?.unit || '';
         return `${pn} (${x.short} ${pu} eksik)`;
       }).join(', ');
-      state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaatı malzeme bekliyor: ${detail}`);
-      toast(`⚠️ ${BUILDING_TYPES[b.type].name} inşaatı duruyor: ${detail}`, 'error');
+      state.agenda.push(`⚠️ ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} inşaatı malzeme bekliyor: ${detail}`);
+      toast(`⚠️ ${(BUILDING_TYPES[b.type]?.name || 'Bina')} inşaatı duruyor: ${detail}`, 'error');
     }
     return;
   }
@@ -6664,8 +6664,8 @@ function progressConstruction(land) {
     b.totalCost += dailyLabor;
   } else {
     b.status = 'paused-warned';
-    state.agenda.push(`⚠️ ${ILCELER[land.ilce].name} inşaat işçiliği ödenemedi`);
-    toast(`⚠️ İşçilik ödenemedi, ${ILCELER[land.ilce].name} inşaatı durdu!`, 'error');
+    state.agenda.push(`⚠️ ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} inşaat işçiliği ödenemedi`);
+    toast(`⚠️ İşçilik ödenemedi, ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} inşaatı durdu!`, 'error');
     return;
   }
 
@@ -6685,7 +6685,7 @@ function handleBuildingCompleted(land) {
   const b = land.building;
   const t = BUILDING_TYPES[b.type];
 
-  state.agenda.push(`✅ ${ILCELER[land.ilce].name} ${t.name} inşaatı tamamlandı!`);
+  state.agenda.push(`✅ ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} ${t.name} inşaatı tamamlandı!`);
   addXP(200 + b.apartments.length * 5, 'inşaat tamamlama');
 
   // 🦺 Bu şantiyede atanmış olan tüm personeli BOŞA çıkar
@@ -6694,7 +6694,7 @@ function handleBuildingCompleted(land) {
     const released = state.constructionStaff.filter(s => s.assignedLandId === land.id);
     released.forEach(s => { s.assignedLandId = null; });
     if (released.length > 0) {
-      state.agenda.push(`🦺 ${released.length} şantiye personeli boşa çıktı (${ILCELER[land.ilce].name} bitti) — yeni şantiyeye ata`);
+      state.agenda.push(`🦺 ${released.length} şantiye personeli boşa çıktı (${(ILCELER[land.ilce]?.name || 'bilinmeyen')} bitti) — yeni şantiyeye ata`);
       toast(`🦺 ${released.length} şantiye personeli boşa çıktı — yeni şantiyeye atayabilirsin`, 'info');
     }
   }
@@ -6779,7 +6779,7 @@ function cancelConstruction(landId) {
       <h2 style="color: var(--red);">${isUrban ? '🏚 KENTSEL DÖNÜŞÜM İPTALİ' : '🏗 İNŞAAT İPTALİ'}</h2>
 
       <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin: 14px 0; font-size: 12px; line-height: 1.7;">
-        <strong>${ILCELER[land.ilce].name}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
+        <strong>${(ILCELER[land.ilce]?.name || 'bilinmeyen')}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
         İlerleme: <strong>${Math.max(0, b.daysPassed)}/${b.totalDays} gün</strong><br>
         Bugüne kadar harcanan: <strong style="color: var(--red);">${fmt(b.totalCost)}</strong> (geri ödeme YOK)
       </div>
@@ -6824,7 +6824,7 @@ function confirmCancelConstruction() {
   if (!land.building) { closeModal(); return; }
 
   const isUrban = !!land.isUrbanRenewal;
-  const ilceName = ILCELER[land.ilce].name;
+  const ilceName = (ILCELER[land.ilce]?.name || 'bilinmeyen');
 
   // Bu inşaata bağlı iç sözleşmeyi iptal et (arşive iptal olarak yaz)
   const internalIdx = state.contracts.findIndex(c =>
@@ -6949,7 +6949,7 @@ function openBuildModal(landId) {
     <div class="modal" onclick="event.stopPropagation()" style="max-width: 900px;">
       <h2>🏗 İNŞAAT TÜRÜ SEÇ</h2>
       <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 16px;">
-        ${ILCELER[land.ilce].name}'da ${land.m2} m² arsa için uygun yapı tipleri:
+        ${(ILCELER[land.ilce]?.name || 'bilinmeyen')}'da ${land.m2} m² arsa için uygun yapı tipleri:
       </p>
       <div class="grid-2">${cards}</div>
       <div style="margin-top: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px;">
@@ -7057,7 +7057,7 @@ function openApartmentsModal(landId, viewMode) {
     <div class="modal" onclick="event.stopPropagation()" style="max-width: 1000px;">
       <h2>${t.icon} ${t.name} — Daire Yönetimi</h2>
       <p style="font-size: 12px; color: var(--ink-dim); margin-bottom: 12px;">
-        ${ILCELER[land.ilce].name}'da ${land.m2} m² arsa üzerinde ${totalApts} daireli ${t.name}
+        ${(ILCELER[land.ilce]?.name || 'bilinmeyen')}'da ${land.m2} m² arsa üzerinde ${totalApts} daireli ${t.name}
       </p>
 
       <div class="stat-grid" style="margin-bottom: 12px;">
@@ -7165,7 +7165,7 @@ function bulkRentApartments(landId) {
   // Onay modalı
   const totalDepositi = apts.reduce((s, a) => s + (a.rentMonthly * 2), 0); // 2 aylık depozit
   const totalMonthlyRent = apts.reduce((s, a) => s + a.rentMonthly, 0);
-  const ilceName = ILCELER[land.ilce].name;
+  const ilceName = (ILCELER[land.ilce]?.name || 'bilinmeyen');
 
   const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
     <div class="modal" onclick="event.stopPropagation()" style="max-width: 540px;">
@@ -7688,7 +7688,7 @@ function generateUrbanRenewalProposal() {
     receivedDay: state.day,
     expiresDay: state.day + 4, // 4 gün cevap süresi
     subject: `🏚 Kentsel Dönüşüm Teklifi — ${ilceData.name}`,
-    body: `${customer.name} olarak ${ilceData.name}'da bulunan ${buildingAge} yıllık binamızı yenilemek istiyoruz. Şirketinizle anlaşmak isterim.\n\nEski bina: ${oldM2} m² · ${oldApartmentCount} daire\nMevcut arsa: ${landM2} m² (yeni inşaata uygun)\nYıkım sonrası planlanan: ${BUILDING_TYPES[newType].name} (${newAptCount} daire)\n\nDaire paylaşımı önerimiz: bize ${theirShare} daire, size ${ourShare} daire.\n\nTahmini yıkım: ${fmt(demolitionCost)}\nToplam süre: ${totalDays} gün\n\nİlginizi bekliyoruz.`,
+    body: `${customer.name} olarak ${ilceData.name}'da bulunan ${buildingAge} yıllık binamızı yenilemek istiyoruz. Şirketinizle anlaşmak isterim.\n\nEski bina: ${oldM2} m² · ${oldApartmentCount} daire\nMevcut arsa: ${landM2} m² (yeni inşaata uygun)\nYıkım sonrası planlanan: ${(BUILDING_TYPES[newType]?.name || 'Bina')} (${newAptCount} daire)\n\nDaire paylaşımı önerimiz: bize ${theirShare} daire, size ${ourShare} daire.\n\nTahmini yıkım: ${fmt(demolitionCost)}\nToplam süre: ${totalDays} gün\n\nİlginizi bekliyoruz.`,
     unread: true,
     answered: false,
     sender: 'urban-customer'
@@ -7968,7 +7968,7 @@ function confirmUrbanRenewal(emailId) {
   closeModal();
   toast(`✓ Kentsel dönüşüm projesi başladı! Yıkım: ${fmt(e.demolitionCost)} · İç sözleşme oluşturuldu`, 'success');
   addXP(80, 'kentsel dönüşüm onayı');
-  state.agenda.push(`🏚 ${ILCELER[e.ilce].name} kentsel dönüşüm projesi başladı · Şantiye sevkiyatları "Sözleşmeler" sekmesinde takip edilir`);
+  state.agenda.push(`🏚 ${(ILCELER[e.ilce]?.name || 'bilinmeyen')} kentsel dönüşüm projesi başladı · Şantiye sevkiyatları "Sözleşmeler" sekmesinde takip edilir`);
   setView('lands');
   render();
 }
@@ -8065,7 +8065,7 @@ function subcontractBuilding(landId) {
       </div>
 
       <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
-        <strong>${ILCELER[land.ilce].name}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
+        <strong>${(ILCELER[land.ilce]?.name || 'bilinmeyen')}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
         Kalan süre: <strong>${remainingDays} gün</strong> → Taşeronda: <strong style="color: var(--green);">${newRemainingDays} gün</strong> (%${Math.round((1 - speedupFactor) * 100)} daha hızlı)<br>
         <strong>Taşeron yalnızca işçilik yapar.</strong> Malzemeleri <strong style="color: var(--accent);">siz tedarik edersiniz</strong> (Tedarikçiler sayfasından alın, stoktan günlük tüketilir).
       </div>
@@ -9024,8 +9024,8 @@ function generateTender() {
 
   const greetings = [
     'Merhaba,\n\nÖnümüzdeki dönem şantiyemizde kullanmak üzere aşağıdaki malzemelere ihtiyacımız vardır. Tarafınızdan en uygun teklifin tarafımıza iletilmesini rica ederiz.',
-    `Sayın yetkili,\n\n${ILCELER[customer.ilce].name} ilçesindeki projemizin aktif fazı için aşağıdaki kalemleri tedarik etmek durumundayız.`,
-    `İyi günler,\n\nFirmamızın ${ILCELER[customer.ilce].name} şantiyesinde kullanılmak üzere aşağıdaki kalemler için fiyat teklifi bekliyoruz.`
+    `Sayın yetkili,\n\n${(ILCELER[customer.ilce]?.name || 'bilinmeyen')} ilçesindeki projemizin aktif fazı için aşağıdaki kalemleri tedarik etmek durumundayız.`,
+    `İyi günler,\n\nFirmamızın ${(ILCELER[customer.ilce]?.name || 'bilinmeyen')} şantiyesinde kullanılmak üzere aşağıdaki kalemler için fiyat teklifi bekliyoruz.`
   ];
 
   return {
@@ -9175,7 +9175,7 @@ function tryFieldSalesVisit(rep) {
   // Mail içeriği
   const intros = [
     `Patron, müjdem var! Az önce ${customer.name} ile görüştüm.`,
-    `Selam patron, ${ILCELER[customer.ilce].name}'da güzel bir iş kovaladım.`,
+    `Selam patron, ${(ILCELER[customer.ilce]?.name || 'bilinmeyen')}'da güzel bir iş kovaladım.`,
     `Bir saatlik görüşmeden sonra ${customer.name} ile anlaştık sayılır.`,
     `Patron, ${customer.name}'in projesi için anlaşma yaptım, onayını bekliyorum.`
   ];
@@ -9203,7 +9203,7 @@ function tryFieldSalesVisit(rep) {
     receivedDay: state.day,
     expiresDay: state.day + 2, // Müşteri sabırsız
     subject: `📞 Yeni İş Önerisi — ${customer.name}`,
-    body: choice(intros) + `\n\nMüşteri: ${customer.name}\nKonum: ${ILCELER[customer.ilce].name}\nTermin: Gün ${deadline}\n\nAnlaşılan fiyat: ${fmt(totalDeal)} (malzeme + nakliye)\nTahmini maliyet: ${fmt(estimatedCost)}\nNet kâr: ${fmt(totalDeal - estimatedCost)}` + choice(closes),
+    body: choice(intros) + `\n\nMüşteri: ${customer.name}\nKonum: ${(ILCELER[customer.ilce]?.name || 'bilinmeyen')}\nTermin: Gün ${deadline}\n\nAnlaşılan fiyat: ${fmt(totalDeal)} (malzeme + nakliye)\nTahmini maliyet: ${fmt(estimatedCost)}\nNet kâr: ${fmt(totalDeal - estimatedCost)}` + choice(closes),
     unread: true,
     answered: false,
     sender: 'employee'
@@ -9990,7 +9990,7 @@ function renderFSProposalDetail(e) {
         <div style="text-align: right;">
           <div style="font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-transform: uppercase;">Müşteri</div>
           <div style="font-family: 'Bebas Neue'; font-size: 18px; letter-spacing: 1px;">${cust.name}</div>
-          <div style="font-size: 10px; color: var(--ink-dim);">${ILCELER[cust.ilce].name} · Güven ${Math.round(cust.trust)}/100</div>
+          <div style="font-size: 10px; color: var(--ink-dim);">${(ILCELER[cust.ilce]?.name || 'bilinmeyen')} · Güven ${Math.round(cust.trust)}/100</div>
         </div>
       </div>
       <div style="font-size: 12px; line-height: 1.7; color: var(--ink); white-space: pre-line; padding: 12px; background: var(--panel-2); border-left: 2px solid var(--green);">${e.body}</div>
@@ -10141,7 +10141,7 @@ function renderPurchaseProposalDetail(e) {
       <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; align-items: flex-start; margin-bottom: 10px;">
         <div>
           <div style="font-family: 'Bebas Neue'; font-size: 16px; letter-spacing: 1px;">${p.supplier.name}</div>
-          <div style="font-size: 10px; color: var(--ink-dim);">${ILCELER[p.supplier.ilce].name} · Bağ: <strong style="color: ${loyaltyInfo.color};">${loyaltyInfo.label} (${loyalty.toFixed(0)}/100)</strong></div>
+          <div style="font-size: 10px; color: var(--ink-dim);">${(ILCELER[p.supplier.ilce]?.name || 'bilinmeyen')} · Bağ: <strong style="color: ${loyaltyInfo.color};">${loyaltyInfo.label} (${loyalty.toFixed(0)}/100)</strong></div>
         </div>
         <div style="text-align: right;">
           <div style="font-family: 'Bebas Neue'; font-size: 18px; color: var(--accent);">${fmt(p.total)}</div>
@@ -10259,7 +10259,7 @@ function autoPurchaseAll(scope) {
       <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
         <div>
           <div style="font-family: 'Bebas Neue'; font-size: 16px; letter-spacing: 1px;">${p.supplier.name}</div>
-          <div style="font-size: 10px; color: var(--ink-dim);">${ILCELER[p.supplier.ilce].name}${showLoyalty ? ` · Bağ: <span style="color: ${loyaltyInfo.color}; font-weight: 700;">${loyaltyInfo.label} (${loyalty.toFixed(0)}/100)</span>` : ''}</div>
+          <div style="font-size: 10px; color: var(--ink-dim);">${(ILCELER[p.supplier.ilce]?.name || 'bilinmeyen')}${showLoyalty ? ` · Bağ: <span style="color: ${loyaltyInfo.color}; font-weight: 700;">${loyaltyInfo.label} (${loyalty.toFixed(0)}/100)</span>` : ''}</div>
         </div>
         <div style="text-align: right;">
           <div style="font-family: 'Bebas Neue'; font-size: 17px; color: var(--accent);">${fmt(p.total)}</div>
@@ -11014,7 +11014,7 @@ function renderEmailDetail() {
       <div class="meta">
         <h3>${e.subject}</h3>
         <div class="meta-row"><span class="k">Kimden</span><span>${cust.name} &lt;ihale@${cust.id}.com.tr&gt;</span></div>
-        <div class="meta-row"><span class="k">İlçe</span><span>${ILCELER[cust.ilce].name} (${ILCELER[cust.ilce].km} km, ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'})</span></div>
+        <div class="meta-row"><span class="k">İlçe</span><span>${(ILCELER[cust.ilce]?.name || 'bilinmeyen')} (${ILCELER[cust.ilce].km} km, ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'})</span></div>
         <div class="meta-row"><span class="k">Tarih</span><span>Gün ${e.receivedDay}</span></div>
         <div class="meta-row"><span class="k">Termin</span><span style="color: var(--accent); font-weight:700">Gün ${e.deadline} (${e.deadline - state.day} gün)</span></div>
       </div>
@@ -11114,7 +11114,7 @@ function renderEmailDetail() {
             </div>
             <div class="ss-item">
               <span class="ss-label">${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası</span>
-              <span class="ss-val" style="font-size: 12px;">${ILCELER[cust.ilce].name}</span>
+              <span class="ss-val" style="font-size: 12px;">${(ILCELER[cust.ilce]?.name || 'bilinmeyen')}</span>
             </div>
           </div>
           <table class="shipping-table">
@@ -11839,7 +11839,7 @@ function renderSuppliers() {
     filteredSuppliers = SUPPLIERS.filter(s => {
       // Supplier name or ilce match
       if (turkishMatch(s.name, q)) return true;
-      if (turkishMatch(ILCELER[s.ilce].name, q)) return true;
+      if (turkishMatch((ILCELER[s.ilce]?.name || 'bilinmeyen'), q)) return true;
       // Any matching product?
       if (matchingProducts.some(pid => s.products.includes(pid))) return true;
       return false;
@@ -11902,7 +11902,7 @@ function renderSuppliers() {
             const info = loyaltyLabel(s.id);
             return `<span style="font-size: 9px; color: ${info.color}; background: var(--panel-2); padding: 2px 6px; border-radius: 2px; letter-spacing: 1px; font-weight: 700; margin-left: 6px; vertical-align: middle;">${info.label.toUpperCase()} · ${loyalty.toFixed(0)}/100</span>`;
           })()}</h3>
-          <div class="loc">📍 ${ILCELER[s.ilce].name} · ${s.priceMod < 0.95 ? 'Ekonomik' : s.priceMod > 1.08 ? 'Premium' : 'Standart'} · ×${s.priceMod.toFixed(2)}</div>
+          <div class="loc">📍 ${(ILCELER[s.ilce]?.name || 'bilinmeyen')} · ${s.priceMod < 0.95 ? 'Ekonomik' : s.priceMod > 1.08 ? 'Premium' : 'Standart'} · ×${s.priceMod.toFixed(2)}</div>
           ${productsToShow.length === 0 ? '<div style="font-size: 11px; color: var(--ink-dim); padding: 6px 0;">Bu tedarikçinin eşleşen ürünü yok.</div>' : ''}
           ${productsToShow.map(pid => {
             // Güvenlik: tanımsız ürün ID'lerini atla (eski state veya yanlış tedarikçi listesi)
@@ -12038,12 +12038,12 @@ function renderContractCard(ct, dispatcherCount, isInternal) {
     // İç inşaat sözleşmesi
     const land = (state.lands || []).find(l => l.id === ct.constructionLandId);
     custName = ct.customerName || '🏗 Şantiyem';
-    ilceName = land ? ILCELER[land.ilce].name : 'Şantiye';
+    ilceName = land ? (ILCELER[land.ilce]?.name || 'bilinmeyen') : 'Şantiye';
   } else {
     const cust = getCustomer(ct.customerId);
     if (!cust) return ''; // sessizce atla
     custName = cust.name;
-    ilceName = ILCELER[cust.ilce].name;
+    ilceName = (ILCELER[cust.ilce]?.name || 'bilinmeyen');
   }
 
   const daysLeft = (ct.dueDay || ct.deadline) - state.day;
@@ -12279,7 +12279,7 @@ function showReceiptModal(ct, cust) {
           <div class="ri-val">
             ${cust.name}<br>
             <span style="font-weight: 400; font-size: 10px; color: #5a5048;">
-              ${ILCELER[cust.ilce].name} · ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası<br>
+              ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')} · ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası<br>
               ihale@${cust.id}.com.tr
             </span>
           </div>
@@ -12704,7 +12704,7 @@ function openDispatchModal(ctId) {
   const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
     <div class="modal" onclick="event.stopPropagation()" style="max-width: 720px;">
       <h2>SEVKİYAT PLANLA</h2>
-      <p><strong>${cust.name}</strong> · ${ILCELER[cust.ilce].name} (${dist} km · ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası)</p>
+      <p><strong>${cust.name}</strong> · ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')} (${dist} km · ${ILCELER[cust.ilce].side === 'A' ? 'Anadolu' : 'Avrupa'} Yakası)</p>
 
       <h3>1) Araç Seç</h3>
       <select id="dispatch-vehicle" class="text-input" onchange="updateDispatchSummary('${ctId}')">
@@ -13099,7 +13099,7 @@ function openExternalCarrierModal(ctId) {
       </div>
 
       <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 16px; font-size: 12px; line-height: 1.6;">
-        <strong style="color: var(--accent);">${cust.name}</strong> · ${ILCELER[cust.ilce].name} (${ILCELER[cust.ilce].km} km)<br>
+        <strong style="color: var(--accent);">${cust.name}</strong> · ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')} (${ILCELER[cust.ilce].km} km)<br>
         Kendi aracın yoksa veya acil teslimat için, dış nakliye firmaları yaklaşık <strong>2-2.5 kat pahalıdır</strong> ama anında çıkar. Şoför XP / araç KM kazanılmaz.
       </div>
 
@@ -13320,7 +13320,7 @@ function showIrsaliye(ctId, delivery) {
         </div>
         <div style="font-size: 11px; margin-bottom: 12px;">
           <div><strong>Alıcı:</strong> ${cust.name}</div>
-          <div><strong>Adres:</strong> ${ILCELER[cust.ilce].name}, İstanbul</div>
+          <div><strong>Adres:</strong> ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')}, İstanbul</div>
           ${delivery.externalCarrier
             ? `<div><strong>Nakliye:</strong> 🚚 ${delivery.externalCarrier} (dış nakliye)</div>
                <div><strong>Nakliye Ücreti:</strong> ${fmt(delivery.externalCost)}</div>`
@@ -13934,7 +13934,7 @@ function assignConstructionStaff(staffId, landId) {
     return;
   }
   s.assignedLandId = landId;
-  toast(`${s.name} → ${ILCELER[land.ilce].name} şantiyesine atandı`, 'success');
+  toast(`${s.name} → ${(ILCELER[land.ilce]?.name || 'bilinmeyen')} şantiyesine atandı`, 'success');
   render();
 }
 
@@ -14057,7 +14057,7 @@ function renderCustomers() {
           <div style="display: flex; justify-content: space-between; align-items: start;">
             <div>
               <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 16px;">${cust.name}</h3>
-              <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">📍 ${ILCELER[cust.ilce].name}</div>
+              <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">📍 ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')}</div>
               ${branchBadges.length > 0 ? `<div style="margin-top: 4px; display: flex; gap: 3px;">${branchBadges.join('')}</div>` : ''}
             </div>
             <div style="text-align: right;">
@@ -14102,7 +14102,7 @@ function renderVisits() {
           <div style="display: flex; justify-content: space-between;">
             <div>
               <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 15px;">${cust.name}</h3>
-              <div style="font-size: 10px; color: var(--ink-dim);">📍 ${ILCELER[cust.ilce].name} · ${dist} km</div>
+              <div style="font-size: 10px; color: var(--ink-dim);">📍 ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')} · ${dist} km</div>
             </div>
             <div style="text-align: right; font-size: 11px;">
               <div style="color: var(--ink-dim);">Güven</div>
@@ -14589,7 +14589,7 @@ function renderLandCard(l) {
     }
 
     buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--green);">
-      <strong style="color: var(--green);">✅ ${BUILDING_TYPES[b.type].name} tamamlandı${isUrban ? ' (Kentsel Dönüşüm)' : ''}</strong><br>
+      <strong style="color: var(--green);">✅ ${(BUILDING_TYPES[b.type]?.name || 'Bina')} tamamlandı${isUrban ? ' (Kentsel Dönüşüm)' : ''}</strong><br>
       <span style="font-size: 10px; color: var(--ink-dim);">${summaryText}</span>
     </div>`;
     // Arşiv binası: sadece bilgi göster, yönetim butonu gerekmiyor
@@ -14639,7 +14639,7 @@ function renderLandCard(l) {
     }
 
     buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">
-      <strong style="color: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">${paused ? '⚠️' : '🏗'} ${BUILDING_TYPES[b.type].name} ${paused ? '(DURDU)' : (isSub ? '(TAŞERONDA)' : 'inşa ediliyor')}${isUrban ? ' · Kentsel Dönüşüm' : ''}</strong>
+      <strong style="color: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">${paused ? '⚠️' : '🏗'} ${(BUILDING_TYPES[b.type]?.name || 'Bina')} ${paused ? '(DURDU)' : (isSub ? '(TAŞERONDA)' : 'inşa ediliyor')}${isUrban ? ' · Kentsel Dönüşüm' : ''}</strong>
       <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};"></div></div>
       <span style="font-size: 10px; color: var(--ink-dim);">${b.daysPassed}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
       ${paused && (!b.missingMaterials || b.missingMaterials.length === 0) ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
@@ -14679,7 +14679,7 @@ function renderLandMarket() {
   }
 
   // İlçeye göre sırala (alfabetik)
-  const sorted = market.slice().sort((a, b) => ILCELER[a.ilce].name.localeCompare(ILCELER[b.ilce].name, 'tr'));
+  const sorted = market.slice().sort((a, b) => (ILCELER[a.ilce]?.name || 'bilinmeyen').localeCompare((ILCELER[b.ilce]?.name || 'bilinmeyen'), 'tr'));
 
   return `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px;">
     <strong style="color: var(--accent);">İstanbul Arsa Piyasası</strong> — Günlük yenilenen ilanlar. Fiyatlar ilçenin m² piyasasına göre <strong>±%15</strong> varyasyonla. İleride üzerine inşaat yapılabilecek.
@@ -15949,7 +15949,7 @@ function renderConstructionHR() {
       activeLands.forEach(land => {
         const b = land.building;
         const bonuses = getConstructionBonuses(land.id);
-        const ilce = ILCELER[land.ilce].name;
+        const ilce = (ILCELER[land.ilce]?.name || 'bilinmeyen');
         const buildName = BUILDING_TYPES[b.type]?.name || 'İnşaat';
         const assignedStaff = staff.filter(s => s.assignedLandId === land.id);
         const progress = Math.min(100, Math.round((b.daysPassed / b.totalDays) * 100));
@@ -16097,7 +16097,7 @@ function renderConstructionCari() {
           <div style="display: flex; justify-content: space-between; align-items: start;">
             <div>
               <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 16px;">${cust.name}</h3>
-              <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">📍 ${ILCELER[cust.ilce].name}</div>
+              <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">📍 ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')}</div>
               ${m.urbanProject ? `<div style="font-size: 10px; color: #a855f7; margin-top: 4px;">🏗 ${BUILDING_TYPES[m.urbanProject.building?.type]?.name || 'Kentsel Dönüşüm'} projesi</div>` : ''}
             </div>
             <div style="text-align: right;">
@@ -16374,7 +16374,7 @@ function renderArchive() {
             <span class="from">${cust ? cust.name : '—'}</span>
             <span class="date" style="color: ${colors[e.status]}">${labels[e.status] || e.status}</span>
           </div>
-          <div class="subject">${cust ? ILCELER[cust.ilce].name : ''} · ${fmt(e.userOffer || e.total || 0)}</div>
+          <div class="subject">${cust ? (ILCELER[cust.ilce]?.name || 'bilinmeyen') : ''} · ${fmt(e.userOffer || e.total || 0)}</div>
         </div>`;
       }).join('')}
     </div>`;
@@ -17502,7 +17502,7 @@ function _nextDayInner() {
       const ct = state.contracts.find(c => c.id === v.deliveringContractId);
       const cust = ct ? getCustomer(ct.customerId) : null;
       if (cust) {
-        state.agenda.push(`${v.name || VEHICLE_TYPES[v.type].name} ${ILCELER[cust.ilce].name}'den döndü`);
+        state.agenda.push(`${v.name || VEHICLE_TYPES[v.type].name} ${(ILCELER[cust.ilce]?.name || 'bilinmeyen')}'den döndü`);
       }
       v.deliveringContractId = null;
     }
@@ -17870,29 +17870,42 @@ function _nextDayInner() {
 
   // 7a) Kentsel dönüşüm teklifleri — her 12-20 günde bir şans, reputation şartı
   if (state.reputation >= 50 && Math.random() < 0.08) {
-    const urbanProposal = generateUrbanRenewalProposal();
-    if (urbanProposal) {
-      state.inbox.push(urbanProposal);
-      toast(`📧 Yeni kentsel dönüşüm teklifi: ${urbanProposal.customerName}`, 'info');
+    try {
+      const urbanProposal = generateUrbanRenewalProposal();
+      if (urbanProposal) {
+        state.inbox.push(urbanProposal);
+        toast(`📧 Yeni kentsel dönüşüm teklifi: ${urbanProposal.customerName}`, 'info');
+      }
+    } catch (e) {
+      console.warn('Kentsel dönüşüm mail üretimi hatası (atlandı):', e);
     }
   }
 
   // 7a-2) Hammadde tedarikçilerinden fabrikaya teklif maili — fabrika varsa, %12 şans
   if ((state.factories || []).length > 0 && Math.random() < 0.12) {
-    const offer = generateRawMaterialOffer();
-    if (offer) {
-      state.inbox.push(offer);
-      toast(`📧 ${offer.supplierName} fabrikana özel teklif gönderdi`, 'info');
+    try {
+      const offer = generateRawMaterialOffer();
+      if (offer) {
+        state.inbox.push(offer);
+        toast(`📧 ${offer.supplierName} fabrikana özel teklif gönderdi`, 'info');
+      }
+    } catch (e) {
+      console.warn('Hammadde teklif maili hatası (atlandı):', e);
     }
   }
 
   // 7a-3) Şantiye kadro uyarısı — 14 günde bir, sadece aktif şantiye varsa
   if (!state.lastConstStaffAlert || state.day - state.lastConstStaffAlert >= 14) {
-    const alert = generateConstructionStaffAlert();
-    if (alert) {
-      state.inbox.push(alert);
-      state.lastConstStaffAlert = state.day;
-      toast(`🦺 Şantiye kadro uyarısı geldi: ${alert.sitesNeedingStaff.length} şantiye eksik`, 'info');
+    try {
+      const alert = generateConstructionStaffAlert();
+      if (alert) {
+        state.inbox.push(alert);
+        state.lastConstStaffAlert = state.day;
+        toast(`🦺 Şantiye kadro uyarısı geldi: ${alert.sitesNeedingStaff.length} şantiye eksik`, 'info');
+      }
+    } catch (e) {
+      console.warn('Şantiye kadro uyarı maili hatası (atlandı):', e);
+      state.lastConstStaffAlert = state.day; // hata olursa da tekrar denemesin
     }
   }
 
@@ -18100,7 +18113,7 @@ function _nextDayInner() {
       const price = l.forSalePrice || landCurrentValue(l);
       const profit = price - l.purchasePrice;
       earn(price, 'arsa-satis');
-      const ilceName = ILCELER[l.ilce].name;
+      const ilceName = (ILCELER[l.ilce]?.name || 'bilinmeyen');
       state.agenda.push(`🏘 ${ilceName} arsası satıldı: +${fmt(price)} (${daysListed} gün sonra alıcı buldu)`);
       toast(`🏘 ${ilceName} arsası alıcı buldu! +${fmt(price)}`, 'success');
       addXP(15, 'arsa satış (piyasa)');
@@ -18124,7 +18137,7 @@ function _nextDayInner() {
         apt.status = 'sold';
         apt.soldDay = state.day;
         apt.actualSalePrice = price;
-        const ilceName = ILCELER[l.ilce].name;
+        const ilceName = (ILCELER[l.ilce]?.name || 'bilinmeyen');
         state.agenda.push(`🏠 ${ilceName} Daire #${apt.number} satıldı: +${fmt(price)} (${daysListed} gün sonra)`);
         toast(`🏠 Daire #${apt.number} alıcı buldu! +${fmt(price)}`, 'success');
         addXP(30 + Math.round(price / 100000), 'daire satış (piyasa)');
@@ -18980,10 +18993,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.89';
+const CURRENT_VERSION = 'v1.90';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.90',
+    date: '24 Mayıs 2026',
+    title: 'GÜN ATLAMA HATASI ÇÖZÜLDÜ — TOPLU GÜVENLİ ERİŞİM',
+    items: [
+      { cat: 'major', text: '🛡️ <strong>Gün atlatılırken "Cannot read properties of undefined (reading \'name\')" hatası çözüldü</strong>' },
+      { cat: 'feature', text: '<strong>49 yerde</strong> ILCELER[X].name → güvenli erişim (?.name || \'bilinmeyen\')' },
+      { cat: 'feature', text: '<strong>5 yerde</strong> BUILDING_TYPES[X].name → güvenli erişim (?.name || \'Bina\')' },
+      { cat: 'feature', text: 'Mail üretim blokları kendi try-catch\'inde — biri patlasa diğeri devam eder' },
+      { cat: 'feature', text: 'Kentsel dönüşüm + hammadde teklifi + şantiye kadro uyarı mailleri korumalı' },
+      { cat: 'feature', text: 'Hata logları console\'a düşer, oyun kilitlenmez' }
+    ]
+  },
   {
     version: 'v1.89',
     date: '24 Mayıs 2026',

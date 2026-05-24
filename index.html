@@ -8794,6 +8794,121 @@ function declineRawMaterialOffer(emailId) {
   render();
 }
 
+// ============================================================
+// 🏗 ŞANTİYE KADRO UYARI MAILI
+// ============================================================
+
+// Atanmamış personeli olan veya hiç personeli olmayan aktif şantiyeleri tara
+function generateConstructionStaffAlert() {
+  const activeLands = (state.lands || []).filter(l =>
+    l.building && ['demolition','building','paused-warned'].includes(l.building.status)
+  );
+  if (activeLands.length === 0) return null;
+
+  const staff = state.constructionStaff || [];
+  const idleStaff = staff.filter(s => !s.assignedLandId);
+
+  // Şantiye durumu — hangi şantiyeler personel ihtiyacı içinde?
+  const sitesNeedingStaff = activeLands.map(land => {
+    const assigned = staff.filter(s => s.assignedLandId === land.id);
+    const hasChief = assigned.some(s => s.role === 'chief');
+    const hasMasters = assigned.some(s => s.role === 'master');
+    const hasEngineer = assigned.some(s => s.role === 'engineer');
+    const hasManager = assigned.some(s => s.role === 'manager');
+    const missing = [];
+    if (!hasChief) missing.push('chief');
+    if (!hasMasters) missing.push('master');
+    if (!hasEngineer) missing.push('engineer');
+    return { land, assigned, missing, hasChief, hasMasters, hasEngineer, hasManager };
+  }).filter(s => s.missing.length > 0);
+
+  if (sitesNeedingStaff.length === 0) return null;
+
+  // Eğer hiç idle yoksa ve hiç ihtiyaç yoksa → mail yok
+  if (idleStaff.length === 0 && sitesNeedingStaff.length === 0) return null;
+
+  // Hangi rolden eksik kaç tane?
+  const totalNeeds = { chief: 0, master: 0, engineer: 0 };
+  sitesNeedingStaff.forEach(s => {
+    s.missing.forEach(role => { if (totalNeeds[role] !== undefined) totalNeeds[role]++; });
+  });
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'construction-staff-alert',
+    branch: 'construction',
+    sitesNeedingStaff: sitesNeedingStaff.map(s => ({
+      landId: s.land.id,
+      ilce: s.land.ilce,
+      buildingType: s.land.building?.type,
+      progress: Math.round((s.land.building.daysPassed / s.land.building.totalDays) * 100),
+      assigned: s.assigned.length,
+      missing: s.missing
+    })),
+    idleStaffCount: idleStaff.length,
+    totalNeeds,
+    receivedDay: state.day,
+    expiresDay: state.day + 10,
+    subject: `🦺 Şantiye Kadro Uyarısı — ${sitesNeedingStaff.length} şantiye eksik kadro`,
+    body: `Sayın yönetici,\n\n${sitesNeedingStaff.length} aktif şantiyenizde eksik kadro tespit edildi:\n\n${sitesNeedingStaff.map(s => {
+      const ilce = ILCELER[s.land.ilce]?.name || s.land.ilce;
+      const bname = BUILDING_TYPES[s.land.building.type]?.name || 'İnşaat';
+      return `• ${ilce} · ${bname} (%${Math.round((s.land.building.daysPassed / s.land.building.totalDays)*100)} tamamlandı) — Eksik: ${s.missing.map(r => CONSTRUCTION_ROLES[r]?.label || r).join(', ')}`;
+    }).join('\n')}\n\n${idleStaff.length > 0 ? `📋 ${idleStaff.length} boştaki personeliniz var — hızlıca atayabilirsiniz.\n\n` : ''}İşe alım & atama için "Otomatik Ata" veya "Şantiye Personeli" sayfasına git.`,
+    unread: true,
+    answered: false
+  };
+}
+
+// Boştaki personeli en uygun şantiyelere otomatik ata
+function autoAssignConstructionStaff() {
+  const staff = state.constructionStaff || [];
+  const idle = staff.filter(s => !s.assignedLandId);
+  if (idle.length === 0) {
+    toast('Boşta personel yok', 'info');
+    return 0;
+  }
+
+  const activeLands = (state.lands || []).filter(l =>
+    l.building && ['demolition','building','paused-warned'].includes(l.building.status)
+  );
+  if (activeLands.length === 0) {
+    toast('Aktif şantiye yok', 'info');
+    return 0;
+  }
+
+  let assigned = 0;
+  // Her boştaki personel için: en eksik olan şantiyeyi bul
+  idle.forEach(person => {
+    const role = CONSTRUCTION_ROLES[person.role];
+    if (!role) return;
+
+    // Bu rol için en çok ihtiyacı olan şantiye (en az atanmış)
+    const candidates = activeLands.map(land => {
+      const onSite = staff.filter(s => s.assignedLandId === land.id && s.role === person.role).length;
+      const maxAllowed = role.maxPerLand;
+      const canFit = onSite < maxAllowed;
+      return { land, onSite, canFit };
+    }).filter(c => c.canFit);
+
+    if (candidates.length === 0) return; // her şantiyede max'a ulaştı
+
+    // En az atanmışa öncelik (ihtiyacı en yüksek olana)
+    candidates.sort((a, b) => a.onSite - b.onSite);
+    person.assignedLandId = candidates[0].land.id;
+    assigned++;
+  });
+
+  if (assigned > 0) {
+    toast(`✅ ${assigned} personel otomatik atandı`, 'success');
+    state.agenda.push(`🦺 Otomatik atama: ${assigned} personel şantiyelere atandı`);
+  } else {
+    toast('Tüm şantiyelerde max kadro dolu', 'info');
+  }
+  render();
+  return assigned;
+}
+
 function generateTender() {
   const customer = choice(state.customers);
   const trustBonus = customer.trust > 60 ? 1.05 : 1.0; // trusted customers tend to send bigger jobs
@@ -9757,6 +9872,20 @@ function renderInbox() {
             </div>`;
           }
 
+          if (e.type === 'construction-staff-alert') {
+            // Şantiye kadro uyarısı
+            const sites = e.sitesNeedingStaff || [];
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid #a855f7;">
+              <div class="top">
+                <span class="from">🦺 Şantiye Yönetimi <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Kadro Uyarısı</span></span>
+                <span class="date">Gün ${e.receivedDay}</span>
+              </div>
+              <div class="subject">${e.subject || 'Şantiye Kadro Uyarısı'}</div>
+              <div class="preview">${sites.length} şantiye eksik kadro${e.idleStaffCount > 0 ? ` · 📋 ${e.idleStaffCount} boştaki personel` : ''}</div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
           // Varsayılan: tender (müşteri ihalesi) — cust null kontrolü
           if (!cust) {
             return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})">
@@ -10583,6 +10712,92 @@ function evaluateOffer(userOffer, email) {
   return { status, willAccept, reason, underBudget, beatsCompetitor };
 }
 
+// Şantiye kadro uyarı maili detay sayfası
+function renderConstructionStaffAlertDetail(e) {
+  const c = $('center');
+  const expIn = e.expiresDay - state.day;
+  const staff = state.constructionStaff || [];
+  const idleStaff = staff.filter(s => !s.assignedLandId);
+
+  // Şantiyelerin güncel durumu (mail oluştuğundan beri değişmiş olabilir)
+  const currentSites = e.sitesNeedingStaff.map(s => {
+    const land = (state.lands || []).find(l => l.id === s.landId);
+    if (!land || !land.building) return null;
+    const assigned = staff.filter(p => p.assignedLandId === s.landId);
+    const roles = {
+      chief: assigned.find(p => p.role === 'chief'),
+      master: assigned.filter(p => p.role === 'master'),
+      engineer: assigned.find(p => p.role === 'engineer'),
+      manager: assigned.find(p => p.role === 'manager')
+    };
+    const progress = Math.round((land.building.daysPassed / land.building.totalDays) * 100);
+    return { land, assigned, roles, progress };
+  }).filter(x => x);
+
+  c.innerHTML = `<div style="max-width: 900px;">
+    <button class="btn" style="margin-bottom: 14px;" onclick="state.selectedEmail=null; render()">← Geri</button>
+
+    <div style="padding: 16px 18px; background: linear-gradient(180deg, rgba(168,85,247,0.06), transparent); border-left: 4px solid #a855f7;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h2 style="margin: 0; color: #a855f7; font-family: 'Bebas Neue'; letter-spacing: 2px;">🦺 ŞANTİYE KADRO UYARISI</h2>
+          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">${currentSites.length} aktif şantiyenizde eksik kadro · Boştaki personel: ${idleStaff.length}</div>
+        </div>
+        <div style="text-align: right; font-size: 11px;">
+          <div style="color: var(--ink-dim);">Geliş: Gün ${e.receivedDay}</div>
+          <div style="color: ${expIn <= 2 ? 'var(--red)' : 'var(--ink-dim)'};">Son: Gün ${e.expiresDay} (${expIn} gün)</div>
+        </div>
+      </div>
+    </div>
+
+    ${idleStaff.length > 0 ? `
+    <div style="margin-top: 14px; padding: 14px 16px; background: var(--panel-2); border-left: 3px solid var(--accent);">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <strong>📋 ${idleStaff.length} boştaki personeliniz var</strong>
+          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">${idleStaff.map(p => `${CONSTRUCTION_ROLES[p.role]?.label || p.role}: ${p.name}`).slice(0, 4).join(' · ')}${idleStaff.length > 4 ? '...' : ''}</div>
+        </div>
+        <button class="btn primary" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; padding: 10px 16px;" onclick="autoAssignConstructionStaff(); state.selectedEmail=null; render();">⚡ OTOMATİK ATA</button>
+      </div>
+    </div>
+    ` : `
+    <div style="margin-top: 14px; padding: 14px 16px; background: var(--panel-2); border-left: 3px solid var(--red);">
+      <strong>⚠️ Boştaki personel yok</strong>
+      <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Eksik şantiyeler için yeni personel işe almalısın.</div>
+      <button class="btn primary" style="margin-top: 10px;" onclick="setView('construction-hr'); window._constHRTab='hire'; setTimeout(render,10);">➕ İŞE AL SAYFASINA GİT</button>
+    </div>
+    `}
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 16px 0 8px;">🏗 ŞANTİYE DURUMU</h3>
+
+    <div class="grid-2">
+      ${currentSites.map(s => {
+        const ilce = ILCELER[s.land.ilce]?.name || s.land.ilce;
+        const bname = BUILDING_TYPES[s.land.building?.type]?.name || 'İnşaat';
+        return `<div class="card" style="border-left: 3px solid #a855f7;">
+          <h3 style="margin: 0;">${ilce} · ${bname}</h3>
+          <div style="font-size: 10px; color: var(--ink-dim);">Gün ${Math.floor(s.land.building.daysPassed)}/${s.land.building.totalDays} · %${s.progress}</div>
+          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${s.progress}%; background: #a855f7;"></div></div>
+
+          <div style="padding: 8px; background: var(--panel-2); font-size: 11px; line-height: 1.7; margin-bottom: 8px;">
+            <div>🦺 Şef: ${s.roles.chief ? `<strong style="color: var(--green);">${s.roles.chief.name} (Sv${s.roles.chief.level})</strong>` : '<span style="color: var(--red);">⚠️ YOK</span>'}</div>
+            <div>👷 Usta: ${s.roles.master.length > 0 ? `<strong style="color: var(--green);">${s.roles.master.length} usta</strong>` : '<span style="color: var(--red);">⚠️ YOK</span>'}</div>
+            <div>📐 Mühendis: ${s.roles.engineer ? `<strong style="color: var(--green);">${s.roles.engineer.name} (Sv${s.roles.engineer.level})</strong>` : '<span style="color: var(--red);">⚠️ YOK</span>'}</div>
+            <div>📋 Sorumlu: ${s.roles.manager ? `<strong style="color: var(--green);">${s.roles.manager.name}</strong>` : '<span style="color: var(--ink-dim);">— (opsiyonel)</span>'}</div>
+          </div>
+
+          <button class="btn small primary" style="width: 100%;" onclick="state.selectedEmail=null; setView('construction-hr'); window._constHRTab='sites'; setTimeout(render,10);">👷 BU ŞANTİYEYE KADRO ATA</button>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div style="margin-top: 18px; display: flex; gap: 10px;">
+      <button class="btn" style="flex: 1; padding: 12px;" onclick="setView('construction-hr'); window._constHRTab='hire'; setTimeout(render,10);">➕ YENİ PERSONEL AL</button>
+      <button class="btn danger" style="padding: 12px;" onclick="declineRawMaterialOffer(${e.id})">📁 Maili Arşivle</button>
+    </div>
+  </div>`;
+}
+
 // Hammadde teklifi maili detay sayfası
 function renderRawOfferDetail(e) {
   const c = $('center');
@@ -10696,6 +10911,12 @@ function renderEmailDetail() {
   // Hammadde teklifi için ayrı sayfa
   if (e.type === 'raw-offer') {
     renderRawOfferDetail(e);
+    return;
+  }
+
+  // Şantiye kadro uyarı maili
+  if (e.type === 'construction-staff-alert') {
+    renderConstructionStaffAlertDetail(e);
     return;
   }
 
@@ -15634,14 +15855,29 @@ function renderConstructionHR() {
   // Tab state
   if (!window._constHRTab) window._constHRTab = 'list';
 
+  // Boşta personel uyarısı
+  const idleStaff = staff.filter(s => !s.assignedLandId);
+  const assignedStaff = staff.filter(s => s.assignedLandId);
+
   // Üst stat'lar
   let body = `
     <div class="stat-grid" style="margin-bottom: 14px;">
       <div class="stat-tile"><div class="stat-label">Toplam Personel</div><div class="stat-val" style="color: #a855f7;">${staff.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Aktif Şantiye</div><div class="stat-val" style="color: var(--blue);">${activeLands.length}</div></div>
-      <div class="stat-tile"><div class="stat-label">Atanmış</div><div class="stat-val" style="color: var(--green);">${staff.filter(s => s.assignedLandId).length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Atanmış</div><div class="stat-val" style="color: var(--green);">${assignedStaff.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Boşta</div><div class="stat-val" style="color: ${idleStaff.length > 0 ? 'var(--red)' : 'var(--ink-dim)'};">${idleStaff.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Aylık Maaş</div><div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(totalSalary)}</div></div>
     </div>
+
+    ${idleStaff.length > 0 && activeLands.length > 0 ? `
+    <div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--red); display: flex; justify-content: space-between; align-items: center;">
+      <div style="font-size: 12px;">
+        ⚠️ <strong style="color: var(--red);">${idleStaff.length} personelin boşta</strong> ama maaş alıyor.
+        <div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">Boştaki personeli şantiyelere atayarak bonuslarını aktif et.</div>
+      </div>
+      <button class="btn primary" style="background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; padding: 10px 16px;" onclick="autoAssignConstructionStaff()">⚡ OTOMATİK ATA</button>
+    </div>
+    ` : ''}
 
     <div class="tabs" style="margin-bottom: 14px;">
       <div class="tab ${window._constHRTab === 'list' ? 'active' : ''}" onclick="window._constHRTab='list'; render()">📋 PERSONELİM (${staff.length})</div>
@@ -15751,19 +15987,21 @@ function renderConstructionHR() {
         const r = CONSTRUCTION_ROLES[s.role];
         const xpReq = 100 * s.level;
         const assigned = s.assignedLandId ? (state.lands || []).find(l => l.id === s.assignedLandId) : null;
-        const assignedLabel = assigned ? `${ILCELER[assigned.ilce].name} şantiyesi` : '<span style="color: var(--ink-dim);">Boşta</span>';
+        const isIdle = !assigned;
+        const assignedLabel = assigned ? `${ILCELER[assigned.ilce]?.name || 'şantiye'} şantiyesi` : '<strong style="color: var(--red);">⚠️ BOŞTA — maaş alıyor ama etkisiz</strong>';
         const bonusPct = s.role === 'manager' ? '✓ Aktif' : `+%${Math.round(r.bonusPerLevel[s.level - 1] * 100)}`;
-        body += `<div class="emp-card" style="border-left: 3px solid #a855f7;">
+        body += `<div class="emp-card" style="border-left: 3px solid ${isIdle ? 'var(--red)' : '#a855f7'}; ${isIdle ? 'background: rgba(239,68,68,0.05);' : ''}">
           <div class="emp-avatar">${r.label.split(' ')[0]}</div>
           <div class="emp-info">
             <div class="emp-name">${s.name}</div>
             <div class="emp-role">${r.label} · Sv ${s.level} · <span class="stars">${'★'.repeat(s.level)}${'☆'.repeat(Math.max(0, 5 - s.level))}</span></div>
-            <div class="emp-stats">Maaş: ${fmt(s.salary)}/ay · ${r.bonusLabel}: <strong style="color: var(--green);">${bonusPct}</strong></div>
+            <div class="emp-stats">Maaş: ${fmt(s.salary)}/ay · ${r.bonusLabel}: <strong style="color: ${isIdle ? 'var(--ink-dim)' : 'var(--green)'};">${bonusPct}</strong></div>
             <div class="emp-stats">📍 ${assignedLabel}</div>
             <div class="emp-stats">XP: ${s.xp}/${xpReq}</div>
             <div class="progress-bar"><div class="progress-fill" style="width: ${(s.xp / xpReq) * 100}%; background: #a855f7;"></div></div>
           </div>
-          <div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${isIdle && activeLands.length > 0 ? `<button class="btn small primary" style="background: var(--accent); color: #000; border-color: var(--accent); white-space: nowrap;" onclick="window._constHRTab='sites'; render()">ATAM</button>` : ''}
             <button class="btn small danger" onclick="fireConstructionStaff('${s.id}')">KOVA</button>
           </div>
         </div>`;
@@ -17621,6 +17859,16 @@ function _nextDayInner() {
     }
   }
 
+  // 7a-3) Şantiye kadro uyarısı — 14 günde bir, sadece aktif şantiye varsa
+  if (!state.lastConstStaffAlert || state.day - state.lastConstStaffAlert >= 14) {
+    const alert = generateConstructionStaffAlert();
+    if (alert) {
+      state.inbox.push(alert);
+      state.lastConstStaffAlert = state.day;
+      toast(`🦺 Şantiye kadro uyarısı geldi: ${alert.sitesNeedingStaff.length} şantiye eksik`, 'info');
+    }
+  }
+
   // 7b) Saha satış sorumluları ziyaret yapar — her 2-3 günde bir
   // Saha satış ziyareti — GÜNDE SADECE 1 MÜŞTERİ ZİYARET EDİLİR (en kıdemli rep yapar)
   // Çoklu rep varsa sıralı olarak her gün başka bir rep aktif olur
@@ -18705,10 +18953,28 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.86';
+const CURRENT_VERSION = 'v1.87';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.87',
+    date: '24 Mayıs 2026',
+    title: 'ŞANTİYE KADRO UYARI MAİLİ + OTOMATİK ATAMA',
+    items: [
+      { cat: 'major', text: '🦺 <strong>Şantiye kadro uyarı maili</strong> — eksik kadro tespit edilirse 14 günde bir bildirim' },
+      { cat: 'feature', text: 'Mail detay sayfasında: tüm aktif şantiyelerin kadro durumu, eksik rol uyarıları' },
+      { cat: 'feature', text: 'Boştaki personel sayısı + "⚡ OTOMATİK ATA" butonu mail içinde' },
+      { cat: 'major', text: '⚡ <strong>Otomatik atama özelliği</strong> — boştaki personeli en uygun şantiyelere dağıtır' },
+      { cat: 'feature', text: 'En az atanmış şantiyeye öncelik (ihtiyacı en yüksek olana)' },
+      { cat: 'feature', text: 'maxPerLand kontrolü — bir şantiyede max 1 şef/mühendis/sorumlu, max 4 usta' },
+      { cat: 'major', text: '🔴 <strong>Şantiye Personeli sayfasında boştaki personeller kırmızı vurgu</strong>' },
+      { cat: 'feature', text: 'Kart kırmızı kenar + "BOŞTA — maaş alıyor ama etkisiz" uyarısı' },
+      { cat: 'feature', text: 'Her boştaki personel kartında "ATAM" butonu → şantiye atama tab\'ına gider' },
+      { cat: 'feature', text: 'Üst stat\'lara "Boşta" sütunu eklendi (kırmızı sayı)' },
+      { cat: 'feature', text: 'Uyarı banner: "X personelin boşta ama maaş alıyor" + OTOMATİK ATA butonu' }
+    ]
+  },
   {
     version: 'v1.86',
     date: '24 Mayıs 2026',

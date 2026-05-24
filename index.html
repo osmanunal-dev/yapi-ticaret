@@ -1256,7 +1256,7 @@
   /* MAIN GRID */
   main {
     display: grid;
-    grid-template-columns: 220px 1fr 320px;
+    grid-template-columns: 260px 1fr 320px;
     overflow: hidden;
   }
 
@@ -1266,7 +1266,19 @@
     background: var(--panel);
     display: flex;
     flex-direction: column;
+    overflow: hidden;  /* scroll inner-scroll'da */
+  }
+  /* Nav alanı kayar, footer sabit */
+  .sidebar-scroll {
+    flex: 1;
     overflow-y: auto;
+    min-height: 0;
+  }
+  /* Topluluk + level barı altta sticky kalır */
+  .sidebar-footer {
+    flex-shrink: 0;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
   }
   .nav-section {
     padding: 14px 16px 6px;
@@ -2673,6 +2685,7 @@
         <span>MENÜ</span>
         <span class="sheet-close" onclick="toggleDrawer()" style="color: #1a1610;">✕</span>
       </div>
+      <div class="sidebar-scroll">
       <div class="nav-section">Ana Sayfa</div>
       <div class="nav-item active" data-view="inbox" onclick="setView('inbox')">
         <span>📨 Gelen Kutusu</span><span class="badge" id="badge-inbox" style="display:none">0</span>
@@ -2778,7 +2791,9 @@
           <span>📁 Arşiv</span>
         </div>
       </div>
+      </div><!-- /sidebar-scroll -->
 
+      <div class="sidebar-footer">
       <div class="nav-section">Topluluk</div>
       <div class="nav-item" data-view="profile" onclick="setView('profile')">
         <span>👤 Profilim</span>
@@ -2799,6 +2814,7 @@
         <div class="lvl-row"><span id="side-xp">0 / 100 XP</span><span id="side-title">Çırak</span></div>
         <div class="lvl-progress"><div class="lvl-progress-fill" id="lvl-progress" style="width: 0%"></div></div>
       </div>
+      </div><!-- /sidebar-footer -->
     </aside>
 
     <section class="center" id="center"></section>
@@ -18964,10 +18980,22 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.88';
+const CURRENT_VERSION = 'v1.89';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.89',
+    date: '24 Mayıs 2026',
+    title: 'SİDEBAR GENİŞLETİLDİ + TOPLULUK ALTTA SABİT',
+    items: [
+      { cat: 'major', text: '📐 <strong>Sol menü 220px → 260px</strong> genişledi — uzun başlıklar tek satırda sığar' },
+      { cat: 'major', text: '📌 <strong>Topluluk bölümü altta sabit</strong> (Profilim, Sıralama, Güncellemeler, Admin Panel + Seviye barı)' },
+      { cat: 'feature', text: 'Üst kısım kayar, alt kısım her zaman görünür kalır' },
+      { cat: 'feature', text: 'Çok sayıda iş kolu/menü açıkken bile Topluluk\'a erişebilirsin' },
+      { cat: 'feature', text: 'Sticky footer üst kenarı border ile ayrıldı' }
+    ]
+  },
   {
     version: 'v1.88',
     date: '24 Mayıs 2026',

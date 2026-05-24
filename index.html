@@ -17443,8 +17443,37 @@ function _nextDayInner() {
       continue;
     }
 
+    // Hammadde teklifi (raw-offer)
+    if (e.type === 'raw-offer') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-raw-offer' });
+        state.agenda.push(`🚚 Hammadde teklifi süresi doldu: ${e.supplierName || 'Tedarikçi'}`);
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
+    // Şantiye kadro uyarı maili
+    if (e.type === 'construction-staff-alert') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-staff-alert' });
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
     if (e.answered) {
       const cust = getCustomer(e.customerId);
+      // Eğer müşteri kayıtsa (raw-offer gibi başka mailler answered=true olabilir), atla
+      if (!cust) {
+        // Bu mail bir tender değil veya müşteri kayıp — sessizce arşive geçir
+        if (!state.archive.find(a => a.id === e.id)) {
+          state.archive.push({ ...e, status: 'handled' });
+        }
+        continue;
+      }
       // Aynı evaluateOffer mantığı kullanılır — canlı önizleme ile bire bir tutarlı
       const ev = evaluateOffer(e.userOffer, e);
       // 'good' garanti kabul, 'bad' garanti red, 'risky' yarısı kabul yarısı red
@@ -17489,7 +17518,8 @@ function _nextDayInner() {
       }
     } else if (e.expiresDay < state.day) {
       state.archive.push({ ...e, status: 'expired' });
-      state.agenda.push(`Cevapsız ihale: ${getCustomer(e.customerId).name}`);
+      const expiredCust = getCustomer(e.customerId);
+      state.agenda.push(`Cevapsız ihale: ${expiredCust ? expiredCust.name : 'bilinmeyen müşteri'}`);
     } else {
       stillInbox.push(e);
     }
@@ -18993,10 +19023,23 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.90';
+const CURRENT_VERSION = 'v1.91';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.91',
+    date: '24 Mayıs 2026',
+    title: 'GÜN ATLAMA HATASI TAMAMEN ÇÖZÜLDÜ',
+    items: [
+      { cat: 'major', text: '🛠️ <strong>Mail süre dolma kontrolünde raw-offer ve construction-staff-alert ayrı bloklarda</strong>' },
+      { cat: 'feature', text: 'Eskiden: süresi dolan hammadde teklifi mail\'i tender bloğuna düşüp <code>getCustomer(undefined).name</code> patlatıyordu' },
+      { cat: 'feature', text: 'Şimdi: her mail türü kendi expire bloğunda işleniyor' },
+      { cat: 'feature', text: 'answered=true olan mail\'lerde cust null kontrolü → sessizce arşive geçer' },
+      { cat: 'feature', text: 'expired tender bloğunda da cust null güvenliği' },
+      { cat: 'feature', text: 'Hammadde teklifi süresi dolunca agenda\'ya: "Hammadde teklifi süresi doldu: Tedarikçi"' }
+    ]
+  },
   {
     version: 'v1.90',
     date: '24 Mayıs 2026',

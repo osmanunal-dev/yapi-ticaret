@@ -6475,7 +6475,8 @@ function createInternalConstructionContract(land) {
     deliveries,
     isInternalConstruction: true,
     isUrbanRenewal: isUrban,
-    constructionLandId: land.id
+    constructionLandId: land.id,
+    branch: 'construction'
   };
 
   // Tüm malzemeler zaten teslim edilmişse (eski state için) direkt arşive geçir, aktif listeye ekleme
@@ -6556,14 +6557,19 @@ function progressConstruction(land) {
     if (b.status === 'paused-warned') b.status = 'building';
 
     // Malzeme tüket (stoktan) + iç sözleşmeye delivery yaz
+    // 📐 Mühendis bonusu: fire azaltma → daha az malzeme tüket
+    const bonusesSub = getConstructionBonuses(land.id);
     consumptionTodaySub.forEach(c => {
-      state.inventory[c.productId] -= c.qty;
+      const reducedQty = Math.ceil(c.qty * (1 - bonusesSub.engineerBonus));
+      state.inventory[c.productId] -= reducedQty;
       const m = b.materialsNeeded.find(x => x.productId === c.productId);
-      if (m) m.consumed += c.qty;
+      if (m) m.consumed += reducedQty;
+      c.qty = reducedQty; // delivery'ye de yansıt
     });
     addInternalContractDeliveries(land, consumptionTodaySub, 'stok');
 
-    b.daysPassed++;
+    // 🦺 Şef bonusu: hızlı ilerleme
+    b.daysPassed += (1 + bonusesSub.chiefBonus);
     if (b.daysPassed >= b.totalDays) {
       b.status = 'completed';
       b.apartments = generateApartmentsFor(b.type, land.m2);
@@ -6615,18 +6621,27 @@ function progressConstruction(land) {
     b.status = 'building';
   }
 
-  // Malzeme tüket + iç sözleşmeye delivery yaz
+  // Bonusları al — 🦺 şef (hız), 📐 mühendis (fire), 👷 usta (taşeron — kendi inşaatta etkisiz, çünkü taşeronlu kısımda)
+  const bonuses = getConstructionBonuses(land.id);
+
+  // Malzeme tüket + iç sözleşmeye delivery yaz — mühendis fire azaltır
   consumptionToday.forEach(c => {
-    state.inventory[c.productId] -= c.qty;
+    const reducedQty = Math.ceil(c.qty * (1 - bonuses.engineerBonus));
+    state.inventory[c.productId] -= reducedQty;
     const m = b.materialsNeeded.find(x => x.productId === c.productId);
-    if (m) m.consumed += c.qty;
+    if (m) m.consumed += reducedQty;
+    c.qty = reducedQty;
   });
   addInternalContractDeliveries(land, consumptionToday, 'stok');
 
   // İşçilik
   const t = BUILDING_TYPES[b.type];
   const totalArea = land.m2 * t.floorMultiplier;
-  const dailyLabor = Math.round(totalArea * 80);
+  let dailyLabor = Math.round(totalArea * 80);
+  // 👷 Usta bonusu: işçilik (taşeron benzeri) maliyetini düşür
+  if (bonuses.masterBonus > 0) {
+    dailyLabor = Math.round(dailyLabor * (1 - bonuses.masterBonus));
+  }
   if (state.cash >= dailyLabor) {
     spend(dailyLabor, 'insaat-iscilik');
     b.totalCost += dailyLabor;
@@ -6637,7 +6652,8 @@ function progressConstruction(land) {
     return;
   }
 
-  b.daysPassed++;
+  // 🦺 Şef bonusu: hızlı ilerleme
+  b.daysPassed += (1 + bonuses.chiefBonus);
 
   if (b.daysPassed >= b.totalDays) {
     b.status = 'completed';
@@ -7619,6 +7635,7 @@ function generateUrbanRenewalProposal() {
   return {
     id: ++_emailIdCounter,
     type: 'urban-renewal',
+    branch: 'construction',    // 🏗 inşaat maili (kentsel dönüşüm teklifi)
     customerId: customer.id,
     customerName: customer.name,
     ilce: customer.ilce,
@@ -8091,7 +8108,12 @@ function confirmSubcontractCash(landId) {
   const remainingDays = b.totalDays - b.daysPassed;
   const totalArea = land.m2 * t.floorMultiplier;
   const labourRemaining = Math.round(totalArea * 80 * remainingDays);
-  const subcontractFee = Math.round(labourRemaining * 1.22);
+  let subcontractFee = Math.round(labourRemaining * 1.22);
+  // 👷 Usta bonusu: taşeron maliyetini düşür
+  const bonuses = getConstructionBonuses(land.id);
+  if (bonuses.masterBonus > 0) {
+    subcontractFee = Math.round(subcontractFee * (1 - bonuses.masterBonus));
+  }
   const newRemainingDays = Math.ceil(remainingDays * 0.6);
 
   if (state.cash < subcontractFee) {
@@ -8180,6 +8202,7 @@ const state = {
   purchasers: [],     // Satın Alma Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalPurchases, totalSavings }
   dispatchers: [],    // Sevkiyat Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDispatches }
   accountants: [],    // Muhasebeci: { id, name, salary, level, xp, hireDay, totalCollected, totalCollectionCount }
+  constructionStaff: [], // 🏗 Şantiye personeli: { id, role:'chief'|'master'|'engineer'|'manager', name, salary, level, xp, hireDay, assignedLandId, branch:'construction' }
 
   // Günlük muhasebe defteri (income/expense kayıtları)
   // { day, type: 'income'|'expense', category, amount, description }
@@ -8484,6 +8507,40 @@ function availableVehicles(now) {
 }
 
 // Kasa hareketi helper'ları — aylık rapor için gelir/gider takibi yapıyor
+// Kategoriyi iş koluna eşle — muhasebe ve kâr/zarar analizi için
+const CATEGORY_BRANCH = {
+  // 🏗 İnşaat
+  'insaat': 'construction',
+  'insaat-iscilik': 'construction',
+  'maas-insaat': 'construction',
+  'yikim': 'construction',
+  'taseron': 'construction',
+  'arsa': 'construction',
+  'arsa-satis': 'construction',
+  'daire-satis': 'construction',
+  'kira-geliri': 'construction',
+  'kira-depozit': 'construction',
+  'kira-depozito': 'construction',
+  // 🏭 Fabrika
+  'fabrika-alim': 'factory',
+  'fabrika-gelistirme': 'factory',
+  'fabrika-isletme': 'factory',
+  'fabrika-satis': 'factory',
+  'hammadde': 'factory',
+  'hammadde-oto': 'factory',
+  'uretim-iscilik': 'factory',
+  // 🏪 Mağaza (varsayılan)
+  'malzeme': 'store',
+  'dis-nakliye': 'store',
+  'tahsilat': 'store',
+  'bayilik-teminat': 'store',
+  // 💰 Genel (banka, kredi, kart, vergi, ceza, maaş, araç vs.) → store'a koyalım çünkü ana iş yeri
+  // (gelecek: özellikle genel olabilir — şimdilik store)
+};
+function _categoryBranch(category) {
+  return CATEGORY_BRANCH[category] || 'store';
+}
+
 function spend(amount, category) {
   state.cash -= amount;
   if (category !== 'noop') state.monthlyExpenses += amount;
@@ -8494,6 +8551,7 @@ function spend(amount, category) {
       day: state.day,
       type: 'expense',
       category: category || 'diger',
+      branch: _categoryBranch(category),
       amount,
       timestamp: Date.now()
     });
@@ -8513,6 +8571,7 @@ function earn(amount, category) {
       day: state.day,
       type: 'income',
       category: category || 'diger',
+      branch: _categoryBranch(category),
       amount,
       timestamp: Date.now()
     });
@@ -8700,6 +8759,7 @@ function generateTender() {
   return {
     id: ++_emailIdCounter,
     type: 'tender',
+    branch: 'store',     // 🏪 mağaza maili (müşteri malzeme ihalesi)
     customerId: customer.id,
     items,
     fairTotal,
@@ -8856,6 +8916,7 @@ function tryFieldSalesVisit(rep) {
   return {
     id: ++_emailIdCounter,
     type: 'fs-proposal',
+    branch: 'store',     // 🏪 saha satışı da mağaza maili (müşteri malzeme satışı)
     repId: rep.id,
     repName: rep.name,
     customerId: customer.id,
@@ -9011,6 +9072,7 @@ function tryDispatcherProposal(rep) {
   return {
     id: ++_emailIdCounter,
     type: 'dispatch-plan',
+    branch: 'store',
     repId: rep.id,
     repName: rep.name,
     plan,
@@ -9449,16 +9511,47 @@ function renderAgenda() {
 
 function renderInbox() {
   const c = $('center');
+
+  // İş kolu filtresi (varsayılan: all)
+  if (!window._inboxBranchFilter) window._inboxBranchFilter = 'all';
+  const branchFilter = window._inboxBranchFilter;
+
+  // Mailleri filtrele
+  const allMails = state.inbox;
+  const filteredMails = branchFilter === 'all' ? allMails : allMails.filter(e => (e.branch || 'store') === branchFilter);
+
+  // Sayımlar
+  const storeCount = allMails.filter(e => (e.branch || 'store') === 'store').length;
+  const constructionCount = allMails.filter(e => e.branch === 'construction').length;
+  const factoryCount = allMails.filter(e => e.branch === 'factory').length;
+
   if (state.inbox.length === 0) {
     c.innerHTML = `<h2>GELEN KUTUSU</h2>
       <div class="subtitle">Müşterilerden ve personelden gelen iletiler</div>
       <div class="empty">Şu anda yeni e-posta yok. "Sonraki Gün" tuşuna bas.</div>`;
     return;
   }
+
+  const filterChips = `<div class="filter-chips" style="margin-bottom: 14px;">
+    <div class="filter-chip ${branchFilter === 'all' ? 'active' : ''}" onclick="window._inboxBranchFilter='all'; render()">📨 Tümü (${allMails.length})</div>
+    <div class="filter-chip ${branchFilter === 'store' ? 'active' : ''}" onclick="window._inboxBranchFilter='store'; render()">🏪 Mağaza (${storeCount})</div>
+    ${constructionCount > 0 ? `<div class="filter-chip ${branchFilter === 'construction' ? 'active' : ''}" onclick="window._inboxBranchFilter='construction'; render()">🏗 İnşaat / KD (${constructionCount})</div>` : ''}
+    ${factoryCount > 0 || (state.factories || []).length > 0 ? `<div class="filter-chip ${branchFilter === 'factory' ? 'active' : ''}" onclick="window._inboxBranchFilter='factory'; render()">🏭 Fabrika (${factoryCount})</div>` : ''}
+  </div>`;
+
+  if (filteredMails.length === 0) {
+    c.innerHTML = `<h2>GELEN KUTUSU</h2>
+      <div class="subtitle">${state.inbox.length} toplam mesaj</div>
+      ${filterChips}
+      <div class="empty">Bu iş kolunda mail yok.</div>`;
+    return;
+  }
+
   c.innerHTML = `<h2>GELEN KUTUSU</h2>
-    <div class="subtitle">${state.inbox.length} mesaj</div>
+    <div class="subtitle">${filteredMails.length} mesaj${branchFilter !== 'all' ? ` (${allMails.length} toplam)` : ''}</div>
+    ${filterChips}
     <div class="email-list">
-      ${state.inbox.map(e => {
+      ${filteredMails.map(e => {
         const cust = getCustomer(e.customerId);
         const expIn = e.expiresDay - state.day;
 
@@ -9651,7 +9744,8 @@ function approveFSProposal(emailId) {
     delivered: false,
     paid: false,
     fromFieldSales: true,
-    salesRepName: e.repName
+    salesRepName: e.repName,
+    branch: 'store'
   };
 
   state.contracts.push(contract);
@@ -11065,7 +11159,8 @@ function confirmFactoryOffer(emailId) {
       paid: false,
       deliveries: [],
       isFactoryOffer: true,
-      factoryOfferItems
+      factoryOfferItems,
+      branch: 'factory'
     });
     // Satış uzmanlarına XP
     factoryOfferItems.forEach(x => {
@@ -11394,10 +11489,15 @@ function buyFromSupplier(sid, pid) {
 
 function renderContractsView() {
   const c = $('center');
-  if (state.contracts.length === 0) {
-    c.innerHTML = `<h2>AKTİF SÖZLEŞMELER</h2>
+  // 🏪 Mağaza sözleşmeleri: müşteri sözleşmeleri (şantiye iç sözleşmeleri ayrı sekmede)
+  // Fabrika sözleşmeleri de buraya dahil — müşteriyle yapılan teslim
+  const storeContracts = state.contracts.filter(ct => ct.branch !== 'construction' && !ct.isInternalConstruction);
+  const internalCount = state.contracts.filter(ct => ct.branch === 'construction' || ct.isInternalConstruction).length;
+
+  if (storeContracts.length === 0) {
+    c.innerHTML = `<h2>🏪 MAĞAZA SÖZLEŞMELERİ</h2>
       <div class="subtitle">Kazandığın işler · Sevkiyatla teslim et</div>
-      <div class="empty">Aktif sözleşme yok.</div>`;
+      <div class="empty">Aktif müşteri sözleşmesi yok.${internalCount > 0 ? `<br><br>İç şantiye sözleşmelerin için <a onclick="setView('construction-contracts')" style="color: var(--accent); cursor: pointer; text-decoration: underline;">🏗 İnşaat → İç Sözleşmeler</a></br>` : ''}</div>`;
     return;
   }
   const dispatcherCount = (state.dispatchers || []).length;
@@ -11409,29 +11509,12 @@ function renderContractsView() {
         ⚠️ <strong style="color: var(--accent);">Sevkiyat Sorumlusu yok</strong> — Personel > Sevkiyat sekmesinden işe alırsan tek tıkla otomatik sevkiyat yapabilirsin.
       </div>`;
 
-  // İç inşaat sözleşmeleri ve normal müşteri sözleşmelerini ayır
-  const customerContracts = state.contracts.filter(c => !c.isInternalConstruction);
-  const internalContracts = state.contracts.filter(c => c.isInternalConstruction && !c.delivered);
-
-  c.innerHTML = `<h2>AKTİF SÖZLEŞMELER</h2>
-    <div class="subtitle">${customerContracts.length} müşteri sözleşmesi${internalContracts.length > 0 ? ` · ${internalContracts.length} şantiye sevkiyatı` : ''}</div>
+  c.innerHTML = `<h2>🏪 MAĞAZA SÖZLEŞMELERİ</h2>
+    <div class="subtitle">${storeContracts.length} müşteri sözleşmesi${internalCount > 0 ? ` · <a onclick="setView('construction-contracts')" style="color: var(--purple); cursor: pointer; text-decoration: underline;">${internalCount} şantiye sözleşmesi →</a>` : ''}</div>
     ${dispatcherInfo}
 
-    ${internalContracts.length > 0 ? `
-    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px; color: var(--purple);">🏗 ŞANTİYE SEVKİYATLARI (${internalContracts.length})</h3>
-    <div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 12px; font-size: 11px;">
-      💡 İnşaat ve kentsel dönüşüm projelerin için <strong>kendi şantiyene</strong> yapılan iç sözleşmelerdir. Stoktan günlük tüketim otomatiktir, ayrıca <strong>bayilik fabrikasından direkt sevk</strong> de yapabilirsin.
-    </div>
-    <div class="email-list" style="margin-bottom: 24px;">
-      ${internalContracts.map(ct => renderContractCard(ct, dispatcherCount, true)).join('')}
-    </div>
-    ` : ''}
-
-    ${customerContracts.length > 0 ? `
-    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 8px;">📜 MÜŞTERİ SÖZLEŞMELERİ (${customerContracts.length})</h3>
-    ` : ''}
     <div class="email-list">
-      ${customerContracts.slice().sort((a, b) => {
+      ${storeContracts.slice().sort((a, b) => {
         if (a.paid !== b.paid) return a.paid ? 1 : -1;
         if (a.delivered !== b.delivered) return a.delivered ? 1 : -1;
         return (a.deadline - state.day) - (b.deadline - state.day);
@@ -12768,12 +12851,17 @@ function showIrsaliye(ctId, delivery) {
 
 function renderHR() {
   const c = $('center');
-  const fieldSalesList = state.fieldSalesReps || [];
-  const purchasersList = state.purchasers || [];
-  const dispatchersList = state.dispatchers || [];
-  const accountantsList = state.accountants || [];
-  const totalMonthly = state.drivers.reduce((s,d) => s + d.salary, 0)
-    + state.salesReps.reduce((s,r) => s + r.salary, 0)
+  // Sadece 'store' branch personeli (Mağaza personeli)
+  // Geriye uyumluluk: branch yoksa store kabul et
+  const isStoreBranch = (p) => !p.branch || p.branch === 'store';
+  const drivers = state.drivers.filter(isStoreBranch);
+  const salesReps = state.salesReps.filter(isStoreBranch);
+  const fieldSalesList = (state.fieldSalesReps || []).filter(isStoreBranch);
+  const purchasersList = (state.purchasers || []).filter(isStoreBranch);
+  const dispatchersList = (state.dispatchers || []).filter(isStoreBranch);
+  const accountantsList = (state.accountants || []).filter(isStoreBranch);
+  const totalMonthly = drivers.reduce((s,d) => s + d.salary, 0)
+    + salesReps.reduce((s,r) => s + r.salary, 0)
     + fieldSalesList.reduce((s,r) => s + r.salary, 0)
     + purchasersList.reduce((s,r) => s + r.salary, 0)
     + dispatchersList.reduce((s,r) => s + r.salary, 0)
@@ -12781,8 +12869,8 @@ function renderHR() {
   const nextPayDay = state.lastPayrollDay + 30;
   const daysToPay = nextPayDay - state.day;
 
-  c.innerHTML = `<h2>PERSONEL YÖNETİMİ</h2>
-    <div class="subtitle">Tüm personel kategorileri · Maaşlar 30 günde bir ödenir</div>
+  c.innerHTML = `<h2>🏪 MAĞAZA PERSONELİ</h2>
+    <div class="subtitle">Mağaza iş kolu personeli · Maaşlar 30 günde bir ödenir</div>
 
     ${totalMonthly > 0 ? `<div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel); border-left: 3px solid ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'}; font-size: 12px;">
       <strong style="color: ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'};">📅 SONRAKI MAAŞ ÖDEMESI:</strong>
@@ -12791,8 +12879,8 @@ function renderHR() {
     </div>` : ''}
 
     <div class="stat-grid">
-      <div class="stat-tile"><div class="stat-label">Şoför</div><div class="stat-val" style="color: var(--blue)">${state.drivers.length}</div></div>
-      <div class="stat-tile"><div class="stat-label">Pazarlama</div><div class="stat-val" style="color: var(--purple)">${state.salesReps.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Şoför</div><div class="stat-val" style="color: var(--blue)">${drivers.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Pazarlama</div><div class="stat-val" style="color: var(--purple)">${salesReps.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Saha Satış</div><div class="stat-val" style="color: var(--green)">${fieldSalesList.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Satın Alma</div><div class="stat-val" style="color: var(--accent)">${purchasersList.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Sevkiyat</div><div class="stat-val" style="color: var(--red)">${dispatchersList.length}</div></div>
@@ -12800,8 +12888,8 @@ function renderHR() {
     </div>
 
     <div class="tabs">
-      <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖR (${state.drivers.length})</div>
-      <div class="tab" onclick="switchHRTab('sales')">PAZARLAMA (${state.salesReps.length})</div>
+      <div class="tab active" onclick="switchHRTab('drivers')">ŞOFÖR (${drivers.length})</div>
+      <div class="tab" onclick="switchHRTab('sales')">PAZARLAMA (${salesReps.length})</div>
       <div class="tab" onclick="switchHRTab('fieldsales')">SAHA SATIŞ (${fieldSalesList.length})</div>
       <div class="tab" onclick="switchHRTab('purchasers')">SATIN ALMA (${purchasersList.length})</div>
       <div class="tab" onclick="switchHRTab('dispatchers')">SEVKİYAT (${dispatchersList.length})</div>
@@ -13097,7 +13185,8 @@ function hireDriver(lvl) {
     level: lvl,
     xp: 0,
     hireDay: state.day,
-    vehicleId: null
+    vehicleId: null,
+    branch: 'store'
   });
   toast(`Yeni şoför işe alındı.`, 'success');
   render();
@@ -13117,7 +13206,8 @@ function hireSales(lvl) {
     xp: 0,
     hireDay: state.day,
     busyUntil: 0,
-    visitingCustomerId: null
+    visitingCustomerId: null,
+    branch: 'store'
   });
   toast(`Yeni pazarlamacı işe alındı.`, 'success');
   render();
@@ -13140,7 +13230,8 @@ function hireFieldSales(lvl) {
     hireDay: state.day,
     busyUntil: 0,
     totalDeals: 0,
-    totalRevenue: 0
+    totalRevenue: 0,
+    branch: 'store'
   });
   toast(`✓ Yeni saha satış sorumlusu işe alındı: Sv${lvl}`, 'success');
   render();
@@ -13163,7 +13254,8 @@ function hirePurchaser(lvl) {
     hireDay: state.day,
     busyUntil: 0,
     totalPurchases: 0,
-    totalSavings: 0
+    totalSavings: 0,
+    branch: 'store'
   });
   toast(`✓ Yeni satın alma sorumlusu işe alındı: Sv${lvl}`, 'success');
   render();
@@ -13207,10 +13299,154 @@ function hireAccountant(lvl) {
     xp: 0,
     hireDay: state.day,
     totalCollected: 0,
-    totalCollectionCount: 0
+    totalCollectionCount: 0,
+    branch: 'store'
   });
   toast(`✓ Yeni muhasebeci işe alındı: Sv${lvl}`, 'success');
   render();
+}
+
+// ============================================================
+// 🏗 ŞANTİYE PERSONELİ — Özel inşaat rolleri (Aşama 7)
+// ============================================================
+const CONSTRUCTION_ROLES = {
+  chief: {
+    label: '🦺 Şantiye Şefi',
+    desc: 'Atadığı şantiyede inşaat hızını artırır',
+    baseSalary: 75000,    // Sv1
+    salaryStep: 45000,    // her seviye +
+    baseHireFee: 25000,
+    hireFeeStep: 17500,
+    bonusPerLevel: [0.10, 0.20, 0.35], // hız bonus
+    bonusLabel: 'Hız bonusu',
+    maxPerLand: 1
+  },
+  master: {
+    label: '👷 Usta Ekibi',
+    desc: 'Şantiyede taşeron maliyetini düşürür',
+    baseSalary: 40000,
+    salaryStep: 22500,
+    baseHireFee: 10000,
+    hireFeeStep: 10000,
+    bonusPerLevel: [0.15, 0.30, 0.50],
+    bonusLabel: 'Taşeron indirimi',
+    maxPerLand: 4   // birden fazla atanabilir
+  },
+  engineer: {
+    label: '📐 İnşaat Mühendisi',
+    desc: 'Malzeme firesini azaltır',
+    baseSalary: 85000,
+    salaryStep: 52500,
+    baseHireFee: 30000,
+    hireFeeStep: 22500,
+    bonusPerLevel: [0.10, 0.20, 0.35],
+    bonusLabel: 'Fire azaltma',
+    maxPerLand: 1
+  },
+  manager: {
+    label: '📋 Şantiye Sorumlusu',
+    desc: 'Otomatik malzeme alımı + günlük rapor',
+    baseSalary: 55000,
+    salaryStep: 32500,
+    baseHireFee: 18000,
+    hireFeeStep: 13500,
+    bonusPerLevel: [1, 1, 1], // boolean: var mı yok mu
+    bonusLabel: 'Otomatik tedarik',
+    maxPerLand: 1
+  }
+};
+
+function constructionRoleSalary(role, level) {
+  const r = CONSTRUCTION_ROLES[role];
+  if (!r) return 0;
+  return r.baseSalary + (level - 1) * r.salaryStep;
+}
+function constructionRoleHireFee(role, level) {
+  const r = CONSTRUCTION_ROLES[role];
+  if (!r) return 0;
+  return r.baseHireFee + (level - 1) * r.hireFeeStep;
+}
+
+function hireConstructionStaff(role, level) {
+  const r = CONSTRUCTION_ROLES[role];
+  if (!r) { toast('Geçersiz rol', 'error'); return; }
+  const fee = constructionRoleHireFee(role, level);
+  const salary = constructionRoleSalary(role, level);
+  if (state.cash < fee) { toast('Yetersiz para.', 'error'); return; }
+  spend(fee, 'ise-alim');
+  if (!state.constructionStaff) state.constructionStaff = [];
+  state.constructionStaff.push({
+    id: 'cs' + uid(),
+    role,
+    name: fullName(),
+    salary,
+    level,
+    xp: 0,
+    hireDay: state.day,
+    assignedLandId: null,
+    branch: 'construction'
+  });
+  toast(`✓ ${r.label} işe alındı (Sv${level})`, 'success');
+  render();
+}
+
+function fireConstructionStaff(id) {
+  const idx = (state.constructionStaff || []).findIndex(s => s.id === id);
+  if (idx < 0) return;
+  const s = state.constructionStaff[idx];
+  const role = CONSTRUCTION_ROLES[s.role];
+  if (!confirm(`${role.label} ${s.name} işten çıkarılsın mı?`)) return;
+  state.constructionStaff.splice(idx, 1);
+  toast(`${s.name} işten çıkarıldı`, 'info');
+  render();
+}
+
+// Şantiyeye personel ata/değiştir
+function assignConstructionStaff(staffId, landId) {
+  const s = (state.constructionStaff || []).find(x => x.id === staffId);
+  if (!s) return;
+  if (landId === '' || landId === 'none') {
+    s.assignedLandId = null;
+    toast(`${s.name} şantiyeden çıkarıldı`, 'info');
+    render();
+    return;
+  }
+  const land = (state.lands || []).find(l => l.id === landId);
+  if (!land) { toast('Arsa bulunamadı', 'error'); return; }
+  if (!land.building || land.building.status === 'completed') {
+    toast('Bu arsada aktif inşaat yok', 'error');
+    return;
+  }
+  // Max sayı kontrolü
+  const role = CONSTRUCTION_ROLES[s.role];
+  const existing = state.constructionStaff.filter(x => x.assignedLandId === landId && x.role === s.role && x.id !== staffId).length;
+  if (existing >= role.maxPerLand) {
+    toast(`Bu şantiyede maksimum ${role.maxPerLand} ${role.label} olabilir`, 'error');
+    return;
+  }
+  s.assignedLandId = landId;
+  toast(`${s.name} → ${ILCELER[land.ilce].name} şantiyesine atandı`, 'success');
+  render();
+}
+
+// Bir şantiyenin aktif bonus değerleri (çıkarılır: chief, masters toplam, engineer, manager)
+function getConstructionBonuses(landId) {
+  const staff = (state.constructionStaff || []).filter(s => s.assignedLandId === landId);
+  const chief = staff.find(s => s.role === 'chief');
+  const engineer = staff.find(s => s.role === 'engineer');
+  const manager = staff.find(s => s.role === 'manager');
+  const masters = staff.filter(s => s.role === 'master');
+  // Bonus çıkar
+  const chiefBonus = chief ? CONSTRUCTION_ROLES.chief.bonusPerLevel[chief.level - 1] : 0;
+  const engineerBonus = engineer ? CONSTRUCTION_ROLES.engineer.bonusPerLevel[engineer.level - 1] : 0;
+  // Usta bonusu birikir, max %70
+  let masterBonus = 0;
+  masters.forEach(m => {
+    masterBonus += CONSTRUCTION_ROLES.master.bonusPerLevel[m.level - 1];
+  });
+  masterBonus = Math.min(0.70, masterBonus);
+  const hasManager = !!manager;
+  return { chiefBonus, engineerBonus, masterBonus, hasManager, chief, engineer, manager, masters };
 }
 
 function fireEmployee(type, id) {
@@ -13235,25 +13471,85 @@ function fireEmployee(type, id) {
 
 function renderCustomers() {
   const c = $('center');
-  const totalReceivable = state.customers.reduce((s, c) => s + Math.max(0, c.balance), 0);
-  const known = state.customers.filter(c => c.totalContracts > 0 || c.trust > 35);
-  c.innerHTML = `<h2>MÜŞTERİLER & CARİ HESAPLAR</h2>
+
+  // Müşterilerin iş kollarındaki katılımını hesapla
+  const allContracts = state.contracts || [];
+  const archivedContracts = (state.archive || []).filter(a => a.status === 'won-pending' || a.status === 'completed' || a.totalCost);
+
+  // Her müşteri için hangi branch'lerde sözleşmesi var?
+  const customerBranches = {}; // { custId: Set('store', 'construction', 'factory') }
+  const customerBranchTotals = {}; // { custId: { store: revenue, construction: ..., factory: ... } }
+  allContracts.forEach(ct => {
+    const branch = ct.branch || (ct.isInternalConstruction ? 'construction' : ct.isFactoryOffer ? 'factory' : 'store');
+    if (!ct.customerId) return; // iç şantiye, müşteri yok
+    if (!customerBranches[ct.customerId]) customerBranches[ct.customerId] = new Set();
+    customerBranches[ct.customerId].add(branch);
+    if (!customerBranchTotals[ct.customerId]) customerBranchTotals[ct.customerId] = { store: 0, construction: 0, factory: 0 };
+    customerBranchTotals[ct.customerId][branch] = (customerBranchTotals[ct.customerId][branch] || 0) + (ct.total || 0);
+  });
+
+  // Filtre durumu
+  if (!window._cariBranchFilter) window._cariBranchFilter = 'store';
+  const filter = window._cariBranchFilter;
+
+  // Müşterileri filtrele
+  let filteredCustomers;
+  if (filter === 'all') {
+    filteredCustomers = state.customers;
+  } else {
+    // O branch'ta sözleşmesi olan VEYA hiç sözleşmesi olmayan ama güveni 35'in üstündeki müşteriler (potansiyel)
+    filteredCustomers = state.customers.filter(cust => {
+      const branches = customerBranches[cust.id];
+      if (filter === 'store') {
+        // Mağaza filtre: store branch sözleşmesi VEYA hiç sözleşmesi yok (potansiyel)
+        return !branches || branches.has('store') || branches.has('factory');
+      }
+      return branches && branches.has(filter);
+    });
+  }
+
+  const totalReceivable = filteredCustomers.reduce((s, c) => s + Math.max(0, c.balance), 0);
+
+  // Branch sayıları
+  const storeCusts = state.customers.filter(cust => {
+    const b = customerBranches[cust.id];
+    return !b || b.has('store') || b.has('factory');
+  }).length;
+  const constCusts = state.customers.filter(cust => customerBranches[cust.id]?.has('construction')).length;
+  const factCusts = state.customers.filter(cust => customerBranches[cust.id]?.has('factory')).length;
+
+  c.innerHTML = `<h2>🏪 MAĞAZA MÜŞTERİLERİ / CARİ</h2>
     <div class="subtitle">${state.customers.length} firma · Sözleşme tamamlanınca müşteriye cari açılır</div>
 
+    <div class="filter-chips" style="margin-bottom: 14px;">
+      <div class="filter-chip ${filter === 'all' ? 'active' : ''}" onclick="window._cariBranchFilter='all'; render()">🏢 Tümü (${state.customers.length})</div>
+      <div class="filter-chip ${filter === 'store' ? 'active' : ''}" onclick="window._cariBranchFilter='store'; render()">🏪 Mağaza (${storeCusts})</div>
+      ${constCusts > 0 ? `<div class="filter-chip ${filter === 'construction' ? 'active' : ''}" onclick="window._cariBranchFilter='construction'; render()">🏗 İnşaat (${constCusts})</div>` : ''}
+      ${factCusts > 0 ? `<div class="filter-chip ${filter === 'factory' ? 'active' : ''}" onclick="window._cariBranchFilter='factory'; render()">🏭 Fabrika (${factCusts})</div>` : ''}
+    </div>
+
     <div class="stat-grid">
-      <div class="stat-tile"><div class="stat-label">Toplam Müşteri</div><div class="stat-val">${state.customers.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Filtreli Müşteri</div><div class="stat-val">${filteredCustomers.length}</div></div>
       <div class="stat-tile"><div class="stat-label">Açık Bakiye</div><div class="stat-val" style="color: var(--green)">${fmt(totalReceivable)}</div></div>
-      <div class="stat-tile"><div class="stat-label">Aktif Sözleşme</div><div class="stat-val" style="color: var(--accent)">${state.contracts.length}</div></div>
-      <div class="stat-tile"><div class="stat-label">Tamamlanan</div><div class="stat-val" style="color: var(--purple)">${state.contractsCompleted}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif Sözleşme</div><div class="stat-val" style="color: var(--accent)">${state.contracts.filter(c => (c.branch || 'store') === 'store' || (c.branch === 'factory')).length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Tamamlanan</div><div class="stat-val" style="color: var(--purple)">${state.contractsCompleted || 0}</div></div>
     </div>
 
     <div class="grid-2">
-      ${state.customers.slice().sort((a,b) => b.trust - a.trust).map(cust => `
+      ${filteredCustomers.slice().sort((a,b) => b.trust - a.trust).map(cust => {
+        const branches = customerBranches[cust.id] || new Set();
+        const branchTotals = customerBranchTotals[cust.id] || {};
+        const branchBadges = [];
+        if (branches.has('store')) branchBadges.push('<span style="font-size: 9px; padding: 2px 5px; background: var(--accent); color: #000; border-radius: 3px;">🏪 MAĞ</span>');
+        if (branches.has('construction')) branchBadges.push('<span style="font-size: 9px; padding: 2px 5px; background: #a855f7; color: #fff; border-radius: 3px;">🏗 İNŞ</span>');
+        if (branches.has('factory')) branchBadges.push('<span style="font-size: 9px; padding: 2px 5px; background: var(--blue); color: #fff; border-radius: 3px;">🏭 FAB</span>');
+        return `
         <div class="customer-card">
           <div style="display: flex; justify-content: space-between; align-items: start;">
             <div>
               <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 16px;">${cust.name}</h3>
               <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">📍 ${ILCELER[cust.ilce].name}</div>
+              ${branchBadges.length > 0 ? `<div style="margin-top: 4px; display: flex; gap: 3px;">${branchBadges.join('')}</div>` : ''}
             </div>
             <div style="text-align: right;">
               <div style="font-size: 9px; color: var(--ink-dim); text-transform: uppercase;">Cari Bakiye</div>
@@ -13270,8 +13566,8 @@ function renderCustomers() {
           <div style="margin-top: 8px; font-size: 11px; color: var(--ink-dim);">
             ${cust.totalContracts} sözleşme · Toplam ciro: ${fmt(cust.totalRevenue)}
           </div>
-        </div>
-      `).join('')}
+        </div>`;
+      }).join('')}
     </div>`;
 }
 
@@ -14572,10 +14868,28 @@ function renderAccounting() {
   const receipts = (state.receipts || []).slice().sort((a, b) => b.day - a.day);
   const ledger = state.dailyLedger || [];
 
+  // Branch filtresi
+  if (!window._accountingBranch) window._accountingBranch = 'all';
+  const branchFilter = window._accountingBranch;
+
   // Seçili dönem için günlük gruplama
   const today = state.day;
   const periodStart = today - _accountingPeriod + 1;
-  const periodLedger = ledger.filter(e => e.day >= periodStart);
+  // 1) Önce dönem, 2) sonra branch filtrele
+  let periodLedger = ledger.filter(e => e.day >= periodStart);
+  const fullPeriodLedger = periodLedger.slice(); // chip sayımları için
+  if (branchFilter !== 'all') {
+    periodLedger = periodLedger.filter(e => (e.branch || 'store') === branchFilter);
+  }
+
+  // Branch sayımları (chip için)
+  const branchStats = { store: { i: 0, e: 0 }, construction: { i: 0, e: 0 }, factory: { i: 0, e: 0 } };
+  fullPeriodLedger.forEach(e => {
+    const b = e.branch || 'store';
+    if (!branchStats[b]) branchStats[b] = { i: 0, e: 0 };
+    if (e.type === 'income') branchStats[b].i += e.amount;
+    else branchStats[b].e += e.amount;
+  });
 
   // Günlük toplam tablosu
   const dailyTotals = {}; // { day: { income, expense, net } }
@@ -14678,7 +14992,12 @@ function renderAccounting() {
   // Son makbuzlar
   const recentReceipts = receipts.slice(0, 50);
 
-  c.innerHTML = `<h2>📊 MUHASEBE</h2>
+  const branchLabel = branchFilter === 'all' ? 'Tüm İş Kolları'
+    : branchFilter === 'store' ? '🏪 Mağaza'
+    : branchFilter === 'construction' ? '🏗 İnşaat & KD'
+    : '🏭 Fabrika';
+
+  c.innerHTML = `<h2>📊 MUHASEBE — ${branchLabel}</h2>
     <div class="subtitle">Günlük kâr/zarar takibi · Tahsilat makbuzları · ${accountantCount > 0 ? `${accountantCount} muhasebeci aktif` : 'Muhasebeci yok'}</div>
 
     ${accountantCount === 0 ? `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid #f59e0b; font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
@@ -14689,11 +15008,19 @@ function renderAccounting() {
     </div>`}
 
     <!-- DÖNEM SEÇİCİ -->
-    <div class="filter-chips" style="margin-bottom: 16px;">
+    <div class="filter-chips" style="margin-bottom: 10px;">
       <div class="filter-chip ${_accountingPeriod === 7 ? 'active' : ''}" onclick="changeAccPeriod(7)">Son 7 gün</div>
       <div class="filter-chip ${_accountingPeriod === 30 ? 'active' : ''}" onclick="changeAccPeriod(30)">Son 30 gün</div>
       <div class="filter-chip ${_accountingPeriod === 90 ? 'active' : ''}" onclick="changeAccPeriod(90)">Son 90 gün</div>
       <div class="filter-chip ${_accountingPeriod === 365 ? 'active' : ''}" onclick="changeAccPeriod(365)">Son 1 yıl</div>
+    </div>
+
+    <!-- İŞ KOLU SEÇİCİ -->
+    <div class="filter-chips" style="margin-bottom: 16px;">
+      <div class="filter-chip ${branchFilter === 'all' ? 'active' : ''}" onclick="window._accountingBranch='all'; render()">📊 TÜM İŞ KOLLARI</div>
+      <div class="filter-chip ${branchFilter === 'store' ? 'active' : ''}" onclick="window._accountingBranch='store'; render()" style="${branchFilter==='store' ? 'background: var(--accent); color: #000;' : ''}">🏪 Mağaza (${fmt(branchStats.store.i - branchStats.store.e)})</div>
+      <div class="filter-chip ${branchFilter === 'construction' ? 'active' : ''}" onclick="window._accountingBranch='construction'; render()" style="${branchFilter==='construction' ? 'background: #a855f7; color: #fff;' : ''}">🏗 İnşaat (${fmt(branchStats.construction.i - branchStats.construction.e)})</div>
+      ${(state.factories || []).length > 0 || branchStats.factory.i + branchStats.factory.e > 0 ? `<div class="filter-chip ${branchFilter === 'factory' ? 'active' : ''}" onclick="window._accountingBranch='factory'; render()" style="${branchFilter==='factory' ? 'background: var(--blue); color: #fff;' : ''}">🏭 Fabrika (${fmt(branchStats.factory.i - branchStats.factory.e)})</div>` : ''}
     </div>
 
     <!-- ÜST İSTATİSTİK -->
@@ -14831,53 +15158,310 @@ function renderConstructionProjects() {
 function renderConstructionContracts() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('İç Şantiye Sözleşmeleri', '🏗', '#a855f7');
-  const internalContracts = state.contracts.filter(c => c.isInternalConstruction);
+  const internalContracts = state.contracts.filter(ct => ct.branch === 'construction' || ct.isInternalConstruction);
   if (internalContracts.length === 0) {
     c.innerHTML += '<div class="empty">Şu an aktif iç şantiye sözleşmesi yok. İnşaat başlattığında otomatik oluşur.</div>';
     return;
   }
-  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px; margin-bottom: 14px;">
-    İnşaat halindeki binalarda her şantiyenin <strong>iç sözleşmesi</strong> burada. ${internalContracts.length} aktif şantiye sözleşmesi var.
-    <br><br>
-    <button class="btn primary" onclick="setView('contracts')">📋 SÖZLEŞMELER SAYFASINA GİT</button>
+  const dispatcherCount = (state.dispatchers || []).length;
+  c.innerHTML += `<div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 14px; font-size: 11px;">
+    💡 İnşaat ve kentsel dönüşüm projelerin için <strong>kendi şantiyene</strong> yapılan iç sözleşmeler. Stoktan günlük tüketim otomatiktir.
+  </div>
+  <div class="subtitle" style="margin-bottom: 14px;">${internalContracts.length} aktif şantiye sözleşmesi</div>
+  <div class="email-list">
+    ${internalContracts.map(ct => renderContractCard(ct, dispatcherCount, true)).join('')}
   </div>`;
 }
 
 function renderConstructionMail() {
   const c = $('center');
-  c.innerHTML = _renderBranchHeader('Kentsel Dönüşüm Teklifleri', '🏗', '#a855f7');
-  // KD/inşaat ile ilgili mailler
-  const kdMails = state.inbox.filter(e => e.type === 'urban-renewal' || e.subject?.toLowerCase().includes('kentsel'));
-  if (kdMails.length === 0) {
-    c.innerHTML += '<div class="empty">Kentsel dönüşüm veya inşaat teklifi gelmemiş.</div>';
+  c.innerHTML = _renderBranchHeader('Kentsel Dönüşüm Teklifleri & İnşaat Mailleri', '🏗', '#a855f7');
+  // Inbox filtresini construction yap ve inbox'ı çağır
+  window._inboxBranchFilter = 'construction';
+  // İçerik kısmında inbox render et
+  const tempCenter = $('center');
+  const headerHtml = tempCenter.innerHTML;
+  // renderInbox center'ı ezecek; başlığı koruyalım
+  const constructionMails = state.inbox.filter(e => e.branch === 'construction');
+  if (constructionMails.length === 0) {
+    tempCenter.innerHTML += '<div class="empty">Kentsel dönüşüm veya inşaat teklifi yok.</div>';
     return;
   }
-  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px;">
-    <strong>${kdMails.length} kentsel dönüşüm/inşaat maili</strong> var.
-    <br><br>
-    <button class="btn primary" onclick="setView('inbox')">📨 GELEN KUTUSUNA GİT</button>
-  </div>`;
+  tempCenter.innerHTML += `<div class="subtitle" style="margin-bottom: 14px;">${constructionMails.length} aktif teklif</div>
+    <div class="email-list">
+      ${constructionMails.map(e => {
+        const expIn = e.expiresDay - state.day;
+        return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid #a855f7;">
+          <div class="top">
+            <span class="from">🏗 ${e.customerName || 'Müşteri'}</span>
+            <span class="date">Gün ${e.receivedDay}${e.ilce ? ' · ' + (ILCELER[e.ilce]?.name || '') : ''}</span>
+          </div>
+          <div class="subject">${e.subject || 'Kentsel dönüşüm teklifi'}</div>
+          <div class="preview">${e.body ? e.body.slice(0, 120) + '...' : ''}</div>
+          <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function renderFactoryMail() {
+  const c = $('center');
+  c.innerHTML = _renderBranchHeader('Fabrika Teklifleri & Mailleri', '🏭', 'var(--accent)');
+  // Fabrika iş kolu mailleri (gelecekte fabrika satış uzmanı çekecek)
+  const factoryMails = state.inbox.filter(e => e.branch === 'factory');
+  if (factoryMails.length === 0) {
+    c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+      🏭 Fabrika maili yok. Bu sayfa, fabrika satış uzmanlarının çektiği müşteri tekliflerini ve fabrikadan gelen üretim raporlarını gösterecek.
+      <br><br>
+      Şimdilik müşteri ihale mailleri <strong>🏪 Mağaza</strong> filtresi altında. Bir ihale açıp "🏭 FABRİKADAN TEKLİF VER" butonuyla fabrikadan yanıt verebilirsin.
+      <br><br>
+      <button class="btn primary" onclick="setView('inbox'); window._inboxBranchFilter='store';">📨 MÜŞTERİ İHALELERİNE GİT</button>
+    </div>`;
+    return;
+  }
+  c.innerHTML += `<div class="subtitle" style="margin-bottom: 14px;">${factoryMails.length} fabrika maili</div>
+    <div class="email-list">
+      ${factoryMails.map(e => {
+        const cust = getCustomer(e.customerId);
+        const expIn = e.expiresDay - state.day;
+        return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--accent);">
+          <div class="top">
+            <span class="from">🏭 ${cust?.name || 'Müşteri'}</span>
+            <span class="date">Gün ${e.receivedDay}</span>
+          </div>
+          <div class="subject">${e.subject || 'Fabrika maili'}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 function renderConstructionHR() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('Şantiye Personeli', '🏗', '#a855f7');
-  c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px; line-height: 1.7;">
-    🏗 Şantiye personeli (inşaat ustaları, mühendisler, şantiye şefleri) <strong>sonraki sürümde</strong> eklenecek.
-    <br>Şu an mevcut personel için <strong>Mağaza → Personel</strong> sayfasına bak.
-    <br><br>
-    <button class="btn primary" onclick="setView('hr')">👷 PERSONELE GİT</button>
-  </div>`;
+
+  const staff = state.constructionStaff || [];
+  const activeLands = (state.lands || []).filter(l => l.building && l.building.status !== 'completed');
+
+  // Toplam maaş hesabı
+  const totalSalary = staff.reduce((s, p) => s + p.salary, 0);
+
+  // Tab state
+  if (!window._constHRTab) window._constHRTab = 'list';
+
+  // Üst stat'lar
+  let body = `
+    <div class="stat-grid" style="margin-bottom: 14px;">
+      <div class="stat-tile"><div class="stat-label">Toplam Personel</div><div class="stat-val" style="color: #a855f7;">${staff.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif Şantiye</div><div class="stat-val" style="color: var(--blue);">${activeLands.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Atanmış</div><div class="stat-val" style="color: var(--green);">${staff.filter(s => s.assignedLandId).length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aylık Maaş</div><div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(totalSalary)}</div></div>
+    </div>
+
+    <div class="tabs" style="margin-bottom: 14px;">
+      <div class="tab ${window._constHRTab === 'list' ? 'active' : ''}" onclick="window._constHRTab='list'; render()">📋 PERSONELİM (${staff.length})</div>
+      <div class="tab ${window._constHRTab === 'hire' ? 'active' : ''}" onclick="window._constHRTab='hire'; render()">➕ İŞE AL</div>
+      <div class="tab ${window._constHRTab === 'sites' ? 'active' : ''}" onclick="window._constHRTab='sites'; render()">🏗 ŞANTİYE ATAMA (${activeLands.length})</div>
+    </div>
+  `;
+
+  if (window._constHRTab === 'hire') {
+    // İşe alım tab'ı: her rol için Sv1/Sv2/Sv3 kartları
+    body += '<div style="display: flex; flex-direction: column; gap: 18px;">';
+    Object.entries(CONSTRUCTION_ROLES).forEach(([roleId, role]) => {
+      body += `<div>
+        <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 6px; color: #a855f7;">${role.label}</h3>
+        <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 10px;">${role.desc}</div>
+        <div class="grid-3">
+          ${[1,2,3].map(lvl => {
+            const salary = constructionRoleSalary(roleId, lvl);
+            const fee = constructionRoleHireFee(roleId, lvl);
+            const bonus = role.bonusPerLevel[lvl - 1];
+            const bonusPct = roleId === 'manager' ? '✓ Aktif' : `+%${Math.round(bonus * 100)}`;
+            return `<div class="card">
+              <h3>Seviye ${lvl}</h3>
+              <div style="font-size: 11px; line-height: 1.7;">
+                <div>${role.bonusLabel}: <strong style="color: var(--green);">${bonusPct}</strong></div>
+                <div>Aylık maaş: <strong>${fmt(salary)}</strong></div>
+                <div>İşe alım: <span style="color: var(--accent); font-weight: 700;">${fmt(fee)}</span></div>
+              </div>
+              <button class="btn primary" style="margin-top: 10px; width: 100%;" onclick="hireConstructionStaff('${roleId}', ${lvl})" ${state.cash >= fee ? '' : 'disabled'}>İŞE AL</button>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    });
+    body += '</div>';
+  } else if (window._constHRTab === 'sites') {
+    // Şantiye atama tab'ı: her şantiye için kadro durumu + atanabilir personel
+    if (activeLands.length === 0) {
+      body += '<div class="empty">Aktif şantiye yok. Önce bir inşaata başla.</div>';
+    } else {
+      body += '<div class="grid-2">';
+      activeLands.forEach(land => {
+        const b = land.building;
+        const bonuses = getConstructionBonuses(land.id);
+        const ilce = ILCELER[land.ilce].name;
+        const buildName = BUILDING_TYPES[b.type]?.name || 'İnşaat';
+        const assignedStaff = staff.filter(s => s.assignedLandId === land.id);
+        const progress = Math.min(100, Math.round((b.daysPassed / b.totalDays) * 100));
+
+        body += `<div class="card" style="border-left: 3px solid #a855f7;">
+          <h3 style="margin: 0;">${ilce} · ${buildName}</h3>
+          <div style="font-size: 10px; color: var(--ink-dim);">Gün ${Math.floor(b.daysPassed)}/${b.totalDays} · %${progress}</div>
+          <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${progress}%; background: #a855f7;"></div></div>
+
+          <div style="padding: 8px; background: var(--panel-2); font-size: 11px; line-height: 1.6; margin-bottom: 8px;">
+            <strong style="color: #a855f7;">🎯 Aktif Bonuslar:</strong>
+            <div>${bonuses.chief ? `🦺 ${bonuses.chief.name}: +%${Math.round(bonuses.chiefBonus*100)} hız` : '<span style="color: var(--ink-dim);">🦺 Şef yok</span>'}</div>
+            <div>${bonuses.masters.length > 0 ? `👷 ${bonuses.masters.length} usta: -%${Math.round(bonuses.masterBonus*100)} taşeron` : '<span style="color: var(--ink-dim);">👷 Usta yok</span>'}</div>
+            <div>${bonuses.engineer ? `📐 ${bonuses.engineer.name}: -%${Math.round(bonuses.engineerBonus*100)} fire` : '<span style="color: var(--ink-dim);">📐 Mühendis yok</span>'}</div>
+            <div>${bonuses.manager ? `📋 ${bonuses.manager.name}: ✓ Otomasyon` : '<span style="color: var(--ink-dim);">📋 Sorumlu yok</span>'}</div>
+          </div>
+
+          ${assignedStaff.length > 0 ? `<div style="font-size: 11px; margin-bottom: 8px;">
+            <strong>Atanmış Personel (${assignedStaff.length}):</strong>
+            ${assignedStaff.map(s => {
+              const r = CONSTRUCTION_ROLES[s.role];
+              return `<div style="padding: 4px 6px; background: var(--panel-2); margin-top: 4px; display: flex; justify-content: space-between; align-items: center;">
+                <span>${r.label} · ${s.name} · Sv${s.level}</span>
+                <button class="btn small danger" onclick="assignConstructionStaff('${s.id}', 'none')">ÇIKAR</button>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+
+          ${(() => {
+            // Boştaki personel: atayabilir
+            const idle = staff.filter(s => !s.assignedLandId);
+            if (idle.length === 0) return '<div style="font-size: 10px; color: var(--ink-dim);">Boşta personel yok</div>';
+            return `<select onchange="if(this.value) { assignConstructionStaff(this.value, '${land.id}'); this.value=''; }" style="width: 100%; padding: 6px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--border); border-radius: 3px; font-size: 11px;">
+              <option value="">+ Boştaki personeli ata...</option>
+              ${idle.map(s => {
+                const r = CONSTRUCTION_ROLES[s.role];
+                return `<option value="${s.id}">${r.label} · ${s.name} · Sv${s.level}</option>`;
+              }).join('')}
+            </select>`;
+          })()}
+        </div>`;
+      });
+      body += '</div>';
+    }
+  } else {
+    // PERSONELİM listesi
+    if (staff.length === 0) {
+      body += `<div class="empty" style="padding: 14px; background: var(--panel-2); border-left: 3px solid #a855f7;">
+        Şantiye personeli yok. <strong>+ İŞE AL</strong> sekmesinden başla.
+        <br><br>
+        Mevcut roller:
+        <ul style="margin: 6px 0 0 18px;">
+          <li>🦺 <strong>Şantiye Şefi</strong> — inşaat hızı +%10-35</li>
+          <li>👷 <strong>Usta Ekibi</strong> — taşeron maliyeti -%15-50 (birden fazla biriker)</li>
+          <li>📐 <strong>İnşaat Mühendisi</strong> — malzeme fire -%10-35</li>
+          <li>📋 <strong>Şantiye Sorumlusu</strong> — otomatik malzeme alımı (yakında)</li>
+        </ul>
+      </div>`;
+    } else {
+      body += '<div class="grid-2">';
+      staff.forEach(s => {
+        const r = CONSTRUCTION_ROLES[s.role];
+        const xpReq = 100 * s.level;
+        const assigned = s.assignedLandId ? (state.lands || []).find(l => l.id === s.assignedLandId) : null;
+        const assignedLabel = assigned ? `${ILCELER[assigned.ilce].name} şantiyesi` : '<span style="color: var(--ink-dim);">Boşta</span>';
+        const bonusPct = s.role === 'manager' ? '✓ Aktif' : `+%${Math.round(r.bonusPerLevel[s.level - 1] * 100)}`;
+        body += `<div class="emp-card" style="border-left: 3px solid #a855f7;">
+          <div class="emp-avatar">${r.label.split(' ')[0]}</div>
+          <div class="emp-info">
+            <div class="emp-name">${s.name}</div>
+            <div class="emp-role">${r.label} · Sv ${s.level} · <span class="stars">${'★'.repeat(s.level)}${'☆'.repeat(Math.max(0, 5 - s.level))}</span></div>
+            <div class="emp-stats">Maaş: ${fmt(s.salary)}/ay · ${r.bonusLabel}: <strong style="color: var(--green);">${bonusPct}</strong></div>
+            <div class="emp-stats">📍 ${assignedLabel}</div>
+            <div class="emp-stats">XP: ${s.xp}/${xpReq}</div>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${(s.xp / xpReq) * 100}%; background: #a855f7;"></div></div>
+          </div>
+          <div>
+            <button class="btn small danger" onclick="fireConstructionStaff('${s.id}')">KOVA</button>
+          </div>
+        </div>`;
+      });
+      body += '</div>';
+    }
+  }
+
+  c.innerHTML += body;
 }
 
 function renderConstructionCari() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('KD Müşterileri / Cari', '🏗', '#a855f7');
-  c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--purple); font-size: 12px; line-height: 1.7;">
-    🏗 Kentsel dönüşüm projelerinde anlaştığın müşteriler ve cari bakiyeleri burada listelenecek (sonraki sürüm).
-    <br><br>
-    <button class="btn primary" onclick="setView('customers')">🏢 TÜM CARİLERE GİT</button>
-  </div>`;
+
+  // construction branch sözleşmesi olan müşteriler
+  const allContracts = state.contracts || [];
+  const constMap = {}; // { custId: { contracts, totalRev, openBalance } }
+  allContracts.forEach(ct => {
+    if (ct.branch !== 'construction' && !ct.isInternalConstruction) return;
+    if (!ct.customerId) return; // iç şantiye, müşteri yok
+    if (!constMap[ct.customerId]) constMap[ct.customerId] = { contracts: [], totalRev: 0, openBalance: 0 };
+    constMap[ct.customerId].contracts.push(ct);
+    constMap[ct.customerId].totalRev += ct.total || 0;
+    if (!ct.paid) constMap[ct.customerId].openBalance += ct.total || 0;
+  });
+
+  // Kentsel dönüşüm projelerinde anlaşılan müşteriler (lands.isUrbanRenewal)
+  const urbanLands = (state.lands || []).filter(l => l.isUrbanRenewal && l.urbanCustomerId);
+  urbanLands.forEach(l => {
+    if (!constMap[l.urbanCustomerId]) {
+      constMap[l.urbanCustomerId] = { contracts: [], totalRev: 0, openBalance: 0, urbanProject: l };
+    } else {
+      constMap[l.urbanCustomerId].urbanProject = l;
+    }
+  });
+
+  const customerIds = Object.keys(constMap);
+  if (customerIds.length === 0) {
+    c.innerHTML += `<div class="empty" style="padding: 14px; background: var(--panel-2); border-left: 3px solid #a855f7;">
+      🏗 İnşaat & kentsel dönüşüm müşterisi yok.<br><br>
+      Kentsel dönüşüm teklifi geldiğinde veya inşaat sözleşmesi yapıldığında müşteriler buraya gelir.
+    </div>`;
+    return;
+  }
+
+  const totalOpen = Object.values(constMap).reduce((s, m) => s + m.openBalance, 0);
+  const totalRev = Object.values(constMap).reduce((s, m) => s + m.totalRev, 0);
+
+  c.innerHTML += `
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="stat-label">İnşaat Müşterisi</div><div class="stat-val" style="color: #a855f7;">${customerIds.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif KD Projesi</div><div class="stat-val" style="color: var(--blue);">${urbanLands.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Açık Bakiye</div><div class="stat-val" style="color: var(--green);">${fmt(totalOpen)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Ciro</div><div class="stat-val" style="color: var(--accent);">${fmt(totalRev)}</div></div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 14px;">
+      ${customerIds.map(cid => {
+        const cust = getCustomer(cid);
+        if (!cust) return '';
+        const m = constMap[cid];
+        const activeCount = m.contracts.filter(c => !c.paid).length;
+        return `
+        <div class="customer-card" style="border-left: 3px solid #a855f7;">
+          <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+              <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 16px;">${cust.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 1px;">📍 ${ILCELER[cust.ilce].name}</div>
+              ${m.urbanProject ? `<div style="font-size: 10px; color: #a855f7; margin-top: 4px;">🏗 ${BUILDING_TYPES[m.urbanProject.building?.type]?.name || 'Kentsel Dönüşüm'} projesi</div>` : ''}
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 9px; color: var(--ink-dim); text-transform: uppercase;">Açık Bakiye</div>
+              <div class="balance ${m.openBalance > 0 ? 'positive' : ''}">${fmt(m.openBalance)}</div>
+            </div>
+          </div>
+          <div style="margin-top: 10px; padding: 8px; background: var(--panel-2); font-size: 11px;">
+            <div>Toplam KD sözleşmesi: <strong>${m.contracts.length}</strong></div>
+            <div>Aktif: <strong>${activeCount}</strong> · Tamamlanan: <strong>${m.contracts.length - activeCount}</strong></div>
+            <div>Toplam ciro: <strong>${fmt(m.totalRev)}</strong></div>
+          </div>
+        </div>`;
+      }).filter(x => x).join('')}
+    </div>`;
 }
 
 // 🏭 FABRİKA İŞ KOLU
@@ -14900,26 +15484,24 @@ function renderFactoryList() {
 function renderFactoryOrders() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('Üretim Sözleşmeleri', '🏭', 'var(--accent)');
-  const factoryContracts = state.contracts.filter(c => c.isFactoryOffer);
+  const factoryContracts = state.contracts.filter(ct => ct.branch === 'factory' || ct.isFactoryOffer);
   if (factoryContracts.length === 0) {
-    c.innerHTML += '<div class="empty">Fabrika üretim sözleşmesi yok. Müşteri ihalelerinde "🏭 FABRİKADAN TEKLİF VER" butonu ile teklif verebilirsin.</div>';
+    c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+      🏭 Fabrika üretim sözleşmesi yok.
+      <br><br>
+      Müşteri ihalelerinde "🏭 FABRİKADAN TEKLİF VER" butonu ile teklif verebilirsin. Kabul edilirse buraya gelir.
+      <br><br>
+      <button class="btn primary" onclick="setView('inbox'); window._inboxBranchFilter='store';">📨 MÜŞTERİ İHALELERİNE GİT</button>
+    </div>`;
     return;
   }
-  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px;">
-    <strong>${factoryContracts.length} fabrika sözleşmesi</strong> aktif.
-    <br><br>
-    <button class="btn primary" onclick="setView('contracts')">📋 TÜM SÖZLEŞMELERE GİT</button>
-  </div>`;
-}
-
-function renderFactoryMail() {
-  const c = $('center');
-  c.innerHTML = _renderBranchHeader('Fabrika Teklifleri', '🏭', 'var(--accent)');
-  c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
-    🏭 Fabrika satış uzmanlarının çektiği müşteri teklifleri burada listelenecek (sonraki sürüm).
-    <br>Şu an müşteri ihale mailleri Gelen Kutusu'nda.
-    <br><br>
-    <button class="btn primary" onclick="setView('inbox')">📨 GELEN KUTUSUNA GİT</button>
+  const dispatcherCount = (state.dispatchers || []).length;
+  c.innerHTML += `<div style="padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--accent); margin-bottom: 14px; font-size: 11px;">
+    💡 Fabrika satış uzmanı tarafından çekilen ve müşterinin kabul ettiği sözleşmeler. Fabrika üretimi + sevkiyat ile teslim edilir.
+  </div>
+  <div class="subtitle" style="margin-bottom: 14px;">${factoryContracts.length} aktif üretim sözleşmesi</div>
+  <div class="email-list">
+    ${factoryContracts.map(ct => renderContractCard(ct, dispatcherCount, false)).join('')}
   </div>`;
 }
 
@@ -14960,30 +15542,58 @@ function renderFactoryHR() {
 function renderFactoryCari() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('Fabrika Müşterileri / Cari', '🏭', 'var(--accent)');
-  // Fabrika teklifiyle gelen sözleşmelerin müşterileri
-  const factoryContractsActive = state.contracts.filter(c => c.isFactoryOffer);
-  const customerIds = [...new Set(factoryContractsActive.map(c => c.customerId))];
+  // Fabrika teklifiyle gelen sözleşmelerin müşterileri (branch='factory' veya isFactoryOffer)
+  const allFactoryContracts = state.contracts.filter(ct => ct.branch === 'factory' || ct.isFactoryOffer);
+  const customerIds = [...new Set(allFactoryContracts.map(c => c.customerId))];
+
   if (customerIds.length === 0) {
-    c.innerHTML += '<div class="empty">Henüz fabrika müşterisi yok. Müşteri ihalelerine fabrikadan teklif vermeyi dene.</div>';
+    c.innerHTML += `<div class="empty" style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent);">
+      🏭 Henüz fabrika müşterisi yok.<br><br>
+      Müşteri ihalelerine "🏭 FABRİKADAN TEKLİF VER" butonuyla teklif verirsen kabul edenler buraya gelir.
+    </div>`;
     return;
   }
-  let bodyHtml = `<div class="grid-2">`;
-  customerIds.forEach(cid => {
-    const cust = getCustomer(cid);
-    if (!cust) return;
-    const customerContracts = factoryContractsActive.filter(c => c.customerId === cid);
-    const totalOpen = customerContracts.filter(c => !c.paid).reduce((s, c) => s + c.total, 0);
-    bodyHtml += `<div class="card">
-      <h3 style="margin: 0 0 4px 0;">${cust.name}</h3>
-      <div style="font-size: 11px; color: var(--ink-dim);">${ILCELER[cust.ilce]?.name || ''}</div>
-      <div style="margin-top: 8px; padding: 8px; background: var(--panel-2); font-size: 12px;">
-        <div>Aktif fabrika sözleşmesi: <strong>${customerContracts.filter(c => !c.paid).length}</strong></div>
-        <div>Toplam bekleyen alacak: <strong style="color: var(--accent);">${fmt(totalOpen)}</strong></div>
-      </div>
+
+  // Hesapla
+  const totalOpen = allFactoryContracts.filter(c => !c.paid).reduce((s, c) => s + c.total, 0);
+  const totalRev = allFactoryContracts.reduce((s, c) => s + (c.total || 0), 0);
+  const activeCount = allFactoryContracts.filter(c => !c.paid).length;
+
+  c.innerHTML += `
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="stat-label">Fabrika Müşterisi</div><div class="stat-val" style="color: var(--accent);">${customerIds.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aktif Sözleşme</div><div class="stat-val" style="color: var(--blue);">${activeCount}</div></div>
+      <div class="stat-tile"><div class="stat-label">Açık Bakiye</div><div class="stat-val" style="color: var(--green);">${fmt(totalOpen)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Ciro</div><div class="stat-val" style="color: var(--accent);">${fmt(totalRev)}</div></div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 14px;">
+      ${customerIds.map(cid => {
+        const cust = getCustomer(cid);
+        if (!cust) return '';
+        const custContracts = allFactoryContracts.filter(c => c.customerId === cid);
+        const custOpen = custContracts.filter(c => !c.paid).reduce((s, c) => s + c.total, 0);
+        const custTotal = custContracts.reduce((s, c) => s + (c.total || 0), 0);
+        return `<div class="customer-card" style="border-left: 3px solid var(--accent);">
+          <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+              <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; font-size: 16px;">${cust.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim); text-transform: uppercase;">📍 ${ILCELER[cust.ilce]?.name || ''}</div>
+              <div style="font-size: 10px; color: var(--accent); margin-top: 4px;">🏭 Fabrika satış uzmanı çekti</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 9px; color: var(--ink-dim); text-transform: uppercase;">Açık Bakiye</div>
+              <div class="balance ${custOpen > 0 ? 'positive' : ''}">${fmt(custOpen)}</div>
+            </div>
+          </div>
+          <div style="margin-top: 10px; padding: 8px; background: var(--panel-2); font-size: 11px;">
+            <div>Aktif fabrika sözleşmesi: <strong>${custContracts.filter(c => !c.paid).length}</strong></div>
+            <div>Tamamlanan: <strong>${custContracts.filter(c => c.paid).length}</strong></div>
+            <div>Fabrika cirosu: <strong style="color: var(--accent);">${fmt(custTotal)}</strong></div>
+          </div>
+        </div>`;
+      }).filter(x => x).join('')}
     </div>`;
-  });
-  bodyHtml += `</div>`;
-  c.innerHTML += bodyHtml;
 }
 
 function renderArchive() {
@@ -16109,7 +16719,8 @@ function _nextDayInner() {
           delivered: false,
           paid: false,
           estimatedCost: estCost,
-          startedDay: state.day
+          startedDay: state.day,
+          branch: 'store'
         });
         cust.totalContracts++;
         cust.trust = Math.min(100, cust.trust + 2);
@@ -16243,7 +16854,7 @@ function _nextDayInner() {
 
   // 5) Salaries - Maaşlar her 30 günde bir ödenir
   const nextPayrollDay = state.lastPayrollDay + 30;
-  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0) || (state.purchasers && state.purchasers.length > 0) || (state.dispatchers && state.dispatchers.length > 0) || (state.accountants && state.accountants.length > 0))) {
+  if (state.day >= nextPayrollDay && (state.drivers.length > 0 || state.salesReps.length > 0 || (state.fieldSalesReps && state.fieldSalesReps.length > 0) || (state.purchasers && state.purchasers.length > 0) || (state.dispatchers && state.dispatchers.length > 0) || (state.accountants && state.accountants.length > 0) || (state.constructionStaff && state.constructionStaff.length > 0))) {
     let totalPayroll = 0;
     const breakdown = [];
 
@@ -16307,10 +16918,29 @@ function _nextDayInner() {
       breakdown.push({ name: r.name, role: 'Muhasebe', pay, daysWorked });
     });
 
+    // 🏗 Şantiye personeli
+    (state.constructionStaff || []).forEach(r => {
+      const periodStart = state.lastPayrollDay;
+      const effectiveStart = Math.max(r.hireDay, periodStart);
+      const daysWorked = Math.min(30, state.day - effectiveStart);
+      const pay = Math.round(r.salary * (daysWorked / 30));
+      totalPayroll += pay;
+      const role = CONSTRUCTION_ROLES[r.role];
+      breakdown.push({ name: r.name, role: role?.label || 'Şantiye', pay, daysWorked });
+    });
+
     if (totalPayroll > 0) {
-      spend(totalPayroll, 'maas');
+      // Şantiye maaşlarını ayrı çıkar (construction branch'a gitsin)
+      const constSalary = (state.constructionStaff || []).reduce((s, r) => {
+        const effectiveStart = Math.max(r.hireDay, state.lastPayrollDay);
+        const daysWorked = Math.min(30, state.day - effectiveStart);
+        return s + Math.round(r.salary * (daysWorked / 30));
+      }, 0);
+      const storeSalary = totalPayroll - constSalary;
+      if (storeSalary > 0) spend(storeSalary, 'maas');
+      if (constSalary > 0) spend(constSalary, 'maas-insaat');
       state.lastPayrollDay = state.day;
-      state.agenda.push(`💼 AYLIK MAAŞLAR ÖDENDİ: ${fmt(totalPayroll)}`);
+      state.agenda.push(`💼 AYLIK MAAŞLAR ÖDENDİ: ${fmt(totalPayroll)}${constSalary > 0 ? ` (Şantiye: ${fmt(constSalary)})` : ''}`);
       toast(`💼 Aylık maaşlar ödendi: ${fmt(totalPayroll)} (${breakdown.length} kişi)`, 'info');
 
       if (state.cash < 0) {
@@ -17579,10 +18209,107 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.76';
+const CURRENT_VERSION = 'v1.82';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.82',
+    date: '24 Mayıs 2026',
+    title: 'ŞANTİYE PERSONELİ — ÖZEL ROLLER',
+    items: [
+      { cat: 'major', text: '🏗 <strong>4 yeni şantiye personeli rolü</strong>: Şef, Usta, Mühendis, Sorumlu' },
+      { cat: 'feature', text: '🦺 <strong>Şantiye Şefi</strong>: inşaat hızı +%10/20/35 (Sv1/2/3) · Maaş ₺75K-165K' },
+      { cat: 'feature', text: '👷 <strong>Usta Ekibi</strong>: taşeron + işçilik maliyeti -%15/30/50 · Birden fazla biriker (max -%70) · Maaş ₺40K-85K' },
+      { cat: 'feature', text: '📐 <strong>İnşaat Mühendisi</strong>: malzeme fire -%10/20/35 · Maaş ₺85K-190K' },
+      { cat: 'feature', text: '📋 <strong>Şantiye Sorumlusu</strong>: otomatik tedarik (sonraki sürümde aktif) · Maaş ₺55K-120K' },
+      { cat: 'feature', text: 'Personel <strong>şantiyeye atanır</strong> — birden fazla şantiye varsa istediğin yere ata' },
+      { cat: 'feature', text: 'Atama tab\'ında her şantiyede aktif bonuslar görünür' },
+      { cat: 'feature', text: 'Maaşlar otomatik 30 günde bir öder, <strong>"maas-insaat"</strong> kategorisiyle muhasebeye yazılır' },
+      { cat: 'feature', text: 'İnşaat sayfasında 🏗 Şantiye Personeli sekmesi tam çalışıyor' },
+      { cat: 'feature', text: 'Atama UI: dropdown\'dan boştaki personeli seç → şantiyeye atansın' }
+    ]
+  },
+  {
+    version: 'v1.81',
+    date: '24 Mayıs 2026',
+    title: 'MUHASEBE İŞ KOLU KAR/ZARAR (6. AŞAMA)',
+    items: [
+      { cat: 'major', text: '📊 <strong>Muhasebe sayfasında iş kolu chip\'leri</strong>: Tüm / Mağaza / İnşaat / Fabrika' },
+      { cat: 'feature', text: 'Her gelir/gider <strong>otomatik iş koluna atanır</strong> (kategori bazlı eşleme)' },
+      { cat: 'feature', text: '🏗 İnşaat: insaat, taseron, arsa, daire-satis, kira-geliri vs.' },
+      { cat: 'feature', text: '🏭 Fabrika: fabrika-alim, hammadde, uretim-iscilik, fabrika-satis vs.' },
+      { cat: 'feature', text: '🏪 Mağaza: malzeme, sevkiyat, tahsilat, bayilik-teminat vs.' },
+      { cat: 'feature', text: 'Chip\'lerde her iş kolunun <strong>net kâr/zarar tutarı</strong> görünür (canlı)' },
+      { cat: 'feature', text: 'Filtre seçilince başlık güncellenir: "MUHASEBE — 🏗 İnşaat & KD"' },
+      { cat: 'feature', text: 'Grafik, kategori dökümü, toplam istatistikler hepsi seçili branch için filtrelenir' },
+      { cat: 'feature', text: 'Eski dailyLedger girişleri yüklenince otomatik etiketlenir (sanitize)' },
+      { cat: 'info', text: 'Tüm 5 aşama tamamlandı: Menü → Mail → Personel → Sözleşme → Cari → Muhasebe' }
+    ]
+  },
+  {
+    version: 'v1.80',
+    date: '24 Mayıs 2026',
+    title: 'CARİ HESAPLAR İŞ KOLUNA AYRILDI (5. AŞAMA)',
+    items: [
+      { cat: 'major', text: '🏪 <strong>Mağaza Müşterileri/Cari</strong> sayfasına filtre chip\'leri: Tümü / Mağaza / İnşaat / Fabrika' },
+      { cat: 'feature', text: 'Müşteri kartlarında <strong>iş kolu rozetleri</strong>: 🏪 MAĞ · 🏗 İNŞ · 🏭 FAB' },
+      { cat: 'feature', text: 'Sayım bazlı filtre — örn: "🏗 İnşaat (3)" → 3 inşaat müşterisi' },
+      { cat: 'major', text: '🏗 <strong>KD Müşterileri / Cari</strong> sayfası gerçek liste!' },
+      { cat: 'feature', text: 'İnşaat müşterilerinde KD projesi varsa proje türü görünür' },
+      { cat: 'feature', text: 'Açık bakiye + toplam ciro + aktif sözleşme sayıları branch bazında' },
+      { cat: 'major', text: '🏭 <strong>Fabrika Müşterileri</strong> sayfası geliştirildi — stat\'lar ve detaylı kartlar' },
+      { cat: 'feature', text: 'Her iş kolu kendi cirosunu ayrı görür' },
+      { cat: 'info', text: '🔜 Sonraki: muhasebe/dailyLedger iş koluna göre kâr/zarar raporu' }
+    ]
+  },
+  {
+    version: 'v1.79',
+    date: '24 Mayıs 2026',
+    title: 'SÖZLEŞMELER İŞ KOLUNA AYRILDI (4. AŞAMA)',
+    items: [
+      { cat: 'major', text: '🏷 <strong>Her sözleşmeye branch alanı eklendi</strong>: store / construction / factory' },
+      { cat: 'feature', text: 'Müşteri ihale + saha satış sözleşmeleri → 🏪 store branch' },
+      { cat: 'feature', text: 'İç şantiye sözleşmeleri → 🏗 construction branch' },
+      { cat: 'feature', text: 'Fabrika teklifi sözleşmeleri → 🏭 factory branch' },
+      { cat: 'major', text: '🏪 <strong>Mağaza Sözleşmeleri</strong> sayfası — sadece müşteri ile yapılan (store + factory)' },
+      { cat: 'major', text: '🏗 <strong>İç Şantiye Sözleşmeleri</strong> sayfası — gerçek liste, şantiye sevkiyatları' },
+      { cat: 'major', text: '🏭 <strong>Üretim Sözleşmeleri</strong> sayfası — fabrika teklifi kabul edilen siparişler' },
+      { cat: 'feature', text: 'İç şantiye sözleşmeleri artık Mağaza sözleşmelerinde gözükmüyor (mükerrer önlendi)' },
+      { cat: 'feature', text: 'Eski sözleşmeler yüklenince otomatik etiketlenir (sanitize)' },
+      { cat: 'feature', text: 'Mağaza sayfası altta şantiye sözleşmelerine yönlendirme linki gösterir' }
+    ]
+  },
+  {
+    version: 'v1.78',
+    date: '23 Mayıs 2026',
+    title: 'PERSONEL İŞ KOLU AYIRIMI (3. AŞAMA)',
+    items: [
+      { cat: 'major', text: '🏷 <strong>Personele branch alanı eklendi</strong>: store / construction / factory' },
+      { cat: 'feature', text: 'Yeni işe alımlar otomatik <strong>store</strong> branch alır' },
+      { cat: 'feature', text: 'Eski personel yüklenince otomatik store olarak etiketlenir' },
+      { cat: 'feature', text: 'Mağaza Personel sayfası başlığı: 🏪 MAĞAZA PERSONELİ (sadece store)' },
+      { cat: 'feature', text: 'Sayımlar yalnızca <strong>store</strong> branch personeli sayar' },
+      { cat: 'feature', text: '🏗 Şantiye Personeli sayfası — yakında gelecek özel roller listesi (şantiye şefi, usta, mühendis)' },
+      { cat: 'feature', text: '🏭 Fabrika Personeli zaten her fabrikanın kendi staff alanında' },
+      { cat: 'info', text: '🔜 Sonraki aşama: Sözleşmeler iş koluna göre ayrı listelensin' }
+    ]
+  },
+  {
+    version: 'v1.77',
+    date: '23 Mayıs 2026',
+    title: 'MAİL İŞ KOLU FİLTRESİ (2. AŞAMA)',
+    items: [
+      { cat: 'major', text: '🏷 <strong>Her mail iş kolu etiketi taşıyor</strong>: store / construction / factory' },
+      { cat: 'feature', text: 'Müşteri ihaleleri ve saha satış teklifleri → 🏪 Mağaza' },
+      { cat: 'feature', text: 'Kentsel dönüşüm teklifleri → 🏗 İnşaat / KD' },
+      { cat: 'feature', text: 'Fabrika satış uzmanları çektiği mailler → 🏭 Fabrika' },
+      { cat: 'feature', text: 'Gelen Kutusu üstünde <strong>filtre chip\'leri</strong>: Tümü / Mağaza / İnşaat / Fabrika' },
+      { cat: 'feature', text: 'Eski mailler yüklenince otomatik etiketlenir (sanitize)' },
+      { cat: 'feature', text: 'İnşaat & KD menüsündeki "KD Teklifleri" sekmesi artık gerçek mailleri gösteriyor' },
+      { cat: 'feature', text: 'Fabrika menüsündeki "Fabrika Teklifleri" sekmesi hazır (mail geldiğinde dolu olur)' }
+    ]
+  },
   {
     version: 'v1.76',
     date: '23 Mayıs 2026',
@@ -19174,6 +19901,41 @@ function sanitizeLoadedState() {
       state.factories.forEach(f => {
         if (!f.rawStock) f.rawStock = {};
         if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+      });
+    }
+
+    // 11) Eski maillere branch etiketi ekle (type'a göre)
+    if (Array.isArray(state.inbox)) {
+      state.inbox.forEach(e => {
+        if (e.branch) return;
+        if (e.type === 'urban-renewal') e.branch = 'construction';
+        else if (e.type === 'tender' || e.type === 'fs-proposal' || e.type === 'dispatch-plan') e.branch = 'store';
+        else e.branch = 'store';  // varsayılan
+      });
+    }
+
+    // 12) Eski personele branch etiketi ekle (varsayılan: store)
+    ['drivers', 'salesReps', 'fieldSalesReps', 'purchasers', 'accountants'].forEach(key => {
+      if (Array.isArray(state[key])) {
+        state[key].forEach(p => { if (!p.branch) p.branch = 'store'; });
+      }
+    });
+
+    // 13) Eski sözleşmelere branch etiketi ekle
+    if (Array.isArray(state.contracts)) {
+      state.contracts.forEach(c => {
+        if (c.branch) return;
+        if (c.isInternalConstruction) c.branch = 'construction';
+        else if (c.isFactoryOffer) c.branch = 'factory';
+        else c.branch = 'store';
+      });
+    }
+
+    // 14) Eski dailyLedger girişlerine branch ekle (kategoriye göre)
+    if (Array.isArray(state.dailyLedger)) {
+      state.dailyLedger.forEach(e => {
+        if (e.branch) return;
+        e.branch = (typeof CATEGORY_BRANCH !== 'undefined' && CATEGORY_BRANCH[e.category]) || 'store';
       });
     }
   } catch (e) {

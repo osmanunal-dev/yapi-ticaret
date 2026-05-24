@@ -8673,6 +8673,127 @@ function onLevelUp() {
 // EMAIL / TENDER GENERATION
 // ============================================================
 
+// Hammadde tedarikçilerinden fabrikalara özel toplu alım teklifi
+function generateRawMaterialOffer() {
+  const factories = state.factories || [];
+  if (factories.length === 0) return null;
+
+  // Rastgele bir fabrika seç
+  const factory = choice(factories);
+  const recipe = PRODUCT_RECIPES[factory.productId] || {};
+  const rawIds = Object.keys(recipe);
+  if (rawIds.length === 0) return null;
+
+  // Bu fabrikanın hammaddelerinden 2-4 tane üzerine teklif
+  const numItems = Math.min(rawIds.length, 2 + Math.floor(Math.random() * 3));
+  const shuffled = rawIds.slice().sort(() => Math.random() - 0.5).slice(0, numItems);
+
+  // Tedarikçi seç (ham_plastik, klinker vs satan tedarikçilerden biri)
+  const matchingSuppliers = SUPPLIERS.filter(s => shuffled.some(rid => s.products.includes(rid)));
+  if (matchingSuppliers.length === 0) return null;
+  const supplier = choice(matchingSuppliers);
+
+  // Her hammadde için: piyasanın %10-25 altında özel fiyat + min ve max miktar
+  const items = [];
+  shuffled.forEach(rid => {
+    if (!supplier.products.includes(rid)) return;
+    const p = PRODUCTS[rid];
+    if (!p) return;
+    const normalPrice = supplierPrice(supplier, rid);
+    const discountPct = 0.10 + Math.random() * 0.15; // %10-%25 indirim
+    const specialPrice = Math.round(normalPrice * (1 - discountPct));
+    // Önerilen miktar: 1 aylık kapasiteye yetecek hammadde × (1 - 2)
+    const perUnit = recipe[rid];
+    const monthNeed = perUnit * factory.monthlyCapacity;
+    const minQty = Math.max(1, Math.ceil(monthNeed * (0.5 + Math.random() * 1.5)));
+    items.push({
+      rawId: rid,
+      name: p.name,
+      unit: p.unit,
+      normalPrice,
+      specialPrice,
+      discountPct: Math.round(discountPct * 100),
+      qty: minQty,
+      total: specialPrice * minQty
+    });
+  });
+
+  if (items.length === 0) return null;
+
+  const totalDeal = items.reduce((s, i) => s + i.total, 0);
+  const expDays = 3 + Math.floor(Math.random() * 4); // 3-6 gün geçerli
+  const b = BRANDS[factory.brandId];
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'raw-offer',
+    branch: 'factory',     // 🏭 fabrika maili
+    factoryId: factory.id,
+    supplierId: supplier.id,
+    supplierName: supplier.name,
+    items,
+    totalDeal,
+    receivedDay: state.day,
+    expiresDay: state.day + expDays,
+    subject: `🚚 ${supplier.name} — ${b?.name || 'Fabrika'}'na Özel Toplu Alım Teklifi`,
+    body: `Sayın ${state.companyName || 'Yetkili'},\n\n${supplier.name} olarak ${b?.name || 'fabrikanız'} için hammadde toplu alım teklifimizdir:\n\n${items.map(it => `• ${it.name}: ${it.qty.toLocaleString('tr-TR')} ${it.unit} → ${fmt(it.specialPrice)}/${it.unit} (piyasa: ${fmt(it.normalPrice)}, %${it.discountPct} indirim)`).join('\n')}\n\nToplam: ${fmt(totalDeal)}\nGeçerlilik: ${expDays} gün\n\nKabul ederseniz hammaddeler doğrudan fabrika stoğunuza eklenecektir.`,
+    unread: true,
+    answered: false
+  };
+}
+
+function acceptRawMaterialOffer(emailId) {
+  const e = state.inbox.find(x => x.id === emailId);
+  if (!e || e.answered) { toast('Teklif bulunamadı veya zaten cevaplandı', 'error'); return; }
+  if (e.type !== 'raw-offer') { toast('Bu mail bir hammadde teklifi değil', 'error'); return; }
+  if (state.day > e.expiresDay) { toast('Teklifin süresi dolmuş', 'error'); return; }
+
+  const factory = (state.factories || []).find(f => f.id === e.factoryId);
+  if (!factory) { toast('Hedef fabrika artık yok', 'error'); return; }
+
+  if (state.cash < e.totalDeal) {
+    toast(`Yetersiz bakiye: ${fmt(e.totalDeal)} gerekli, kasada ${fmt(state.cash)} var`, 'error');
+    return;
+  }
+
+  // Öde + hammaddeler fabrika stoğuna gir
+  spend(e.totalDeal, 'hammadde');
+  if (!factory.rawStock) factory.rawStock = {};
+  e.items.forEach(it => {
+    factory.rawStock[it.rawId] = (factory.rawStock[it.rawId] || 0) + it.qty;
+  });
+  // Tedarikçi sadakati
+  if (!state.supplierLoyalty) state.supplierLoyalty = {};
+  state.supplierLoyalty[e.supplierId] = Math.min(100, (state.supplierLoyalty[e.supplierId] || 0) + 5);
+
+  e.answered = true;
+  e.acceptedDay = state.day;
+
+  // Arşive geçir
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx >= 0) {
+    state.archive.push({ ...e, status: 'raw-offer-accepted' });
+    state.inbox.splice(idx, 1);
+  }
+
+  const b = BRANDS[factory.brandId];
+  toast(`✅ ${e.supplierName} tedariği kabul edildi: ${e.items.length} kalem fabrikaya geldi (${fmt(e.totalDeal)})`, 'success');
+  state.agenda.push(`🚚 ${b?.name || 'Fabrika'} hammadde tedariği: ${fmt(e.totalDeal)}`);
+  state.selectedEmail = null;
+  render();
+}
+
+function declineRawMaterialOffer(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  state.archive.push({ ...e, status: 'declined' });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+  toast('Hammadde teklifi reddedildi', 'info');
+  render();
+}
+
 function generateTender() {
   const customer = choice(state.customers);
   const trustBonus = customer.trust > 60 ? 1.05 : 1.0; // trusted customers tend to send bigger jobs
@@ -10424,6 +10545,88 @@ function evaluateOffer(userOffer, email) {
   return { status, willAccept, reason, underBudget, beatsCompetitor };
 }
 
+// Hammadde teklifi maili detay sayfası
+function renderRawOfferDetail(e) {
+  const c = $('center');
+  const factory = (state.factories || []).find(f => f.id === e.factoryId);
+  const b = factory ? BRANDS[factory.brandId] : null;
+  const expIn = e.expiresDay - state.day;
+  const expired = expIn < 0;
+
+  // Toplam tasarruf hesabı
+  const normalTotal = e.items.reduce((s, it) => s + it.normalPrice * it.qty, 0);
+  const savings = normalTotal - e.totalDeal;
+
+  c.innerHTML = `<div style="max-width: 850px;">
+    <button class="btn" style="margin-bottom: 14px;" onclick="state.selectedEmail=null; render()">← Geri</button>
+
+    <div style="padding: 16px 18px; background: linear-gradient(180deg, rgba(244,160,32,0.06), transparent); border-left: 4px solid var(--accent);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h2 style="margin: 0; color: var(--accent); font-family: 'Bebas Neue'; letter-spacing: 2px;">🚚 ${e.supplierName.toUpperCase()}</h2>
+          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Hedef: 🏭 ${b?.name || 'Fabrika'} · ${PRODUCTS[factory?.productId]?.name || ''}</div>
+        </div>
+        <div style="text-align: right; font-size: 11px;">
+          <div style="color: var(--ink-dim);">Geliş: Gün ${e.receivedDay}</div>
+          <div style="color: ${expIn <= 1 ? 'var(--red)' : 'var(--ink-dim)'};">Son: Gün ${e.expiresDay} ${expired ? '(SÜRESİ GEÇTİ)' : `(${expIn} gün)`}</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 18px;">${e.subject}</h3>
+    <div style="white-space: pre-line; padding: 12px; background: var(--panel-2); font-size: 12px; line-height: 1.7; margin: 8px 0 16px;">${e.body}</div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 12px 0 8px;">📦 TEKLİF KALEMLERİ</h3>
+    <table class="data-table" style="width: 100%;">
+      <thead>
+        <tr>
+          <th>Hammadde</th>
+          <th class="num">Miktar</th>
+          <th class="num">Piyasa Fiyatı</th>
+          <th class="num">Özel Fiyat</th>
+          <th class="num">İndirim</th>
+          <th class="num">Toplam</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${e.items.map(it => `<tr>
+          <td><strong>${it.name}</strong></td>
+          <td class="num">${it.qty.toLocaleString('tr-TR')} ${it.unit}</td>
+          <td class="num" style="color: var(--ink-dim);">${fmt(it.normalPrice)}</td>
+          <td class="num" style="color: var(--green); font-weight: 700;">${fmt(it.specialPrice)}</td>
+          <td class="num" style="color: var(--accent);">%${it.discountPct}</td>
+          <td class="num" style="font-weight: 700;">${fmt(it.total)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <div style="margin-top: 14px; padding: 14px 16px; background: var(--panel-2); border-left: 3px solid var(--green);">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span>Piyasa fiyatından toplam:</span>
+        <strong style="color: var(--ink-dim); text-decoration: line-through;">${fmt(normalTotal)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span>Özel teklif toplamı:</span>
+        <strong style="color: var(--accent); font-size: 18px;">${fmt(e.totalDeal)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px dashed var(--border);">
+        <span style="color: var(--green);">Tasarruf:</span>
+        <strong style="color: var(--green);">+${fmt(savings)}</strong>
+      </div>
+    </div>
+
+    ${e.answered ? `<div style="margin-top: 14px; padding: 12px; background: var(--panel-2); border-left: 3px solid var(--ink-dim);">
+      ✓ Bu teklif zaten cevaplandı.
+    </div>` : expired ? `<div style="margin-top: 14px; padding: 12px; background: var(--panel-2); border-left: 3px solid var(--red); color: var(--red);">
+      ⚠️ Teklifin süresi geçti.
+    </div>` : `<div style="display: flex; gap: 10px; margin-top: 14px;">
+      <button class="btn primary" style="flex: 1; padding: 12px; background: var(--green); border-color: var(--green); color: #fff; font-weight: 700;" onclick="acceptRawMaterialOffer(${e.id})" ${state.cash < e.totalDeal ? 'disabled' : ''}>✓ KABUL ET (${fmt(e.totalDeal)})</button>
+      <button class="btn danger" style="padding: 12px;" onclick="declineRawMaterialOffer(${e.id})">REDDET</button>
+    </div>
+    ${state.cash < e.totalDeal ? `<div style="text-align: center; color: var(--red); font-size: 11px; margin-top: 8px;">⚠️ Yetersiz bakiye — eksik ${fmt(e.totalDeal - state.cash)}</div>` : ''}`}
+  </div>`;
+}
+
 function renderEmailDetail() {
   const e = state.selectedEmail;
   const c = $('center');
@@ -10449,6 +10652,12 @@ function renderEmailDetail() {
   // Kentsel dönüşüm için ayrı sayfa
   if (e.type === 'urban-renewal') {
     renderUrbanRenewalDetail(e);
+    return;
+  }
+
+  // Hammadde teklifi için ayrı sayfa
+  if (e.type === 'raw-offer') {
+    renderRawOfferDetail(e);
     return;
   }
 
@@ -15156,17 +15365,122 @@ function _renderBranchHeader(branchName, icon, color) {
 // 🏗 İNŞAAT İŞ KOLU
 function renderConstructionProjects() {
   const c = $('center');
-  c.innerHTML = _renderBranchHeader('İnşaat & Kentsel Dönüşüm Projeleri', '🏗', '#a855f7') + '<div id="branch-body"></div>';
-  // Mevcut renderLands'i kullan, sadece projects sekmesini aç
-  window._landTab = 'projects';
-  const body = $('branch-body');
-  // Geçici çözüm: lands sayfasına yönlendir
-  body.innerHTML = `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7; margin-bottom: 14px;">
-    🏗 <strong>Devam eden inşaat ve kentsel dönüşüm projelerin Arsa & Gayrimenkul sayfasında.</strong><br>
-    Bu sekme bu aşamada Arsa sayfasına yönlendirir. Sonraki sürümlerde tam ayrı sayfa olacak.
-    <br><br>
-    <button class="btn primary" onclick="setView('lands'); window._landTab='projects'; setTimeout(render,10);">🏞 ARSA SAYFASINA GİT</button>
-  </div>`;
+  c.innerHTML = _renderBranchHeader('İnşaat & Kentsel Dönüşüm Projeleri', '🏗', '#a855f7');
+
+  const lands = state.lands || [];
+  const activeProjects = lands.filter(l => l.building && ['demolition','building','paused-warned'].includes(l.building.status));
+  const completedNotArchived = lands.filter(l => l.building && l.building.status === 'completed' && (l.building.apartments || []).some(a => a.status === 'unsold' || a.status === 'listed' || a.status === 'rented'));
+
+  if (activeProjects.length === 0 && completedNotArchived.length === 0) {
+    c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid #a855f7; font-size: 12px; line-height: 1.7;">
+      🏗 <strong>Aktif inşaat veya kentsel dönüşüm projesi yok.</strong>
+      <br><br>
+      <strong>Yeni proje başlatmak için:</strong>
+      <ul style="margin: 6px 0 0 18px;">
+        <li>Arsa & Gayrimenkul → Piyasa'dan arsa al, sonra inşaat başlat</li>
+        <li>Kentsel dönüşüm tekliflerini bekle (Mail kutusu → KD Teklifleri)</li>
+      </ul>
+      <br>
+      <button class="btn primary" onclick="setView('lands')">🏞 ARSA SAYFASINA GİT</button>
+    </div>`;
+    return;
+  }
+
+  // Aktif projeleri listele
+  let body = '';
+
+  if (activeProjects.length > 0) {
+    body += `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 8px 0; color: #a855f7;">🏗 AKTİF PROJELER (${activeProjects.length})</h3>
+    <div class="grid-2">`;
+
+    activeProjects.forEach(l => {
+      const b = l.building;
+      const t = BUILDING_TYPES[b.type];
+      const ilce = ILCELER[l.ilce];
+      const progress = Math.min(100, Math.round((b.daysPassed / b.totalDays) * 100));
+      const isUrban = l.isUrbanRenewal;
+      const statusBadge = b.status === 'demolition' ? '<span style="background: #f59e0b; color: #000; padding: 2px 6px; font-size: 10px; border-radius: 2px; font-weight: 700;">YIKIM</span>'
+        : b.status === 'paused-warned' ? '<span style="background: var(--red); color: #fff; padding: 2px 6px; font-size: 10px; border-radius: 2px; font-weight: 700;">DURMUŞ</span>'
+        : '<span style="background: #a855f7; color: #fff; padding: 2px 6px; font-size: 10px; border-radius: 2px; font-weight: 700;">İNŞAAT</span>';
+
+      // Şantiye personeli bonusları
+      const bonuses = (typeof getConstructionBonuses === 'function') ? getConstructionBonuses(l.id) : { chiefBonus: 0, masterBonus: 0, engineerBonus: 0 };
+      const hasStaff = bonuses.chief || bonuses.masters.length > 0 || bonuses.engineer || bonuses.manager;
+
+      body += `<div class="card" style="border-left: 3px solid #a855f7;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+          <div>
+            <h3 style="margin: 0;">${ilce.name} · ${t.name}</h3>
+            <div style="font-size: 10px; color: var(--ink-dim);">${l.m2.toLocaleString('tr-TR')} m² arsa${isUrban ? ' · 🏗 Kentsel Dönüşüm' : ''}</div>
+          </div>
+          ${statusBadge}
+        </div>
+
+        <div style="margin: 8px 0; font-size: 11px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span>Gün ${Math.floor(b.daysPassed)}/${b.totalDays}</span>
+            <span style="color: var(--accent);">%${progress}</span>
+          </div>
+          <div class="progress-bar" style="margin-top: 4px;"><div class="progress-fill" style="width: ${progress}%; background: #a855f7;"></div></div>
+        </div>
+
+        ${b.isSubcontracted ? `<div style="font-size: 10px; color: var(--ink-dim); margin-top: 4px;">🤝 Taşeronlu</div>` : ''}
+
+        ${hasStaff ? `<div style="margin-top: 8px; padding: 6px 8px; background: var(--panel-2); border-left: 2px solid var(--green); font-size: 10px; line-height: 1.6;">
+          <strong>Şantiye Kadrosu:</strong>
+          ${bonuses.chief ? `<br>🦺 ${bonuses.chief.name} (+%${Math.round(bonuses.chiefBonus*100)} hız)` : ''}
+          ${bonuses.masters.length > 0 ? `<br>👷 ${bonuses.masters.length} usta (-%${Math.round(bonuses.masterBonus*100)} taşeron)` : ''}
+          ${bonuses.engineer ? `<br>📐 ${bonuses.engineer.name} (-%${Math.round(bonuses.engineerBonus*100)} fire)` : ''}
+          ${bonuses.manager ? `<br>📋 ${bonuses.manager.name} (otomasyon)` : ''}
+        </div>` : `<div style="margin-top: 8px; padding: 6px 8px; background: var(--panel-2); border-left: 2px solid var(--ink-dim); font-size: 10px;">
+          <span style="color: var(--ink-dim);">⚠️ Atanmış şantiye personeli yok</span>
+        </div>`}
+
+        ${b.missingMaterials && b.missingMaterials.length > 0 ? `<div style="margin-top: 8px; padding: 6px 8px; background: rgba(239, 68, 68, 0.1); border-left: 2px solid var(--red); font-size: 10px;">
+          ⚠️ <strong>Malzeme eksik:</strong> ${b.missingMaterials.slice(0, 2).map(m => `${PRODUCTS[m.productId]?.name || m.productId} (-${m.short})`).join(', ')}${b.missingMaterials.length > 2 ? '...' : ''}
+        </div>` : ''}
+
+        <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
+          <button class="btn small primary" onclick="setView('construction-hr'); window._constHRTab='sites'; setTimeout(render,10);">👷 KADRO</button>
+          ${!b.isSubcontracted && b.status === 'building' ? `<button class="btn small" style="background: #f59e0b; color: #000; border-color: #f59e0b;" onclick="setView('lands'); window._landTab='projects'; setTimeout(render,10);">🤝 TAŞERON</button>` : ''}
+          <button class="btn small" onclick="setView('lands')">🏞 ARSA DETAY</button>
+        </div>
+      </div>`;
+    });
+
+    body += `</div>`;
+  }
+
+  // Tamamlanmış ama satılan/kiralanan daireler olan binalar
+  if (completedNotArchived.length > 0) {
+    body += `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 18px 0 8px; color: var(--green);">✅ TAMAMLANAN — SATIŞA ÇIKAN (${completedNotArchived.length})</h3>
+    <div class="grid-2">`;
+
+    completedNotArchived.forEach(l => {
+      const b = l.building;
+      const t = BUILDING_TYPES[b.type];
+      const ilce = ILCELER[l.ilce];
+      const apts = b.apartments || [];
+      const unsold = apts.filter(a => a.status === 'unsold' || a.status === 'listed').length;
+      const sold = apts.filter(a => a.status === 'sold').length;
+      const rented = apts.filter(a => a.status === 'rented').length;
+
+      body += `<div class="card" style="border-left: 3px solid var(--green);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+          <div>
+            <h3 style="margin: 0;">${ilce.name} · ${t.name}</h3>
+            <div style="font-size: 10px; color: var(--ink-dim);">${apts.length} daire · ${unsold} satılık · ${sold} satıldı · ${rented} kirada</div>
+          </div>
+          <span style="background: var(--green); color: #000; padding: 2px 6px; font-size: 10px; border-radius: 2px; font-weight: 700;">✓ BİTTİ</span>
+        </div>
+        <button class="btn small primary" style="width: 100%; margin-top: 8px;" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>
+      </div>`;
+    });
+
+    body += '</div>';
+  }
+
+  c.innerHTML += body;
 }
 
 function renderConstructionContracts() {
@@ -15221,26 +15535,46 @@ function renderConstructionMail() {
 function renderFactoryMail() {
   const c = $('center');
   c.innerHTML = _renderBranchHeader('Fabrika Teklifleri & Mailleri', '🏭', 'var(--accent)');
-  // Fabrika iş kolu mailleri (gelecekte fabrika satış uzmanı çekecek)
+  // Fabrika iş kolu mailleri
   const factoryMails = state.inbox.filter(e => e.branch === 'factory');
   if (factoryMails.length === 0) {
     c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
-      🏭 Fabrika maili yok. Bu sayfa, fabrika satış uzmanlarının çektiği müşteri tekliflerini ve fabrikadan gelen üretim raporlarını gösterecek.
+      🏭 <strong>Fabrika maili yok.</strong>
       <br><br>
-      Şimdilik müşteri ihale mailleri <strong>🏪 Mağaza</strong> filtresi altında. Bir ihale açıp "🏭 FABRİKADAN TEKLİF VER" butonuyla fabrikadan yanıt verebilirsin.
-      <br><br>
-      <button class="btn primary" onclick="setView('inbox'); window._inboxBranchFilter='store';">📨 MÜŞTERİ İHALELERİNE GİT</button>
+      Bu sayfa şu mailleri gösterir:
+      <ul style="margin: 6px 0 0 18px;">
+        <li>🚚 <strong>Hammadde tedarikçilerinden özel teklifler</strong> — fabrikan varsa rastgele gelir</li>
+        <li>💼 <strong>Fabrika satış uzmanının çektiği müşteri talepleri</strong> (yakında)</li>
+      </ul>
+      <br>
+      ${(state.factories || []).length === 0 ? '<em>Önce bir fabrika satın al — sonra hammadde tedarikçileri sana özel teklifler göndermeye başlar.</em>' : 'Birkaç gün içinde hammadde tedarikçilerinden özel teklifler gelecek.'}
     </div>`;
     return;
   }
   c.innerHTML += `<div class="subtitle" style="margin-bottom: 14px;">${factoryMails.length} fabrika maili</div>
     <div class="email-list">
       ${factoryMails.map(e => {
-        const cust = getCustomer(e.customerId);
         const expIn = e.expiresDay - state.day;
+        const expired = expIn < 0;
+        // Raw offer maili
+        if (e.type === 'raw-offer') {
+          const factory = (state.factories || []).find(f => f.id === e.factoryId);
+          const b = factory ? BRANDS[factory.brandId] : null;
+          return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
+            <div class="top">
+              <span class="from">🚚 ${e.supplierName}</span>
+              <span class="date">Gün ${e.receivedDay}</span>
+            </div>
+            <div class="subject">${e.subject}</div>
+            <div class="preview">${e.items.length} hammadde · Toplam: <strong style="color: var(--accent);">${fmt(e.totalDeal)}</strong> · Hedef: ${b?.name || 'Fabrika'}</div>
+            <div class="deadline" style="color: ${expIn <= 1 ? 'var(--red)' : 'var(--ink-dim)'};">${expired ? 'SÜRESİ GEÇTİ!' : (expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün')}</div>
+          </div>`;
+        }
+        // Diğer (varsa)
+        const cust = e.customerId ? getCustomer(e.customerId) : null;
         return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--accent);">
           <div class="top">
-            <span class="from">🏭 ${cust?.name || 'Müşteri'}</span>
+            <span class="from">🏭 ${cust?.name || e.supplierName || 'Mail'}</span>
             <span class="date">Gün ${e.receivedDay}</span>
           </div>
           <div class="subject">${e.subject || 'Fabrika maili'}</div>
@@ -15484,15 +15818,116 @@ function renderFactoryList() {
   c.innerHTML = _renderBranchHeader('Fabrikalarım', '🏭', 'var(--accent)');
   const factories = state.factories || [];
   if (factories.length === 0) {
-    c.innerHTML += `<div class="empty">Henüz fabrika satın almadın. <a onclick="setView('dealerships')" style="color: var(--accent); cursor:pointer; text-decoration: underline;">Bayilik sayfasından satın al</a></div>`;
+    c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+      🏭 <strong>Henüz fabrika satın almadın.</strong>
+      <br><br>
+      Fabrika satın almak için Bayilik sayfasına git. Bir markanın fabrikasını alarak <strong>kendi üretimini</strong> yapabilirsin:
+      <ul style="margin: 6px 0 0 18px;">
+        <li>Piyasa fiyatının %50 maliyetiyle üretim</li>
+        <li>Sınırsız tedarik (kapasite içinde)</li>
+        <li>Müşteri ihalelerine direkt teklif</li>
+      </ul>
+      <br>
+      <button class="btn primary" onclick="setView('dealerships')">🏭 BAYİLİK SAYFASINA GİT</button>
+    </div>`;
     return;
   }
-  // Bayilik sayfasındaki fabrikalarım kısmıyla aynı render
-  c.innerHTML += `<div style="padding: 12px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; margin-bottom: 14px;">
-    <strong>${factories.length} fabrikan var.</strong> Tam yönetim Bayilik sayfasında — sonraki sürümlerde bu sekme tam ayrı olacak.
-    <br><br>
-    <button class="btn primary" onclick="setView('dealerships')">🏭 BAYİLİK SAYFASINA GİT</button>
-  </div>`;
+
+  // Toplam istatistikler
+  const totalCapacity = factories.reduce((s, f) => s + (f.monthlyCapacity || 0), 0);
+  const totalProduced = factories.reduce((s, f) => s + (f.totalProduced || 0), 0);
+  const totalOpex = factories.reduce((s, f) => s + factoryMonthlyOpex(f.brandId, f.level), 0);
+  const totalSalary = factories.reduce((s, f) => {
+    if (!f.staff) return s;
+    return s + (f.staff.workers||0) * 25000 + (f.staff.purchaser||0) * 50000 + (f.staff.salesRep||0) * 60000;
+  }, 0);
+
+  let body = `
+    <div class="stat-grid" style="margin-bottom: 16px;">
+      <div class="stat-tile"><div class="stat-label">Fabrika</div><div class="stat-val" style="color: var(--accent);">${factories.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aylık Kapasite</div><div class="stat-val" style="color: var(--blue); font-size: 14px;">${totalCapacity.toLocaleString('tr-TR')}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aylık Gider</div><div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(totalOpex + totalSalary)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Üretilen</div><div class="stat-val" style="color: var(--green); font-size: 14px;">${totalProduced.toLocaleString('tr-TR')}</div></div>
+    </div>
+
+    <div class="grid-2">
+      ${factories.map(f => {
+        const b = BRANDS[f.brandId];
+        if (!b) return '';
+        const p = PRODUCTS[f.productId];
+        if (!p) return '';
+        // Ay başına sıfırla (görüntü için)
+        let currentProd = f.currentProduction || 0;
+        let monthStartDay = f.productionMonthStartDay || f.purchaseDay;
+        if (state.day - monthStartDay >= 30) currentProd = 0;
+        const remaining = f.monthlyCapacity - currentProd;
+        const pct = Math.round((currentProd / f.monthlyCapacity) * 100);
+        const unitCost = factoryProductionCost(f.id);
+        const cheapest = (typeof cheapestSupplier === 'function') ? cheapestSupplier(f.productId) : null;
+        const marketPrice = cheapest ? cheapest.price : (BASE_PRICE[f.productId] || 0);
+        const opex = factoryMonthlyOpex(f.brandId, f.level);
+
+        // Hammadde durumu
+        const recipe = PRODUCT_RECIPES[f.productId] || {};
+        const rawIds = Object.keys(recipe);
+        let minProducable = Infinity;
+        if (rawIds.length > 0) {
+          if (!f.rawStock) f.rawStock = {};
+          minProducable = Math.min(...rawIds.map(rid => {
+            const have = f.rawStock[rid] || 0;
+            const perUnit = recipe[rid];
+            return perUnit > 0 ? Math.floor(have / perUnit) : Infinity;
+          }));
+        }
+        const rawColor = minProducable === 0 ? 'var(--red)' : minProducable < f.monthlyCapacity / 4 ? '#f59e0b' : 'var(--green)';
+
+        // Kadro
+        if (!f.staff) f.staff = { workers: 8, purchaser: 0, salesRep: 0 };
+        const workerRatio = (f.staff.workers || 0) / 8;
+        const dailyCap = Math.floor((f.monthlyCapacity / 30) * workerRatio);
+
+        return `<div class="card" style="border-left: 3px solid var(--accent);">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <h3 style="margin: 0; color: var(--accent);">🏭 ${b.name} Fabrikası</h3>
+              <div style="font-size: 10px; color: var(--ink-dim);">${p.name} üretimi · Sv ${f.level}/3</div>
+            </div>
+            <div style="text-align: right; font-size: 10px; color: var(--ink-dim);">
+              <div>Alış: ${fmt(f.purchasePrice)}</div>
+              <div>G${f.purchaseDay} · ${state.day - f.purchaseDay} gün</div>
+            </div>
+          </div>
+          <div style="margin-top: 8px; padding: 8px 10px; background: var(--panel-2); font-size: 11px; line-height: 1.6;">
+            <div>Üretim maliyeti: <strong style="color: var(--green);">${fmt(unitCost)}</strong> / ${p.unit}</div>
+            <div style="font-size: 10px; color: var(--ink-dim);">Piyasa: ${fmt(marketPrice)} (Tasarruf: ${fmt(marketPrice - unitCost)})</div>
+            <div style="margin-top: 4px;">Aylık işletme: <strong style="color: var(--red);">-${fmt(opex)}</strong></div>
+            <div style="margin-top: 6px;">Bu Ay Üretim: <strong>${currentProd.toLocaleString('tr-TR')}</strong> / ${f.monthlyCapacity.toLocaleString('tr-TR')} ${p.unit}</div>
+            <div class="progress-bar" style="margin: 4px 0;"><div class="progress-fill" style="width: ${pct}%; background: var(--accent);"></div></div>
+            <div style="font-size: 10px; color: var(--ink-dim);">Toplam üretilen: ${(f.totalProduced || 0).toLocaleString('tr-TR')} ${p.unit}</div>
+          </div>
+
+          ${rawIds.length > 0 ? `<div style="margin-top: 6px; padding: 6px 8px; background: rgba(244,160,32,0.08); border-left: 2px solid ${rawColor}; font-size: 10px;">
+            📦 Hammadde stoğu: <strong style="color: ${rawColor};">${(minProducable === Infinity ? 0 : minProducable).toLocaleString('tr-TR')} ${p.unit}</strong> üretim için yeterli
+            ${minProducable === 0 ? '<br><span style="color: var(--red);">⚠️ Hammadde yok — üretim yapamazsın</span>' : ''}
+          </div>` : ''}
+
+          <div style="margin-top: 4px; padding: 6px 8px; background: rgba(59, 130, 246, 0.08); border-left: 2px solid var(--blue); font-size: 10px; line-height: 1.5;">
+            👥 Kadro: <strong>${f.staff.workers||0} işçi</strong>${f.staff.purchaser ? ' · 🚚 sorumlu' : ''}${f.staff.salesRep ? ' · 💼 satış uzmanı' : ''}
+            · Günlük: <strong style="color: var(--blue);">${dailyCap.toLocaleString('tr-TR')} ${p.unit}</strong>
+          </div>
+
+          <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
+            <button class="btn small primary" style="flex: 1; background: var(--accent); border-color: var(--accent); color: #000;" onclick="openProductionModal('${f.id}')" ${remaining <= 0 ? 'disabled' : ''}>🏭 ÜRET (${remaining.toLocaleString('tr-TR')})</button>
+            <button class="btn small" style="background: #f59e0b; border-color: #f59e0b; color: #000; font-weight: 700;" onclick="openFactoryStockModal('${f.id}')" title="Hammadde tedarik et">🚚 HAMMADDE</button>
+            <button class="btn small" style="background: var(--blue); border-color: var(--blue); color: #fff;" onclick="openFactoryStaffModal('${f.id}')" title="Kadro yönet">👥 KADRO</button>
+            ${f.level < 3 ? `<button class="btn small" style="background: var(--purple); border-color: var(--purple); color: #fff;" onclick="upgradeFactory('${f.id}')" title="Sv ${f.level + 1}">⬆️ GELİŞTİR</button>` : ''}
+            <button class="btn small danger" onclick="sellFactory('${f.id}')" title="%30 değer kaybıyla sat">SAT</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  c.innerHTML += body;
 }
 
 function renderFactoryOrders() {
@@ -17139,6 +17574,15 @@ function _nextDayInner() {
     }
   }
 
+  // 7a-2) Hammadde tedarikçilerinden fabrikaya teklif maili — fabrika varsa, %12 şans
+  if ((state.factories || []).length > 0 && Math.random() < 0.12) {
+    const offer = generateRawMaterialOffer();
+    if (offer) {
+      state.inbox.push(offer);
+      toast(`📧 ${offer.supplierName} fabrikana özel teklif gönderdi`, 'info');
+    }
+  }
+
   // 7b) Saha satış sorumluları ziyaret yapar — her 2-3 günde bir
   // Saha satış ziyareti — GÜNDE SADECE 1 MÜŞTERİ ZİYARET EDİLİR (en kıdemli rep yapar)
   // Çoklu rep varsa sıralı olarak her gün başka bir rep aktif olur
@@ -18223,10 +18667,28 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.83';
+const CURRENT_VERSION = 'v1.84';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.84',
+    date: '24 Mayıs 2026',
+    title: 'İŞ KOLU SAYFALARI GERÇEK + HAMMADDE TEKLİFLERİ',
+    items: [
+      { cat: 'major', text: '🏗 <strong>Devam Eden Projeler</strong> sayfası gerçek liste — aktif inşaatlar + tamamlananlar' },
+      { cat: 'feature', text: 'Her proje kartında: ilerleme yüzdesi, statü, şantiye kadrosu, malzeme eksik uyarısı' },
+      { cat: 'feature', text: 'Direkt 👷 KADRO, 🤝 TAŞERON, 🏞 ARSA DETAY butonları' },
+      { cat: 'major', text: '🏭 <strong>Fabrikalarım</strong> sayfası gerçek liste — eskiden placeholder idi' },
+      { cat: 'feature', text: 'Her fabrika kartında: kapasite, maliyet, hammadde durumu, kadro, ÜRET/HAMMADDE/KADRO/GELİŞTİR/SAT butonları' },
+      { cat: 'feature', text: 'Üst stat\'lar: fabrika sayısı, aylık kapasite, aylık gider, toplam üretilen' },
+      { cat: 'major', text: '🚚 <strong>Hammadde tedarikçilerinden fabrikaya özel teklif maili</strong> — %12 günlük şans' },
+      { cat: 'feature', text: 'Teklifte 2-4 hammadde, %10-25 indirim, 3-6 gün geçerlilik' },
+      { cat: 'feature', text: 'Mail açılınca özel detay sayfası: piyasa fiyatı vs özel fiyat, tasarruf hesabı' },
+      { cat: 'feature', text: 'Kabul edilirse hammaddeler doğrudan fabrika stoğuna eklenir' },
+      { cat: 'feature', text: 'Fabrika Teklifleri sayfasında raw-offer mailleri detaylı listelenir' }
+    ]
+  },
   {
     version: 'v1.83',
     date: '24 Mayıs 2026',

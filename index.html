@@ -2784,6 +2784,9 @@
         <div class="nav-item" data-view="investment" onclick="setView('investment')">
           <span>💎 Yatırım</span>
         </div>
+        <div class="nav-item" data-view="luxury" onclick="setView('luxury')">
+          <span>🎩 Lüks Koleksiyon</span>
+        </div>
         <div class="nav-item" data-view="dealerships" onclick="setView('dealerships')">
           <span>🏭 Bayilik</span>
         </div>
@@ -8236,6 +8239,10 @@ const state = {
   constructionStaff: [], // 🏗 Şantiye personeli: { id, role:'chief'|'master'|'engineer'|'manager', name, salary, level, xp, hireDay, assignedLandId, branch:'construction' }
   branches: [], // 🏪 Mağaza şubeleri: { id, ilce, name, openedDay, purchasePrice, monthlyRent, monthlyOpex, inventory:{}, staff:{manager,cashiers:[],warehousers:[]}, totalRevenue, monthlySales, branch:'store' }
   lastBranchPayment: 0, // Şubelerin son aylık ödeme günü
+  luxuryCollection: [], // 🎩 Lüks koleksiyon: { id, itemId, purchasePrice, currentValue, purchaseDay, lastValueUpdateDay }
+  lastWealthTax: 0, // Son servet vergisi ödeme günü (365 günde bir)
+  lastLuxuryMaintenance: 0, // Lüks ürünler bakım ödemesi (30 günde bir)
+  totalLuxurySpent: 0, // İstatistik: lüks ürünlere toplam harcanan
 
   // Günlük muhasebe defteri (income/expense kayıtları)
   // { day, type: 'income'|'expense', category, amount, description }
@@ -8572,6 +8579,10 @@ const CATEGORY_BRANCH = {
   'sube-kira': 'store',
   'sube-satis': 'store',
   'sube-opex': 'store',
+  'luks-alim': 'store',
+  'luks-satis': 'store',
+  'luks-bakim': 'store',
+  'servet-vergisi': 'store',
   // 💰 Genel (banka, kredi, kart, vergi, ceza, maaş, araç vs.) → store'a koyalım çünkü ana iş yeri
   // (gelecek: özellikle genel olabilir — şimdilik store)
 };
@@ -9956,6 +9967,7 @@ function _renderInner() {
   else if (state.view === 'contracts') renderContractsView();
   else if (state.view === 'fleet') renderFleet();
   else if (state.view === 'branches') renderBranches();
+  else if (state.view === 'luxury') renderLuxury();
   else if (state.view === 'hr') renderHR();
   else if (state.view === 'customers') renderCustomers();
   else if (state.view === 'visits') renderVisits();
@@ -13247,6 +13259,177 @@ function _renderBranchRosterTab(br) {
   </div>`;
 }
 
+// 🎩 Lüks Koleksiyon sayfası
+let _luxuryTab = 'collection'; // 'collection' veya 'shop'
+let _luxuryShopCat = 'mega'; // 'mega' | 'art' | 'car'
+
+function renderLuxury() {
+  const c = $('center');
+  const collection = state.luxuryCollection || [];
+  const totalValue = luxuryCollectionValue();
+  const totalSpent = state.totalLuxurySpent || 0;
+  const totalProfit = totalValue - collection.reduce((s, l) => s + l.purchasePrice, 0);
+  const monthlyMaint = collection.reduce((s, l) => {
+    const item = LUXURY_ITEMS[l.itemId];
+    return s + (item?.monthlyMaint || 0);
+  }, 0);
+
+  // Servet vergi durumu
+  const wealth = calculateWealth();
+  const luxValue = totalValue;
+  const taxable = Math.max(0, wealth - luxValue);
+  const rate = wealthTaxRate(wealth);
+  const annualTax = Math.round(taxable * rate);
+  const nextTaxDay = (state.lastWealthTax || state.day) + 365;
+  const daysToTax = nextTaxDay - state.day;
+
+  c.innerHTML = `<h2>🎩 LÜKS KOLEKSİYON</h2>
+    <div class="subtitle">Statü, prestij ve sanat eseri yatırımları · ${collection.length} ürün</div>
+
+    <div class="stat-grid" style="margin-bottom: 14px;">
+      <div class="stat-tile"><div class="stat-label">Koleksiyon</div><div class="stat-val" style="color: var(--accent);">${collection.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Değer</div><div class="stat-val" style="color: var(--green); font-size: 14px;">${fmt(totalValue)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Harcama</div><div class="stat-val" style="color: var(--blue); font-size: 14px;">${fmt(totalSpent)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aylık Bakım</div><div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(monthlyMaint)}</div></div>
+    </div>
+
+    <!-- 💸 Servet vergisi uyarısı -->
+    ${rate > 0 ? `<div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel-2); border-left: 3px solid ${daysToTax <= 30 ? 'var(--red)' : '#f59e0b'}; font-size: 12px; line-height: 1.6;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <strong style="color: ${daysToTax <= 30 ? 'var(--red)' : '#f59e0b'};">💸 SERVET VERGİSİ UYARISI</strong>
+          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 2px;">${daysToTax > 0 ? daysToTax + ' gün sonra' : 'BUGÜN!'} · Vergilendirilebilir servet: <strong>${fmt(taxable)}</strong> · Oran: <strong>%${(rate * 100).toFixed(0)}</strong></div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 11px; color: var(--ink-dim);">Tahmini vergi</div>
+          <div style="color: var(--red); font-weight: 700; font-size: 16px;">${fmt(annualTax)}</div>
+        </div>
+      </div>
+      <div style="margin-top: 8px; padding: 8px; background: var(--bg); font-size: 11px; line-height: 1.5;">
+        💡 <strong>Lüks koleksiyonun ${fmt(luxValue)}</strong> servet vergisinden <strong>MUAFTIR</strong>. Sanat eserleri ve lüks ürünler kültürel miras olarak değerlendirilir. Servet vergisinden kaçınmak için lüks alımları artırabilirsin.
+      </div>
+    </div>` : `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--green); font-size: 11px;">
+      ✓ Servet vergisi eşiğinin altındasın (${fmt(taxable)} / ₺500M). Servet 500M\'i aşınca yıllık vergi başlar.
+    </div>`}
+
+    <div class="tabs" style="margin-bottom: 14px;">
+      <div class="tab ${_luxuryTab === 'collection' ? 'active' : ''}" onclick="_luxuryTab='collection'; render()">📋 KOLEKSİYONUM (${collection.length})</div>
+      <div class="tab ${_luxuryTab === 'shop' ? 'active' : ''}" onclick="_luxuryTab='shop'; render()">🛒 SATIN AL</div>
+    </div>
+  `;
+
+  if (_luxuryTab === 'shop') {
+    // Kategori filtreleri
+    c.innerHTML += `<div class="filter-chips" style="margin-bottom: 14px;">
+      ${Object.entries(LUXURY_CATEGORIES).map(([cat, info]) => {
+        const count = Object.values(LUXURY_ITEMS).filter(i => i.cat === cat).length;
+        return `<div class="filter-chip ${_luxuryShopCat === cat ? 'active' : ''}" onclick="_luxuryShopCat='${cat}'; render()" style="${_luxuryShopCat === cat ? `background: ${info.color}; color: #fff;` : ''}">${info.label} (${count})</div>`;
+      }).join('')}
+    </div>
+    <div class="grid-2">
+      ${Object.entries(LUXURY_ITEMS).filter(([_, item]) => item.cat === _luxuryShopCat).map(([id, item]) => {
+        const ownedCount = collection.filter(l => l.itemId === id).length;
+        const canAfford = state.cash >= item.price;
+        const cat = LUXURY_CATEGORIES[item.cat];
+        return `<div class="card" style="border-left: 3px solid ${cat.color};">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div style="flex: 1;">
+              <h3 style="margin: 0; font-size: 14px;">${item.icon} ${item.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim);">${cat.label}${ownedCount > 0 ? ` · <span style="color: var(--green);">${ownedCount} adet sende</span>` : ''}</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 10px; color: var(--ink-dim);">İtibar</div>
+              <div style="color: var(--accent); font-weight: 700;">+${item.reputation}</div>
+            </div>
+          </div>
+          <div style="margin-top: 8px; padding: 8px; background: var(--panel-2); font-size: 10px; line-height: 1.6; color: var(--ink-dim);">
+            ${item.desc}
+          </div>
+          <div style="margin-top: 8px; padding: 8px; background: var(--panel-2); font-size: 11px; line-height: 1.8;">
+            <div style="display: flex; justify-content: space-between;">
+              <span>Fiyat:</span><strong style="color: var(--accent);">${fmt(item.price)}</strong>
+            </div>
+            ${item.monthlyMaint > 0 ? `<div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--ink-dim);">Aylık bakım:</span><strong style="color: var(--red);">-${fmt(item.monthlyMaint)}</strong>
+            </div>` : '<div style="display: flex; justify-content: space-between;"><span style="color: var(--ink-dim);">Aylık bakım:</span><strong style="color: var(--green);">YOK</strong></div>'}
+            <div style="display: flex; justify-content: space-between; font-size: 10px;">
+              <span style="color: var(--ink-dim);">Değer artışı/ay:</span>
+              <strong style="color: ${item.valueGrowthMax > 0.005 ? 'var(--green)' : 'var(--ink-dim)'};">%${(item.valueGrowthMin * 100).toFixed(1)} - %${(item.valueGrowthMax * 100).toFixed(1)}</strong>
+            </div>
+          </div>
+          <button class="btn primary" style="width: 100%; margin-top: 10px; ${!canAfford ? 'opacity:0.4;' : ''}" onclick="buyLuxuryItem('${id}')" ${!canAfford ? 'disabled' : ''}>${canAfford ? `🎩 SATIN AL (${fmt(item.price)})` : `Yetersiz para (-${fmt(item.price - state.cash)})`}</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+    return;
+  }
+
+  // KOLEKSİYONUM
+  if (collection.length === 0) {
+    c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+      🎩 <strong>Henüz lüks koleksiyonun yok.</strong>
+      <br><br>
+      Lüks ürünler:
+      <ul style="margin: 6px 0 0 18px;">
+        <li>📈 <strong>Değer artırır</strong> — özellikle sanat eserleri (Picasso, antika vazo)</li>
+        <li>🏆 <strong>İtibar kazandırır</strong> — müşteri güveni hızlı yükselir</li>
+        <li>💸 <strong>Servet vergisinden muaf</strong> — yıllık %1-5 vergiden kaçınma</li>
+        <li>💎 <strong>Statü</strong> — sıralamada öne çıkarsın</li>
+      </ul>
+      <br>
+      <button class="btn primary" onclick="_luxuryTab='shop'; render()">🛒 SATIN AL SAYFASINA GİT</button>
+    </div>`;
+    return;
+  }
+
+  // Koleksiyon listesi — kategori sıralı
+  const byCategory = {};
+  collection.forEach(lux => {
+    const item = LUXURY_ITEMS[lux.itemId];
+    if (!item) return;
+    if (!byCategory[item.cat]) byCategory[item.cat] = [];
+    byCategory[item.cat].push({ lux, item });
+  });
+
+  Object.entries(LUXURY_CATEGORIES).forEach(([cat, info]) => {
+    if (!byCategory[cat]) return;
+    c.innerHTML += `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 16px 0 8px; color: ${info.color};">${info.label} (${byCategory[cat].length})</h3>
+    <div class="grid-2">
+      ${byCategory[cat].map(({ lux, item }) => {
+        const profit = lux.currentValue - lux.purchasePrice;
+        const profitPct = ((lux.currentValue / lux.purchasePrice - 1) * 100).toFixed(1);
+        const profitColor = profit >= 0 ? 'var(--green)' : 'var(--red)';
+        const daysOwned = state.day - lux.purchaseDay;
+        return `<div class="card" style="border-left: 3px solid ${info.color};">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <h3 style="margin: 0; font-size: 14px;">${item.icon} ${item.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim);">Alındı: Gün ${lux.purchaseDay} (${daysOwned} gün önce)</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 10px; color: var(--ink-dim);">Güncel değer</div>
+              <div style="color: ${profitColor}; font-weight: 700;">${fmt(lux.currentValue)}</div>
+              <div style="font-size: 10px; color: ${profitColor};">${profit >= 0 ? '+' : ''}${profitPct}%</div>
+            </div>
+          </div>
+          <div style="margin-top: 8px; padding: 8px; background: var(--panel-2); font-size: 11px; line-height: 1.7;">
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--ink-dim);">Alış fiyatı:</span><strong>${fmt(lux.purchasePrice)}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--ink-dim);">Kâr/Zarar:</span><strong style="color: ${profitColor};">${profit >= 0 ? '+' : ''}${fmt(profit)}</strong>
+            </div>
+            ${item.monthlyMaint > 0 ? `<div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--ink-dim);">Aylık bakım:</span><strong style="color: var(--red);">-${fmt(item.monthlyMaint)}</strong>
+            </div>` : ''}
+          </div>
+          <button class="btn small danger" style="width: 100%; margin-top: 8px;" onclick="sellLuxuryItem('${lux.id}')">💰 SAT (${fmt(Math.round(lux.currentValue * 0.85))})</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  });
+}
+
 function renderBranches() {
   const c = $('center');
   const branches = state.branches || [];
@@ -14883,6 +15066,185 @@ function branchMonthlyOpex(ilceId) {
 }
 
 // 🏪 Şube personeli rolleri
+// ============================================================
+// 🎩 LÜKS KOLEKSİYON SİSTEMİ
+// ============================================================
+const LUXURY_ITEMS = {
+  // 🛥 Mega Lüks — büyük yatırım, itibar
+  yat:        { name: 'Süper Yat',           icon: '🛥', cat: 'mega',  price: 350000000, monthlyMaint: 2000000, reputation: 50, valueGrowthMin: -0.02, valueGrowthMax: 0.03,  desc: 'Boğaz\'da 60m\'lik süper yat. Davet edersen müşteri güveni hızlı artar.' },
+  jet:        { name: 'Özel Jet',            icon: '✈', cat: 'mega',  price: 800000000, monthlyMaint: 3000000, reputation: 80, valueGrowthMin: -0.03, valueGrowthMax: 0.02,  desc: 'Gulfstream G650. İlçeler arası ulaşım sıfırlanır (hızlı pazarlama).' },
+  helikopter: { name: 'Helikopter',          icon: '🚁', cat: 'mega',  price: 120000000, monthlyMaint: 800000,  reputation: 30, valueGrowthMin: -0.02, valueGrowthMax: 0.02,  desc: 'Bell 429. Şantiyeler arası hızlı geçiş ve VIP gösteri.' },
+  yali:       { name: 'Boğaz Yalısı',        icon: '🏰', cat: 'mega',  price: 2000000000, monthlyMaint: 5000000, reputation: 200, valueGrowthMin: 0.02, valueGrowthMax: 0.10, desc: 'Sarıyer\'de tarihi yalı. Türkiye\'nin en pahalı emlaklarından.' },
+  ada:        { name: 'Özel Ada',            icon: '🏝', cat: 'mega',  price: 1500000000, monthlyMaint: 3000000, reputation: 150, valueGrowthMin: 0.01, valueGrowthMax: 0.08, desc: 'Ege\'de özel ada. Türk emlak yatırımcılığının zirvesi.' },
+
+  // 🎨 Sanat & Antika — değer artışı odaklı
+  picasso:    { name: 'Picasso Eskizi',      icon: '🎨', cat: 'art',   price: 25000000,  monthlyMaint: 50000,   reputation: 25, valueGrowthMin: 0.005, valueGrowthMax: 0.015, desc: 'Picasso\'nun erken döneminden bir eskiz. Sanat dünyasının ilgisini çeker.' },
+  modern_tr:  { name: 'Modern Türk Resmi',   icon: '🖼', cat: 'art',   price: 3000000,   monthlyMaint: 10000,   reputation: 8,  valueGrowthMin: 0.004, valueGrowthMax: 0.012, desc: 'Bedri Rahmi Eyüboğlu eserlerinden.' },
+  vazo:       { name: 'Antika Vazo',         icon: '🏺', cat: 'art',   price: 8000000,   monthlyMaint: 15000,   reputation: 12, valueGrowthMin: 0.003, valueGrowthMax: 0.010, desc: 'Çin Tang Hanedanı\'ndan 1300 yıllık vazo. Müzeye ödünç verilebilir.' },
+  mucevher:   { name: 'Osmanlı Mücevheri',   icon: '📿', cat: 'art',   price: 15000000,  monthlyMaint: 30000,   reputation: 20, valueGrowthMin: 0.006, valueGrowthMax: 0.014, desc: 'III. Mustafa\'nın hazinesinden mücevher seti.' },
+  tarihi:     { name: 'Tarihi Eşya Seti',    icon: '🪖', cat: 'art',   price: 5000000,   monthlyMaint: 12000,   reputation: 10, valueGrowthMin: 0.004, valueGrowthMax: 0.011, desc: 'II. Dünya Savaşı dönemi tarihi eşyalar.' },
+  sarap:      { name: 'Şarap Koleksiyonu',   icon: '🍷', cat: 'art',   price: 2000000,   monthlyMaint: 8000,    reputation: 6,  valueGrowthMin: 0.005, valueGrowthMax: 0.018, desc: '1947 Château Cheval Blanc dahil 200 şişe nadir şarap.' },
+  gitar:      { name: 'İmzalı Gitar',        icon: '🎸', cat: 'art',   price: 1500000,   monthlyMaint: 5000,    reputation: 4,  valueGrowthMin: 0.003, valueGrowthMax: 0.009, desc: 'Hendrix\'in 1968\'deki konserinde kullandığı gitar.' },
+  saat:       { name: 'Patek Philippe',      icon: '⌚', cat: 'art',   price: 3000000,   monthlyMaint: 0,       reputation: 10, valueGrowthMin: 0.004, valueGrowthMax: 0.012, desc: 'Patek Philippe Grandmaster Chime. Limited edition.' },
+
+  // 🚗 Araç — statü + bakım
+  ferrari:    { name: 'Ferrari SF90',        icon: '🚗', cat: 'car',   price: 15000000,  monthlyMaint: 250000,  reputation: 20, valueGrowthMin: -0.015, valueGrowthMax: 0.005, desc: 'Ferrari\'nin hibrit canavarı. İstanbul\'da 50 örnek bulunmakta.' },
+  rolls:      { name: 'Rolls-Royce Phantom', icon: '🚙', cat: 'car',   price: 28000000,  monthlyMaint: 350000,  reputation: 30, valueGrowthMin: -0.010, valueGrowthMax: 0.008, desc: 'Phantom Series II. CEO kültürünün simgesi.' },
+  bugatti:    { name: 'Bugatti Chiron',      icon: '🏎', cat: 'car',   price: 45000000,  monthlyMaint: 600000,  reputation: 50, valueGrowthMin: -0.020, valueGrowthMax: 0.010, desc: 'Bugatti Chiron Super Sport. 1500 BG.' },
+  lambo:      { name: 'Lamborghini Aventador', icon: '🚗', cat: 'car',   price: 12000000,  monthlyMaint: 180000,  reputation: 15, valueGrowthMin: -0.015, valueGrowthMax: 0.005, desc: 'Aventador SVJ. Yarış pisti için tasarlandı.' },
+  pirlanta:   { name: 'Pırlanta Yüzük',      icon: '💎', cat: 'car',   price: 8000000,   monthlyMaint: 0,       reputation: 15, valueGrowthMin: 0.003, valueGrowthMax: 0.010, desc: '15 karat pırlanta. Eski Tiffany&Co. tasarımı.' }
+};
+
+const LUXURY_CATEGORIES = {
+  mega: { label: '🛥 Mega Lüks',   color: 'var(--purple)' },
+  art:  { label: '🎨 Sanat & Antika', color: 'var(--accent)' },
+  car:  { label: '🚗 Araç & Mücevher', color: 'var(--blue)' }
+};
+
+function buyLuxuryItem(itemId) {
+  const item = LUXURY_ITEMS[itemId];
+  if (!item) { toast('Geçersiz lüks ürün', 'error'); return; }
+  if (state.cash < item.price) { toast(`Yetersiz para. Gerekli: ${fmt(item.price)}`, 'error'); return; }
+
+  spend(item.price, 'luks-alim');
+  if (!Array.isArray(state.luxuryCollection)) state.luxuryCollection = [];
+
+  state.luxuryCollection.push({
+    id: 'lux' + uid(),
+    itemId,
+    purchasePrice: item.price,
+    currentValue: item.price,
+    purchaseDay: state.day,
+    lastValueUpdateDay: state.day
+  });
+
+  state.totalLuxurySpent = (state.totalLuxurySpent || 0) + item.price;
+  state.reputation = Math.min(100, (state.reputation || 0) + Math.round(item.reputation / 10));
+
+  addXP(Math.round(item.price / 1000000), `lüks alım: ${item.name}`);
+  toast(`🎩 ${item.icon} ${item.name} alındı! İtibar +${Math.round(item.reputation / 10)}`, 'success');
+  state.agenda.push(`🎩 Lüks alım: ${item.icon} ${item.name} (${fmt(item.price)})`);
+  closeModal();
+  render();
+}
+
+function sellLuxuryItem(luxId) {
+  const idx = (state.luxuryCollection || []).findIndex(l => l.id === luxId);
+  if (idx < 0) return;
+  const lux = state.luxuryCollection[idx];
+  const item = LUXURY_ITEMS[lux.itemId];
+  if (!item) return;
+
+  // Satış fiyatı: %85 (komisyon vs.)
+  const sellPrice = Math.round(lux.currentValue * 0.85);
+
+  if (!confirm(`${item.icon} ${item.name} satılsın mı?\n\nGüncel değer: ${fmt(lux.currentValue)}\nSatış fiyatı (%85): ${fmt(sellPrice)}\n${lux.currentValue > lux.purchasePrice ? `Kâr: +${fmt(lux.currentValue - lux.purchasePrice)}` : `Zarar: ${fmt(lux.currentValue - lux.purchasePrice)}`}`)) return;
+
+  earn(sellPrice, 'luks-satis');
+  state.luxuryCollection.splice(idx, 1);
+  state.reputation = Math.max(0, (state.reputation || 0) - Math.round(item.reputation / 20));
+
+  toast(`💰 ${item.name} satıldı: ${fmt(sellPrice)}`, 'success');
+  state.agenda.push(`💰 Lüks satış: ${item.icon} ${item.name} (${fmt(sellPrice)})`);
+  render();
+}
+
+// Her ay değer güncellemesi (rastgele dalgalanma)
+function updateLuxuryValues() {
+  if (!Array.isArray(state.luxuryCollection) || state.luxuryCollection.length === 0) return;
+  state.luxuryCollection.forEach(lux => {
+    const item = LUXURY_ITEMS[lux.itemId];
+    if (!item) return;
+    const range = item.valueGrowthMax - item.valueGrowthMin;
+    const growth = item.valueGrowthMin + Math.random() * range;
+    lux.currentValue = Math.max(item.price * 0.3, Math.round(lux.currentValue * (1 + growth)));
+    lux.lastValueUpdateDay = state.day;
+  });
+}
+
+// Aylık lüks bakım gideri
+function payLuxuryMaintenance() {
+  if (!Array.isArray(state.luxuryCollection) || state.luxuryCollection.length === 0) return;
+  let total = 0;
+  state.luxuryCollection.forEach(lux => {
+    const item = LUXURY_ITEMS[lux.itemId];
+    if (item && item.monthlyMaint) total += item.monthlyMaint;
+  });
+  if (total > 0) {
+    spend(total, 'luks-bakim');
+    state.agenda.push(`🎩 Lüks bakım giderleri: -${fmt(total)} (${state.luxuryCollection.length} ürün)`);
+  }
+}
+
+// Toplam koleksiyon değeri
+function luxuryCollectionValue() {
+  if (!Array.isArray(state.luxuryCollection)) return 0;
+  return state.luxuryCollection.reduce((s, l) => s + (l.currentValue || 0), 0);
+}
+
+// ============================================================
+// 💸 SERVET VERGİSİ — Yıllık zorunlu vergi (Lüks vergi muafiyeti yapar)
+// ============================================================
+
+function calculateWealth() {
+  // Kasa + envanter değeri + arsa+bina + fabrika + sözleşme alacakları
+  let total = state.cash || 0;
+  // Envanter
+  Object.entries(state.inventory || {}).forEach(([pid, qty]) => {
+    total += (BASE_PRICE[pid] || 0) * qty;
+  });
+  // Arsalar
+  (state.lands || []).forEach(l => {
+    total += l.price || 0;
+    if (l.building) total += l.building.totalCost || 0;
+  });
+  // Fabrikalar
+  (state.factories || []).forEach(f => total += f.purchasePrice || 0);
+  // Şubeler
+  (state.branches || []).forEach(br => total += br.purchasePrice || 0);
+  // Cari alacaklar (paid olmayan sözleşmeler)
+  (state.contracts || []).forEach(ct => {
+    if (!ct.paid) total += ct.total || 0;
+  });
+  // Müşteri carileri
+  (state.customers || []).forEach(c => total += Math.max(0, c.balance || 0));
+  // Banka mevduatı
+  (state.deposits || []).forEach(d => total += (d.principal || 0) + (d.interestAccrued || 0));
+  return total;
+}
+
+function wealthTaxRate(wealth) {
+  // Lüks koleksiyon değeri muaf (vergi avantajı)
+  const luxValue = luxuryCollectionValue();
+  const taxable = Math.max(0, wealth - luxValue);
+  if (taxable < 500000000) return 0;  // 500M altı muaf
+  if (taxable < 1000000000) return 0.01; // 500M-1B: %1
+  if (taxable < 5000000000) return 0.02; // 1B-5B: %2
+  if (taxable < 20000000000) return 0.03; // 5B-20B: %3
+  return 0.05; // 20B+: %5
+}
+
+function payWealthTax() {
+  const wealth = calculateWealth();
+  const rate = wealthTaxRate(wealth);
+  if (rate === 0) return;
+  const luxValue = luxuryCollectionValue();
+  const taxable = Math.max(0, wealth - luxValue);
+  const tax = Math.round(taxable * rate);
+  if (tax <= 0) return;
+
+  if (state.cash >= tax) {
+    spend(tax, 'servet-vergisi');
+    state.agenda.push(`💸 Yıllık Servet Vergisi: -${fmt(tax)} (%${(rate * 100).toFixed(0)} oranında, lüks koleksiyon ${fmt(luxValue)} muaf)`);
+    toast(`💸 Servet Vergisi ödendi: ${fmt(tax)} (Koleksiyon ${fmt(luxValue)} vergiden muaf)`, 'info');
+  } else {
+    // Kasada para yetmezse: ceza + sonradan ödenir
+    state.cash -= tax;
+    state.agenda.push(`⚠️ Servet Vergisi kasayı eksiltti: -${fmt(tax)} (kasa açıkta kaldı)`);
+    toast(`⚠️ Servet Vergisi ödendi ama kasa eksi düştü!`, 'error');
+  }
+}
+
 const BRANCH_ROLES = {
   manager: {
     label: '🧑‍💼 Mağaza Müdürü',
@@ -18940,6 +19302,27 @@ function _nextDayInner() {
     }
   }
 
+  // 🎩 Aylık lüks bakım + değer güncellemesi (30 günde bir)
+  if ((state.luxuryCollection || []).length > 0) {
+    if (!state.lastLuxuryMaintenance) state.lastLuxuryMaintenance = state.day;
+    if (state.day - state.lastLuxuryMaintenance >= 30) {
+      try {
+        payLuxuryMaintenance();
+        updateLuxuryValues();
+        state.lastLuxuryMaintenance = state.day;
+      } catch (e) { console.warn('Lüks bakım hatası:', e); }
+    }
+  }
+
+  // 💸 Yıllık servet vergisi (365 günde bir)
+  if (!state.lastWealthTax) state.lastWealthTax = state.day;
+  if (state.day - state.lastWealthTax >= 365) {
+    try {
+      payWealthTax();
+      state.lastWealthTax = state.day;
+    } catch (e) { console.warn('Servet vergisi hatası:', e); }
+  }
+
   // 🏪 Günlük şube perakende satışı (müdürü olan şubelerde)
   try {
     processDailyBranchRetail();
@@ -20671,10 +21054,29 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v2.02';
+const CURRENT_VERSION = 'v2.03';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v2.03',
+    date: '24 Mayıs 2026',
+    title: 'LÜKS KOLEKSİYON + SERVET VERGİSİ',
+    items: [
+      { cat: 'major', text: '🎩 <strong>Lüks Koleksiyon sistemi</strong>: 19 farklı ürün — yat, jet, helikopter, yalı, ada, sanat, antika, mücevher, lüks araçlar' },
+      { cat: 'feature', text: '3 kategori: 🛥 Mega Lüks (₺120M-2B) · 🎨 Sanat & Antika (₺1.5M-25M) · 🚗 Araç & Mücevher (₺3M-45M)' },
+      { cat: 'feature', text: 'Her ay otomatik <strong>değer dalgalanması</strong> — sanat eserleri en çok kazandırır (%0.5-1.5/ay)' },
+      { cat: 'feature', text: '<strong>Aylık bakım gideri</strong>: jet ₺3M, yat ₺2M, Bugatti ₺600K... (mücevher/saat ücretsiz)' },
+      { cat: 'feature', text: 'Satış fiyatı: güncel değerin %85\'i (komisyon)' },
+      { cat: 'major', text: '💸 <strong>YILLIK SERVET VERGİSİ</strong> — 365 günde bir otomatik' },
+      { cat: 'feature', text: 'Eşikler: ₺500M altı muaf · ₺500M-1B %1 · ₺1B-5B %2 · ₺5B-20B %3 · ₺20B+ %5' },
+      { cat: 'feature', text: '🎩 <strong>Lüks koleksiyon servet vergisinden MUAFTIR</strong> — kaçınma stratejisi' },
+      { cat: 'feature', text: 'Servet hesaplama: kasa + envanter + arsa/bina + fabrika + şube + alacaklar + mevduat' },
+      { cat: 'feature', text: 'Lüks koleksiyon sayfası: 💰 Finans & Yatırım altında 🎩 sekmesi' },
+      { cat: 'feature', text: 'İtibar bonusu: her lüks ürün +4-200 reputation' },
+      { cat: 'info', text: '💡 Strateji: Servet ₺500M\'i aşacaksa lüks alımı vergiden kaçınmanın en iyi yolu' }
+    ]
+  },
   {
     version: 'v2.02',
     date: '24 Mayıs 2026',

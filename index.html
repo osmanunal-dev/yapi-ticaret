@@ -8946,7 +8946,20 @@ function autoAssignConstructionStaff() {
 }
 
 function generateTender() {
-  const customer = choice(state.customers);
+  // 🏪 Şubeli ilçelerin müşterileri %30 daha sık seçilir
+  const branchIlces = new Set((state.branches || []).map(b => b.ilce));
+  let customer;
+  if (branchIlces.size > 0 && Math.random() < 0.30 * branchIlces.size / 5) {
+    // Şube olan ilçedeki müşterileri öncelikli seç
+    const branchCustomers = state.customers.filter(c => branchIlces.has(c.ilce));
+    if (branchCustomers.length > 0) {
+      customer = choice(branchCustomers);
+    } else {
+      customer = choice(state.customers);
+    }
+  } else {
+    customer = choice(state.customers);
+  }
   const trustBonus = customer.trust > 60 ? 1.05 : 1.0; // trusted customers tend to send bigger jobs
 
   // Determine "scale" by trust + randomness
@@ -12396,6 +12409,321 @@ let _fleetTab = 'mine';
 // 🏪 Şubelerim sayfası
 let _branchesTab = 'list'; // 'list' veya 'open'
 
+// Şube kadro modalı
+// Şube envanter modalı — şubenin stoğunu göster
+function openBranchInventoryModal(branchId) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br) { toast('Şube bulunamadı', 'error'); return; }
+  if (!br.inventory) br.inventory = {};
+
+  const items = Object.entries(br.inventory).filter(([_, qty]) => qty > 0);
+  let totalValue = 0;
+  items.forEach(([pid, qty]) => {
+    const p = PRODUCTS[pid];
+    if (p) totalValue += (BASE_PRICE[pid] || 0) * qty;
+  });
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 820px;">
+      <h2 style="margin-bottom: 4px;">📦 ${br.name} — Envanter</h2>
+      <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 16px;">📍 ${ILCELER[br.ilce]?.name || br.ilce} · ${items.length} ürün · Toplam değer: <strong style="color: var(--green);">${fmt(totalValue)}</strong></div>
+
+      ${items.length === 0 ? `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+        Bu şubede henüz stok yok.<br><br>
+        <strong>🔄 TRANSFER</strong> butonu ile ana depodan ürün gönderebilirsin.<br>
+        Şubede stok varsa daha fazla perakende satış yapılır + yakın müşterilere hızlı sevkiyat.
+        <br><br>
+        <button class="btn primary" onclick="closeModal(); openBranchTransferModal('${br.id}')">🔄 TRANSFER YAP</button>
+      </div>` : `
+      <table class="data-table" style="width: 100%;">
+        <thead>
+          <tr>
+            <th>Ürün</th>
+            <th class="num">Miktar</th>
+            <th class="num">Birim Fiyat</th>
+            <th class="num">Değer</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.sort(([a],[b]) => (PRODUCTS[a]?.name||'').localeCompare(PRODUCTS[b]?.name||'')).map(([pid, qty]) => {
+            const p = PRODUCTS[pid];
+            if (!p) return '';
+            const price = BASE_PRICE[pid] || 0;
+            return `<tr>
+              <td><strong>${p.name}</strong></td>
+              <td class="num">${qty.toLocaleString('tr-TR')} ${p.unit}</td>
+              <td class="num">${fmt(price)}</td>
+              <td class="num"><strong>${fmt(price * qty)}</strong></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      `}
+
+      <div style="display: flex; justify-content: space-between; margin-top: 14px;">
+        <button class="btn primary" onclick="closeModal(); openBranchTransferModal('${br.id}')">🔄 TRANSFER</button>
+        <button class="btn" onclick="closeModal()">KAPAT</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+// Şube transfer modalı — ana ↔ şube ürün transferi
+function openBranchTransferModal(branchId, direction) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br) { toast('Şube bulunamadı', 'error'); return; }
+  if (!br.inventory) br.inventory = {};
+
+  // Yön kontrolü — varsayılan: ana → şube
+  if (!direction) direction = window._branchTransferDir || 'to-branch';
+  window._branchTransferDir = direction;
+
+  _renderBranchTransferModal(br);
+}
+
+function _renderBranchTransferModal(br) {
+  const dir = window._branchTransferDir || 'to-branch';
+  const sourceInv = dir === 'to-branch' ? state.inventory : br.inventory;
+  const destInv = dir === 'to-branch' ? br.inventory : state.inventory;
+  const sourceLabel = dir === 'to-branch' ? '🏢 Ana Depo' : `🏪 ${br.name}`;
+  const destLabel = dir === 'to-branch' ? `🏪 ${br.name}` : '🏢 Ana Depo';
+
+  // Transfer maliyeti hesabı — şube uzaklığına göre yakıt
+  const ilce = ILCELER[br.ilce];
+  const km = ilce?.km || 30;
+  // Basit yakıt: km × ₺200
+  const fuelCost = km * 200;
+
+  // Aktarılabilir ürünleri listele (qty > 0)
+  const transferableItems = Object.entries(sourceInv || {})
+    .filter(([_, qty]) => qty > 0)
+    .sort(([a],[b]) => (PRODUCTS[a]?.name||'').localeCompare(PRODUCTS[b]?.name||''));
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 880px;">
+      <h2 style="margin-bottom: 4px;">🔄 Envanter Transferi — ${br.name}</h2>
+      <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 12px;">${sourceLabel} → ${destLabel} · Sevkiyat yakıtı: <strong style="color: var(--red);">${fmt(fuelCost)}</strong> (${km} km)</div>
+
+      <div class="tabs" style="margin-bottom: 14px;">
+        <div class="tab ${dir === 'to-branch' ? 'active' : ''}" onclick="window._branchTransferDir='to-branch'; _renderBranchTransferModal((state.branches||[]).find(b=>b.id==='${br.id}'))">🏢 → 🏪 Şubeye Gönder</div>
+        <div class="tab ${dir === 'to-main' ? 'active' : ''}" onclick="window._branchTransferDir='to-main'; _renderBranchTransferModal((state.branches||[]).find(b=>b.id==='${br.id}'))">🏪 → 🏢 Ana Depoya Geri</div>
+      </div>
+
+      ${transferableItems.length === 0 ? `<div class="empty">${sourceLabel}'da stok yok. Önce malzeme alıp koy.</div>` : `
+      <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); padding: 4px;">
+        <table class="data-table" style="width: 100%;">
+          <thead>
+            <tr>
+              <th>Ürün</th>
+              <th class="num">Mevcut (${sourceLabel.replace(/[🏢🏪]/g, '').trim()})</th>
+              <th class="num">Hedef (${destLabel.replace(/[🏢🏪]/g, '').trim()})</th>
+              <th class="num">Transfer Miktar</th>
+              <th class="num">Eylem</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${transferableItems.map(([pid, qty]) => {
+              const p = PRODUCTS[pid];
+              if (!p) return '';
+              const destQty = destInv[pid] || 0;
+              return `<tr>
+                <td><strong>${p.name}</strong> <span style="color: var(--ink-dim); font-size: 10px;">(${p.unit})</span></td>
+                <td class="num">${qty.toLocaleString('tr-TR')}</td>
+                <td class="num" style="color: var(--ink-dim);">${destQty.toLocaleString('tr-TR')}</td>
+                <td class="num"><input type="number" id="tr-${pid}" min="0" max="${qty}" value="0" style="width: 80px; padding: 4px; background: var(--bg); color: var(--ink); border: 1px solid var(--border); text-align: right; font-family: 'Roboto Mono', monospace;"></td>
+                <td class="num">
+                  <button class="btn small" onclick="document.getElementById('tr-${pid}').value=${qty}">HEPSİ</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top: 14px; padding: 10px 12px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px;">
+        💡 Yakıt maliyeti tek seferde alınır (ne kadar ürün transfer edilirse edilsin: ${fmt(fuelCost)}). Boş bırakırsan o ürünü transfer etmez.
+      </div>
+      `}
+
+      <div style="display: flex; justify-content: space-between; gap: 8px; margin-top: 14px;">
+        <button class="btn" onclick="closeModal()">İPTAL</button>
+        ${transferableItems.length > 0 ? `<button class="btn primary" onclick="executeBranchTransfer('${br.id}')">🔄 TRANSFER ET (yakıt: ${fmt(fuelCost)})</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function executeBranchTransfer(branchId) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br) return;
+  const dir = window._branchTransferDir || 'to-branch';
+  if (!br.inventory) br.inventory = {};
+
+  const sourceInv = dir === 'to-branch' ? state.inventory : br.inventory;
+  const destInv = dir === 'to-branch' ? br.inventory : state.inventory;
+
+  // Her ürün için input değerini oku
+  const transfers = [];
+  Object.keys(sourceInv).forEach(pid => {
+    const input = document.getElementById('tr-' + pid);
+    if (!input) return;
+    const qty = parseInt(input.value) || 0;
+    if (qty <= 0) return;
+    if (qty > (sourceInv[pid] || 0)) {
+      toast(`${PRODUCTS[pid]?.name || pid} için yetersiz stok`, 'error');
+      return;
+    }
+    transfers.push({ pid, qty });
+  });
+
+  if (transfers.length === 0) {
+    toast('Hiç ürün seçilmedi', 'error');
+    return;
+  }
+
+  const ilce = ILCELER[br.ilce];
+  const km = ilce?.km || 30;
+  const fuelCost = km * 200;
+
+  if (state.cash < fuelCost) {
+    toast(`Yetersiz yakıt parası: ${fmt(fuelCost)} gerekli`, 'error');
+    return;
+  }
+
+  // Uygula
+  spend(fuelCost, 'yakit');
+  let totalQty = 0;
+  transfers.forEach(({ pid, qty }) => {
+    sourceInv[pid] = (sourceInv[pid] || 0) - qty;
+    destInv[pid] = (destInv[pid] || 0) + qty;
+    totalQty += qty;
+  });
+
+  toast(`✅ ${transfers.length} ürün transfer edildi (${totalQty.toLocaleString('tr-TR')} adet)`, 'success');
+  state.agenda.push(`🔄 Şube transferi: ${transfers.length} ürün ${dir === 'to-branch' ? '→ ' + br.name : 'Ana depoya'} (yakıt: ${fmt(fuelCost)})`);
+  closeModal();
+  render();
+}
+
+function openBranchStaffModal(branchId) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br) { toast('Şube bulunamadı', 'error'); return; }
+  if (!br.staff) br.staff = { manager: null, cashiers: [], warehousers: [] };
+  _renderBranchStaffModal(br);
+}
+
+function _renderBranchStaffModal(br) {
+  const ilce = ILCELER[br.ilce];
+  const totalSalary = branchTotalSalary(br);
+  // Beklenen günlük perakende satış
+  let expectedRetail = 0;
+  if (br.staff.manager) {
+    expectedRetail = branchDailyRetailSale({ ...br }); // bir kez hesapla
+  }
+
+  const tab = window._branchStaffTab || 'roster';
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 900px;">
+      <h2 style="margin-bottom: 4px;">👥 ${br.name} — Kadro</h2>
+      <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 16px;">📍 ${ilce?.name || br.ilce} · Aylık personel maaşı: <strong style="color: var(--red);">${fmt(totalSalary)}</strong>${br.staff.manager ? ` · Tahmini günlük perakende: <strong style="color: var(--green);">+${fmt(expectedRetail)}</strong>` : ' · ⚠️ Müdür yok — perakende satış 0'}</div>
+
+      <div class="tabs" style="margin-bottom: 14px;">
+        <div class="tab ${tab === 'roster' ? 'active' : ''}" onclick="window._branchStaffTab='roster'; _renderBranchStaffModal((state.branches||[]).find(b=>b.id==='${br.id}'))">📋 KADRO</div>
+        <div class="tab ${tab === 'hire' ? 'active' : ''}" onclick="window._branchStaffTab='hire'; _renderBranchStaffModal((state.branches||[]).find(b=>b.id==='${br.id}'))">➕ İŞE AL</div>
+      </div>
+
+      ${tab === 'hire' ? _renderBranchHireTab(br) : _renderBranchRosterTab(br)}
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 14px;">
+        <button class="btn" onclick="closeModal(); render();">KAPAT</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function _renderBranchHireTab(br) {
+  return `<div style="display: flex; flex-direction: column; gap: 14px;">
+    ${Object.entries(BRANCH_ROLES).map(([roleId, role]) => {
+      // Bu şubede o rolden kaç tane var?
+      let count = 0;
+      if (roleId === 'manager') count = br.staff.manager ? 1 : 0;
+      else if (roleId === 'cashier') count = (br.staff.cashiers || []).length;
+      else count = (br.staff.warehousers || []).length;
+      const remaining = role.maxPerBranch - count;
+
+      return `<div>
+        <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin-bottom: 4px; color: var(--accent);">${role.label}</h3>
+        <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 8px;">${role.desc} · ${count}/${role.maxPerBranch} dolu (${remaining > 0 ? remaining + ' kalan' : 'DOLU'})</div>
+        ${remaining > 0 ? `<div class="grid-3">
+          ${[1,2,3].map(lvl => {
+            const salary = branchRoleSalary(roleId, lvl);
+            const fee = branchRoleHireFee(roleId, lvl);
+            const bonus = role.bonusPerLevel[lvl - 1];
+            const bonusPct = `+%${Math.round(bonus * 100)}`;
+            return `<div class="card" style="padding: 10px;">
+              <h3 style="margin: 0; font-size: 13px;">Seviye ${lvl}</h3>
+              <div style="font-size: 11px; line-height: 1.6; margin-top: 4px;">
+                <div>${role.bonusLabel}: <strong style="color: var(--green);">${bonusPct}</strong></div>
+                <div>Maaş: ${fmt(salary)}/ay</div>
+                <div>İşe alım: <span style="color: var(--accent);">${fmt(fee)}</span></div>
+              </div>
+              <button class="btn primary" style="width: 100%; margin-top: 8px; font-size: 11px;" onclick="hireBranchStaff('${br.id}', '${roleId}', ${lvl}); _renderBranchStaffModal((state.branches||[]).find(b=>b.id==='${br.id}'))" ${state.cash >= fee ? '' : 'disabled'}>İŞE AL</button>
+            </div>`;
+          }).join('')}
+        </div>` : '<div style="font-size: 11px; color: var(--ink-dim); padding: 8px; background: var(--panel-2);">Bu pozisyon doludu. Birini çıkarmak için KADRO sekmesini kullan.</div>'}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function _renderBranchRosterTab(br) {
+  const items = [];
+  if (br.staff.manager) {
+    const r = BRANCH_ROLES.manager;
+    items.push({ role: 'manager', staff: br.staff.manager, label: r.label, bonusLabel: r.bonusLabel, bonusPct: Math.round(r.bonusPerLevel[br.staff.manager.level - 1] * 100) });
+  }
+  (br.staff.cashiers || []).forEach(s => {
+    const r = BRANCH_ROLES.cashier;
+    items.push({ role: 'cashier', staff: s, label: r.label, bonusLabel: r.bonusLabel, bonusPct: Math.round(r.bonusPerLevel[s.level - 1] * 100) });
+  });
+  (br.staff.warehousers || []).forEach(s => {
+    const r = BRANCH_ROLES.warehouser;
+    items.push({ role: 'warehouser', staff: s, label: r.label, bonusLabel: r.bonusLabel, bonusPct: Math.round(r.bonusPerLevel[s.level - 1] * 100) });
+  });
+
+  if (items.length === 0) {
+    return `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+      🏪 Bu şubede henüz kadro yok.
+      <br><br>
+      <strong>İlk adımda Mağaza Müdürü işe al</strong> — müdür olmadan perakende satış başlamaz.
+      <br>Sonra kasiyerler ekleyebilirsin (satış hızı artar).
+      <br><br>
+      <button class="btn primary" onclick="window._branchStaffTab='hire'; _renderBranchStaffModal((state.branches||[]).find(b=>b.id==='${br.id}'))">➕ İŞE AL SEKMESİNE GİT</button>
+    </div>`;
+  }
+
+  return `<div class="grid-2">
+    ${items.map(it => `<div class="emp-card" style="border-left: 3px solid var(--accent);">
+      <div class="emp-avatar">${it.label.split(' ')[0]}</div>
+      <div class="emp-info">
+        <div class="emp-name">${it.staff.name}</div>
+        <div class="emp-role">${it.label} · Sv ${it.staff.level} · <span class="stars">${'★'.repeat(it.staff.level)}${'☆'.repeat(Math.max(0, 5 - it.staff.level))}</span></div>
+        <div class="emp-stats">Maaş: ${fmt(it.staff.salary)}/ay · ${it.bonusLabel}: <strong style="color: var(--green);">+%${it.bonusPct}</strong></div>
+        <div class="emp-stats">İşe alındı: Gün ${it.staff.hireDay}</div>
+      </div>
+      <div>
+        <button class="btn small danger" onclick="fireBranchStaff('${br.id}', '${it.role}', '${it.staff.id}'); _renderBranchStaffModal((state.branches||[]).find(b=>b.id==='${br.id}'))">KOVA</button>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
 function renderBranches() {
   const c = $('center');
   const branches = state.branches || [];
@@ -12524,29 +12852,39 @@ function renderBranches() {
           </div>
         </div>
 
+        ${!staff.manager ? `<div style="margin-top: 8px; padding: 6px 10px; background: rgba(239,68,68,0.1); border-left: 2px solid var(--red); font-size: 10px; color: var(--red);">
+          ⚠️ <strong>Mağaza müdürü yok</strong> — perakende satış başlamadı. <span style="color: var(--ink-dim);">Kadro → Müdür işe al.</span>
+        </div>` : `<div style="margin-top: 8px; padding: 6px 10px; background: rgba(34,197,94,0.08); border-left: 2px solid var(--green); font-size: 10px;">
+          ✅ <strong>Aktif</strong> · Müdür: ${staff.manager.name} Sv${staff.manager.level}${staff.cashiers?.length > 0 ? ` · ${staff.cashiers.length} kasiyer` : ''}
+        </div>`}
+
         <div style="margin-top: 10px; padding: 8px 10px; background: var(--panel-2); font-size: 11px; line-height: 1.7;">
           <div style="display: flex; justify-content: space-between;">
             <span style="color: var(--ink-dim);">Toplam ciro:</span>
             <strong style="color: var(--green);">${fmt(br.totalRevenue || 0)}</strong>
           </div>
           <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">Bu ay ciro:</span>
+            <strong style="color: var(--blue);">${fmt(br.monthlyRevenue || 0)}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
             <span style="color: var(--ink-dim);">Aylık kira+opex:</span>
             <strong style="color: var(--red);">-${fmt(monthlyCost)}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">Personel maaşı/ay:</span>
+            <strong style="color: var(--red);">-${fmt(branchTotalSalary(br))}</strong>
           </div>
           <div style="display: flex; justify-content: space-between;">
             <span style="color: var(--ink-dim);">Envanter:</span>
             <strong>${stockCount} ürün · ${totalStockQty.toLocaleString('tr-TR')} adet</strong>
           </div>
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: var(--ink-dim);">Personel:</span>
-            <strong>${staffCount > 0 ? `${staffCount} kişi` : '<span style="color: var(--ink-dim);">Boş — yakında kadro açılır</span>'}</strong>
-          </div>
         </div>
 
         <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
-          <button class="btn small" style="flex: 1; opacity: 0.6;" disabled title="Aşama B'de açılacak">📦 ENVANTER</button>
-          <button class="btn small" style="flex: 1; opacity: 0.6;" disabled title="Aşama B'de açılacak">👥 KADRO</button>
-          <button class="btn small" style="flex: 1; opacity: 0.6;" disabled title="Aşama C'de açılacak">🔄 TRANSFER</button>
+          <button class="btn small" style="flex: 1;" onclick="openBranchInventoryModal('${br.id}')">📦 ENVANTER (${stockCount})</button>
+          <button class="btn small primary" style="flex: 1;" onclick="openBranchStaffModal('${br.id}')">👥 KADRO (${staffCount})</button>
+          <button class="btn small" style="flex: 1; background: var(--blue); border-color: var(--blue); color: #fff;" onclick="openBranchTransferModal('${br.id}')">🔄 TRANSFER</button>
           <button class="btn small danger" onclick="closeBranch('${br.id}')" title="Şubeyi kapat (%60 geri al)">KAPAT</button>
         </div>
       </div>`;
@@ -14019,6 +14357,226 @@ function branchMonthlyOpex(ilceId) {
   if (!ilce) return 50000;
   // Pahalı bölgelerde daha yüksek opex
   return Math.round(40000 + ilce.m2Price * 0.5);
+}
+
+// 🏪 Şube personeli rolleri
+const BRANCH_ROLES = {
+  manager: {
+    label: '🧑‍💼 Mağaza Müdürü',
+    desc: 'Şube cirosunu artırır',
+    baseSalary: 55000,
+    salaryStep: 37500,
+    baseHireFee: 18000,
+    hireFeeStep: 15000,
+    bonusPerLevel: [0.20, 0.40, 0.70], // ciro bonusu
+    bonusLabel: 'Ciro bonusu',
+    maxPerBranch: 1
+  },
+  cashier: {
+    label: '💼 Kasiyer',
+    desc: 'Günlük perakende sayısını artırır',
+    baseSalary: 28000,
+    salaryStep: 13500,
+    baseHireFee: 8000,
+    hireFeeStep: 6000,
+    bonusPerLevel: [0.30, 0.55, 0.85], // her kasiyer için biriken bonus
+    bonusLabel: 'Satış hızı',
+    maxPerBranch: 3
+  },
+  warehouser: {
+    label: '📦 Depo Görevlisi',
+    desc: 'Şubeden sevkiyat hızlanır (Aşama C)',
+    baseSalary: 25000,
+    salaryStep: 12500,
+    baseHireFee: 6000,
+    hireFeeStep: 5000,
+    bonusPerLevel: [0.15, 0.30, 0.50],
+    bonusLabel: 'Sevkiyat hızı',
+    maxPerBranch: 3
+  }
+};
+
+function branchRoleSalary(role, level) {
+  const r = BRANCH_ROLES[role];
+  if (!r) return 0;
+  return r.baseSalary + (level - 1) * r.salaryStep;
+}
+
+function branchRoleHireFee(role, level) {
+  const r = BRANCH_ROLES[role];
+  if (!r) return 0;
+  return r.baseHireFee + (level - 1) * r.hireFeeStep;
+}
+
+function hireBranchStaff(branchId, role, level) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br) { toast('Şube bulunamadı', 'error'); return; }
+  const r = BRANCH_ROLES[role];
+  if (!r) return;
+
+  const fee = branchRoleHireFee(role, level);
+  if (state.cash < fee) { toast('Yetersiz para', 'error'); return; }
+
+  if (!br.staff) br.staff = { manager: null, cashiers: [], warehousers: [] };
+
+  // Max kontrolü
+  let count;
+  if (role === 'manager') {
+    if (br.staff.manager) { toast('Bu şubede zaten bir müdür var', 'error'); return; }
+    count = 0;
+  } else if (role === 'cashier') {
+    count = (br.staff.cashiers || []).length;
+  } else {
+    count = (br.staff.warehousers || []).length;
+  }
+
+  if (count >= r.maxPerBranch) {
+    toast(`Bu şubede maksimum ${r.maxPerBranch} ${r.label} olabilir`, 'error');
+    return;
+  }
+
+  spend(fee, 'ise-alim');
+
+  const newStaff = {
+    id: 'bs' + uid(),
+    role,
+    name: fullName(),
+    salary: branchRoleSalary(role, level),
+    level,
+    xp: 0,
+    hireDay: state.day,
+    branchId: branchId,
+    branch: 'store'
+  };
+
+  if (role === 'manager') {
+    br.staff.manager = newStaff;
+  } else if (role === 'cashier') {
+    br.staff.cashiers.push(newStaff);
+  } else {
+    br.staff.warehousers.push(newStaff);
+  }
+
+  toast(`✓ ${r.label} işe alındı (Sv${level})`, 'success');
+  render();
+}
+
+function fireBranchStaff(branchId, role, staffId) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br || !br.staff) return;
+  const r = BRANCH_ROLES[role];
+  if (!confirm(`${r?.label || 'Personel'} işten çıkarılsın mı?`)) return;
+
+  if (role === 'manager') {
+    br.staff.manager = null;
+  } else if (role === 'cashier') {
+    br.staff.cashiers = (br.staff.cashiers || []).filter(s => s.id !== staffId);
+  } else {
+    br.staff.warehousers = (br.staff.warehousers || []).filter(s => s.id !== staffId);
+  }
+
+  toast('Personel işten çıkarıldı', 'info');
+  render();
+}
+
+// Şubedeki tüm personelin toplam maaşı
+function branchTotalSalary(br) {
+  if (!br.staff) return 0;
+  let total = 0;
+  if (br.staff.manager) total += br.staff.manager.salary;
+  (br.staff.cashiers || []).forEach(c => total += c.salary);
+  (br.staff.warehousers || []).forEach(w => total += w.salary);
+  return total;
+}
+
+// Şubenin günlük perakende satış geliri (otomatik, müdür varsa)
+function branchDailyRetailSale(br) {
+  if (!br.staff || !br.staff.manager) return 0; // müdür yoksa satış yok
+  const ilce = ILCELER[br.ilce];
+  if (!ilce) return 0;
+
+  // Base günlük talep: m²Price'a göre
+  const baseDaily = 200 + Math.round(ilce.m2Price * 0.005); // ₺290-₺800
+  // Müdür bonus
+  const mgr = br.staff.manager;
+  const mgrBonus = BRANCH_ROLES.manager.bonusPerLevel[mgr.level - 1] || 0;
+  // Kasiyer bonus (her kasiyer biriker)
+  let cashierBonus = 0;
+  (br.staff.cashiers || []).forEach(c => {
+    cashierBonus += BRANCH_ROLES.cashier.bonusPerLevel[c.level - 1] || 0;
+  });
+  // Hesap
+  const expected = Math.round(baseDaily * (1 + mgrBonus) * (1 + cashierBonus));
+  // ±%20 dalgalanma
+  return Math.round(expected * (0.8 + Math.random() * 0.4));
+}
+
+// Tüm şubelerin günlük perakende satışı (nextDay'de çağrılır)
+function processDailyBranchRetail() {
+  if (!Array.isArray(state.branches) || state.branches.length === 0) return;
+  let totalSale = 0;
+  let saleCount = 0;
+  let totalStockSale = 0;
+  state.branches.forEach(br => {
+    if (!br.staff || !br.staff.manager) return; // müdürsüz şube satış yapmaz
+
+    // 1) Normal perakende (nakit satış)
+    const sale = branchDailyRetailSale(br);
+    if (sale > 0) {
+      earn(sale, 'sube-satis');
+      br.totalRevenue = (br.totalRevenue || 0) + sale;
+      br.monthlyRevenue = (br.monthlyRevenue || 0) + sale;
+      br.totalSales = (br.totalSales || 0) + 1;
+      totalSale += sale;
+      saleCount++;
+    }
+
+    // 2) Depo görevlisi stok satışı — şube envanteri varsa
+    const warehousers = br.staff.warehousers || [];
+    if (warehousers.length > 0 && br.inventory) {
+      // Stokta olan ürünleri bul
+      const stockItems = Object.entries(br.inventory).filter(([_, q]) => q > 0);
+      if (stockItems.length > 0) {
+        // Depo görevlisi başına: günde 1-3 ürün, %1-3 stoktan satış
+        warehousers.forEach(w => {
+          const bonus = BRANCH_ROLES.warehouser.bonusPerLevel[w.level - 1] || 0;
+          const numProds = 1 + Math.floor(Math.random() * 2); // 1-2 ürün/gün
+          for (let i = 0; i < numProds && stockItems.length > 0; i++) {
+            const [pid, qty] = stockItems[Math.floor(Math.random() * stockItems.length)];
+            const p = PRODUCTS[pid];
+            if (!p) continue;
+            // Sat: stoğun %0.5 - %2'si
+            const sellPct = 0.005 + Math.random() * 0.015 + bonus * 0.5;
+            const sellQty = Math.max(1, Math.floor(qty * sellPct));
+            if (sellQty > qty || sellQty <= 0) continue;
+            const price = BASE_PRICE[pid] || 0;
+            const saleAmt = sellQty * price;
+            if (saleAmt <= 0) continue;
+            br.inventory[pid] = qty - sellQty;
+            earn(saleAmt, 'sube-satis');
+            br.totalRevenue = (br.totalRevenue || 0) + saleAmt;
+            br.monthlyRevenue = (br.monthlyRevenue || 0) + saleAmt;
+            totalStockSale += saleAmt;
+          }
+        });
+      }
+    }
+  });
+
+  if (totalSale > 0 || totalStockSale > 0) {
+    const parts = [];
+    if (totalSale > 0) parts.push(`Perakende: +${fmt(totalSale)}`);
+    if (totalStockSale > 0) parts.push(`Stok satışı: +${fmt(totalStockSale)}`);
+    state.agenda.push(`🏪 Şube günlük: ${parts.join(' · ')}`);
+  }
+}
+
+// Aylık perakende sıfırlama (monthlyRevenue)
+function resetBranchMonthlyRevenue() {
+  if (!Array.isArray(state.branches)) return;
+  state.branches.forEach(br => {
+    br.monthlyRevenue = 0;
+  });
 }
 
 function openBranch(ilceId) {
@@ -17677,8 +18235,16 @@ function _nextDayInner() {
     if (!state.lastBranchPayment) state.lastBranchPayment = state.day;
     if (state.day - state.lastBranchPayment >= 30) {
       payBranchMonthlyExpenses();
+      resetBranchMonthlyRevenue(); // aylık ciro sıfırla
       state.lastBranchPayment = state.day;
     }
+  }
+
+  // 🏪 Günlük şube perakende satışı (müdürü olan şubelerde)
+  try {
+    processDailyBranchRetail();
+  } catch (e) {
+    console.warn('Şube perakende satış hatası:', e);
   }
 
   // Aylık kira tahsilatı — kiracılı dairelerden
@@ -18019,6 +18585,24 @@ function _nextDayInner() {
       totalPayroll += pay;
       const role = CONSTRUCTION_ROLES[r.role];
       breakdown.push({ name: r.name, role: role?.label || 'Şantiye', pay, daysWorked });
+    });
+
+    // 🏪 Şube personeli (mağaza müdürü, kasiyer, depo görevlisi)
+    (state.branches || []).forEach(br => {
+      if (!br.staff) return;
+      const allStaff = [];
+      if (br.staff.manager) allStaff.push(br.staff.manager);
+      (br.staff.cashiers || []).forEach(c => allStaff.push(c));
+      (br.staff.warehousers || []).forEach(w => allStaff.push(w));
+      allStaff.forEach(r => {
+        const periodStart = state.lastPayrollDay;
+        const effectiveStart = Math.max(r.hireDay, periodStart);
+        const daysWorked = Math.min(30, state.day - effectiveStart);
+        const pay = Math.round(r.salary * (daysWorked / 30));
+        totalPayroll += pay;
+        const role = BRANCH_ROLES[r.role];
+        breakdown.push({ name: r.name, role: `${role?.label || 'Şube'} (${br.name})`, pay, daysWorked });
+      });
     });
 
     if (totalPayroll > 0) {
@@ -19333,10 +19917,46 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.93';
+const CURRENT_VERSION = 'v1.95';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.95',
+    date: '24 Mayıs 2026',
+    title: 'ŞUBELER AŞAMA C — ENVANTER + TRANSFER + İLÇE AĞI',
+    items: [
+      { cat: 'major', text: '📦 <strong>Şube envanteri</strong>: ürünleri tablo halinde gör, toplam değer hesabı' },
+      { cat: 'major', text: '🔄 <strong>Ana ↔ Şube transfer modalı</strong>: çift yönlü, çoklu ürün, miktar girişi' },
+      { cat: 'feature', text: 'Transfer yakıt maliyeti: <code>km × ₺200</code> (tek seferde alınır)' },
+      { cat: 'feature', text: 'HEPSİ butonu — tek tıkla mevcut stoğun tamamını seç' },
+      { cat: 'major', text: '🎯 <strong>İlçeye özel müşteri ağı</strong>: şubeli ilçelerin müşterilerinden +%30 ihale şansı' },
+      { cat: 'feature', text: 'Daha fazla şube = daha fazla yönlendirilmiş ihale (max 5 şube tam doygunluk)' },
+      { cat: 'major', text: '📦 <strong>Depo görevlisi aktif</strong>: şube envanterinden günlük stok satışı yapar' },
+      { cat: 'feature', text: 'Her depo görevlisi: günlük 1-2 ürünü stoğun %0.5-2\'si kadar satar' },
+      { cat: 'feature', text: 'Depo görevlisi seviyesi bonus verir (Sv3 = +%50 satış oranı)' },
+      { cat: 'feature', text: 'Ajanda kaydı: "Şube günlük: Perakende: +₺X · Stok satışı: +₺Y"' }
+    ]
+  },
+  {
+    version: 'v1.94',
+    date: '24 Mayıs 2026',
+    title: 'MAĞAZA ŞUBELERİ AŞAMA B — PERSONEL + PERAKENDE',
+    items: [
+      { cat: 'major', text: '👥 <strong>Şube personeli sistemi</strong>: 3 rol — Mağaza Müdürü, Kasiyer, Depo Görevlisi' },
+      { cat: 'feature', text: '🧑‍💼 <strong>Mağaza Müdürü</strong>: Sv1/2/3 → +%20/40/70 ciro bonusu (her şubeye 1)' },
+      { cat: 'feature', text: '💼 <strong>Kasiyer</strong>: Sv1/2/3 → +%30/55/85 satış hızı (max 3, biriker)' },
+      { cat: 'feature', text: '📦 <strong>Depo Görevlisi</strong>: sevkiyat hızı (Aşama C\'de aktif olacak)' },
+      { cat: 'major', text: '💰 <strong>Günlük perakende satış</strong> — müdürü olan şubelerde her gün otomatik' },
+      { cat: 'feature', text: 'Base günlük talep: <code>₺200 + m²Price × 0.005</code> + müdür/kasiyer bonusları + ±%20 dalgalanma' },
+      { cat: 'feature', text: 'Şube kartında "Bu ay ciro" satırı + "Personel maaşı/ay" satırı' },
+      { cat: 'feature', text: 'Aktif/Pasif rozeti: müdür yoksa ⚠️ kırmızı, varsa ✅ yeşil' },
+      { cat: 'feature', text: '<strong>Kadro modalı</strong>: İŞE AL + KADRO sekmeleri, her rol Sv1-3 kartları' },
+      { cat: 'feature', text: 'Aylık maaş otomatik payroll\'a eklendi (store branch)' },
+      { cat: 'feature', text: 'Aylık ciro otomatik sıfırlanıyor (30 günde bir)' },
+      { cat: 'info', text: '🔜 Aşama C: Envanter transfer + ilçeye özel müşteri ağı + depo görevlisi sevkiyat bonusu' }
+    ]
+  },
   {
     version: 'v1.93',
     date: '24 Mayıs 2026',

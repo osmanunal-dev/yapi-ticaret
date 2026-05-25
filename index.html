@@ -6783,7 +6783,7 @@ function cancelConstruction(landId) {
 
       <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin: 14px 0; font-size: 12px; line-height: 1.7;">
         <strong>${(ILCELER[land.ilce]?.name || 'bilinmeyen')}</strong> · ${t.icon} ${t.name} (${land.m2} m²)<br>
-        İlerleme: <strong>${Math.max(0, b.daysPassed)}/${b.totalDays} gün</strong><br>
+        İlerleme: <strong>${Math.max(0, Math.floor(b.daysPassed))}/${b.totalDays} gün</strong><br>
         Bugüne kadar harcanan: <strong style="color: var(--red);">${fmt(b.totalCost)}</strong> (geri ödeme YOK)
       </div>
 
@@ -16134,7 +16134,7 @@ function renderLandCard(l) {
       ? '<span style="font-size: 10px; color: var(--ink-dim);">📁 Tüm daireler satıldı/teslim edildi</span>'
       : `<button class="btn small primary" onclick="openApartmentsModal('${l.id}')">🏠 DAİRELERİ YÖNET</button>`;
   } else if (b.status === 'demolition') {
-    const demoDay = Math.abs(b.daysPassed);
+    const demoDay = Math.floor(Math.abs(b.daysPassed));
     const demoTotal = 6;
     const pct = Math.round((demoDay / demoTotal) * 100);
     buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid var(--red);">
@@ -16145,7 +16145,7 @@ function renderLandCard(l) {
     actions = `<button class="btn small danger" onclick="cancelConstruction('${l.id}')">İPTAL ET</button>`;
   } else if (b.status === 'building' || b.status === 'paused-warned') {
     const pct = Math.round((b.daysPassed / b.totalDays) * 100);
-    const remaining = b.totalDays - b.daysPassed;
+    const remaining = Math.max(0, Math.ceil(b.totalDays - b.daysPassed));
     const paused = b.status === 'paused-warned';
     const isUrban = l.isUrbanRenewal;
     const isSub = b.isSubcontracted;
@@ -16178,7 +16178,7 @@ function renderLandCard(l) {
     buildingInfo = `<div style="margin-top: 6px; padding: 8px; background: var(--panel-2); border-left: 3px solid ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">
       <strong style="color: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};">${paused ? '⚠️' : '🏗'} ${(BUILDING_TYPES[b.type]?.name || 'Bina')} ${paused ? '(DURDU)' : (isSub ? '(TAŞERONDA)' : 'inşa ediliyor')}${isUrban ? ' · Kentsel Dönüşüm' : ''}</strong>
       <div class="progress-bar" style="margin: 6px 0;"><div class="progress-fill" style="width: ${pct}%; background: ${paused ? 'var(--red)' : (isSub ? 'var(--purple)' : 'var(--accent)')};"></div></div>
-      <span style="font-size: 10px; color: var(--ink-dim);">${b.daysPassed}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
+      <span style="font-size: 10px; color: var(--ink-dim);">${Math.floor(b.daysPassed)}/${b.totalDays} gün · %${pct} · ${remaining} gün kaldı · Harcanan: ${fmt(b.totalCost)}</span>
       ${paused && (!b.missingMaterials || b.missingMaterials.length === 0) ? '<br><span style="font-size: 10px; color: var(--red);">Malzeme veya işçilik bekleniyor</span>' : ''}
       ${isSub ? '<br><span style="font-size: 10px; color: var(--purple);">Taşeron firma bitiriyor</span>' : ''}
       ${missingDetail}
@@ -20671,10 +20671,22 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v2.01';
+const CURRENT_VERSION = 'v2.02';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v2.02',
+    date: '24 Mayıs 2026',
+    title: 'VİRGÜLLÜ SAYILAR DÜZELTİLDİ',
+    items: [
+      { cat: 'major', text: '🔢 <strong>İnşaat ilerleme günleri artık tam sayı</strong> — "12.149999999.../74.15 gün" gibi virgüllü değerler düzeltildi' },
+      { cat: 'feature', text: 'Şef bonusu sayesinde virgüllü ilerleyen <code>daysPassed</code> render edilirken yuvarlanıyor' },
+      { cat: 'feature', text: '<code>Math.floor(daysPassed)</code> arsa sayfası inşaat detayı, iptal modalı' },
+      { cat: 'feature', text: '<code>Math.ceil(remaining)</code> kalan gün sayımı (kullanıcı için negatif/sıfır göstermez)' },
+      { cat: 'feature', text: 'Yıkım süreci günleri de düzeltildi (Math.abs + Math.floor)' }
+    ]
+  },
   {
     version: 'v2.01',
     date: '24 Mayıs 2026',

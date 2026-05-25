@@ -8984,6 +8984,141 @@ function declineSupplierOrder(emailId) {
 }
 
 // ============================================================
+// 🏭 FABRİKA MÜŞTERİ İHALESİ — Satış uzmanı kendi başına müşteri çeker
+// ============================================================
+
+function generateFactoryCustomerTender(factory) {
+  if (!factory || !factory.productId) return null;
+  const product = PRODUCTS[factory.productId];
+  if (!product) return null;
+  // Bu fabrikada üretebileceğimiz miktar (mevcut hammadde + kapasite ile)
+  const monthlyCapacity = factory.monthlyCapacity || 1000;
+
+  // Müşteri seç — şubeli ilçelerden veya rastgele
+  const branchIlces = new Set((state.branches || []).map(b => b.ilce));
+  let customer;
+  if (branchIlces.size > 0 && Math.random() < 0.40) {
+    const branchCustomers = state.customers.filter(c => branchIlces.has(c.ilce));
+    customer = branchCustomers.length > 0 ? choice(branchCustomers) : choice(state.customers);
+  } else {
+    customer = choice(state.customers);
+  }
+  if (!customer) return null;
+
+  // Talep miktarı: kapasitenin %20-80'i
+  const demandPct = 0.20 + Math.random() * 0.60;
+  const qty = Math.max(10, Math.floor(monthlyCapacity * demandPct));
+  // Müşterinin teklif fiyatı: piyasanın %95-110'ı (rekabetçi)
+  const marketPrice = BASE_PRICE[factory.productId] || 1000;
+  const offerPct = 0.95 + Math.random() * 0.15;
+  const customerBudget = Math.round(marketPrice * offerPct);
+  const estTotal = customerBudget * qty;
+
+  // Üretim maliyeti (referans için)
+  const prodCost = (typeof factoryProductionCost === 'function') ? factoryProductionCost(factory.id) : Math.round(marketPrice * 0.5);
+  const estProfit = (customerBudget - prodCost) * qty;
+  const profitPct = Math.round(((customerBudget - prodCost) / customerBudget) * 100);
+
+  // Satış uzmanının adı
+  const repName = fullName();
+  const expDays = 3 + Math.floor(Math.random() * 4); // 3-6 gün
+  const deadline = state.day + 7 + Math.floor(Math.random() * 14); // 7-20 gün teslim
+
+  const brand = BRANDS[factory.brandId];
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'factory-customer-tender',
+    branch: 'factory',
+    factoryId: factory.id,
+    customerId: customer.id,
+    customerName: customer.name,
+    repName,
+    productId: factory.productId,
+    productName: product.name,
+    productUnit: product.unit,
+    qty,
+    unitPrice: customerBudget,
+    marketPrice,
+    prodCost,
+    estTotal,
+    estProfit,
+    profitPct,
+    deadline,
+    receivedDay: state.day,
+    expiresDay: state.day + expDays,
+    subject: `🏭 ${customer.name} — ${product.name} talebi (${brand?.name || 'Fabrika'} satış uzmanı çekti)`,
+    body: `Sayın yetkili,\n\n${brand?.name || 'Fabrikanız'} satış uzmanımız ${repName}, ${customer.name} firması ile görüştü ve aşağıdaki teklifi getirdi:\n\n• Ürün: ${product.name}\n• Miktar: ${qty.toLocaleString('tr-TR')} ${product.unit}\n• Birim fiyat (müşteri teklifi): ${fmt(customerBudget)}/${product.unit} (piyasa: ${fmt(marketPrice)})\n• Teslim süresi: Gün ${deadline} (${deadline - state.day} gün)\n\nToplam ciro: ${fmt(estTotal)}\nÜretim maliyeti tahmini: ${fmt(prodCost * qty)}\nTahmini brüt kâr: +${fmt(estProfit)} (%${profitPct})\n\nKabul ederseniz fabrikamız üretimi başlatır, sevkiyat ile teslim ederiz.`,
+    unread: true,
+    answered: false
+  };
+}
+
+function acceptFactoryCustomerTender(emailId) {
+  const e = state.inbox.find(x => x.id === emailId);
+  if (!e || e.answered) { toast('Teklif bulunamadı veya zaten cevaplandı', 'error'); return; }
+  if (e.type !== 'factory-customer-tender') return;
+  if (state.day > e.expiresDay) { toast('Teklifin süresi dolmuş', 'error'); return; }
+
+  const factory = (state.factories || []).find(f => f.id === e.factoryId);
+  if (!factory) { toast('Hedef fabrika artık yok', 'error'); return; }
+
+  const customer = getCustomer(e.customerId);
+  if (!customer) { toast('Müşteri bulunamadı', 'error'); return; }
+
+  // Sözleşme oluştur
+  const contract = {
+    id: 'c' + uid(),
+    customerId: customer.id,
+    items: [{ productId: e.productId, qty: e.qty }],
+    unitPrices: { [e.productId]: e.unitPrice },
+    deliveries: [],
+    deadline: e.deadline,
+    startedDay: state.day,
+    total: e.estTotal,
+    materialsTotal: e.estTotal,
+    shippingCost: 0,
+    estimatedCost: e.prodCost * e.qty,
+    shippingType: null,
+    delivered: false,
+    paid: false,
+    isFactoryOffer: true,
+    factoryId: factory.id,
+    branch: 'factory'
+  };
+  state.contracts.push(contract);
+
+  // Müşteri güveni
+  customer.trust = Math.min(100, customer.trust + 2);
+
+  e.answered = true;
+  // Arşive geçir
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx >= 0) {
+    state.archive.push({ ...e, status: 'factory-tender-accepted' });
+    state.inbox.splice(idx, 1);
+  }
+
+  const brand = BRANDS[factory.brandId];
+  toast(`✅ ${e.customerName} ile fabrika sözleşmesi yapıldı: ${fmt(e.estTotal)}`, 'success');
+  state.agenda.push(`🏭 ${brand?.name || 'Fabrika'} → ${e.customerName}: ${e.qty.toLocaleString('tr-TR')} ${e.productUnit} sözleşmesi (${fmt(e.estTotal)})`);
+  addXP(20 + Math.round(e.estProfit / 10000), 'fabrika ihalesi');
+  state.selectedEmail = null;
+  render();
+}
+
+function declineFactoryCustomerTender(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  state.archive.push({ ...e, status: 'declined' });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+  toast('Fabrika ihalesi reddedildi', 'info');
+  render();
+}
+
+// ============================================================
 // 🏗 ŞANTİYE KADRO UYARI MAILI
 // ============================================================
 
@@ -10090,6 +10225,21 @@ function renderInbox() {
             </div>`;
           }
 
+          if (e.type === 'factory-customer-tender') {
+            // Fabrika satış uzmanı müşteri çekti
+            const factory = (state.factories || []).find(f => f.id === e.factoryId);
+            const brand = factory ? BRANDS[factory.brandId] : null;
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--blue);">
+              <div class="top">
+                <span class="from">🏭 ${e.customerName || 'Müşteri'} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">→ ${brand?.name || 'Fabrika'}</span></span>
+                <span class="date">Gün ${e.receivedDay}</span>
+              </div>
+              <div class="subject">${e.subject || 'Fabrika İhalesi'}</div>
+              <div class="preview">${e.qty?.toLocaleString('tr-TR') || '?'} ${e.productUnit || ''} ${e.productName || ''} · <strong style="color: var(--accent);">${fmt(e.estTotal || 0)}</strong> (kâr: +${fmt(e.estProfit || 0)})</div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
           if (e.type === 'construction-staff-alert') {
             // Şantiye kadro uyarısı
             const sites = e.sitesNeedingStaff || [];
@@ -11016,6 +11166,109 @@ function renderConstructionStaffAlertDetail(e) {
   </div>`;
 }
 
+// Fabrika müşteri ihalesi detay sayfası (satış uzmanı çekti)
+function renderFactoryTenderDetail(e) {
+  const c = $('center');
+  const expIn = e.expiresDay - state.day;
+  const expired = expIn < 0;
+  const factory = (state.factories || []).find(f => f.id === e.factoryId);
+  const brand = factory ? BRANDS[factory.brandId] : null;
+  const product = PRODUCTS[e.productId];
+  const customer = getCustomer(e.customerId);
+
+  // Mevcut hammadde durumu (üretim için yeterli mi?)
+  const recipe = PRODUCT_RECIPES[e.productId] || {};
+  const rawIds = Object.keys(recipe);
+  let canProduce = Infinity;
+  if (rawIds.length > 0 && factory) {
+    if (!factory.rawStock) factory.rawStock = {};
+    canProduce = Math.min(...rawIds.map(rid => {
+      const have = factory.rawStock[rid] || 0;
+      return recipe[rid] > 0 ? Math.floor(have / recipe[rid]) : Infinity;
+    }));
+  }
+  const sufficientRaw = canProduce >= e.qty;
+
+  c.innerHTML = `<div style="max-width: 880px;">
+    <button class="btn" style="margin-bottom: 14px;" onclick="state.selectedEmail=null; render()">← Geri</button>
+
+    <div style="padding: 16px 18px; background: linear-gradient(180deg, rgba(59,130,246,0.06), transparent); border-left: 4px solid var(--blue);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h2 style="margin: 0; color: var(--blue); font-family: 'Bebas Neue'; letter-spacing: 2px;">🏭 ${(e.customerName || 'Müşteri').toUpperCase()}</h2>
+          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">${brand?.name || 'Fabrika'} satış uzmanı <strong>${e.repName}</strong> çekti · ${customer ? `📍 ${ILCELER[customer.ilce]?.name || ''} · Güven: ${Math.round(customer.trust)}/100` : ''}</div>
+        </div>
+        <div style="text-align: right; font-size: 11px;">
+          <div style="color: var(--ink-dim);">Geliş: Gün ${e.receivedDay}</div>
+          <div style="color: ${expIn <= 1 ? 'var(--red)' : 'var(--ink-dim)'};">Son: Gün ${e.expiresDay} ${expired ? '(SÜRESİ GEÇTİ)' : `(${expIn} gün)`}</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 18px;">${e.subject}</h3>
+    <div style="white-space: pre-line; padding: 12px; background: var(--panel-2); font-size: 12px; line-height: 1.7; margin: 8px 0 16px;">${e.body}</div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 12px 0 8px;">📊 SÖZLEŞME ÖZETİ</h3>
+    <div style="padding: 12px 14px; background: var(--panel-2); font-size: 12px; line-height: 1.9;">
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--ink-dim);">Ürün:</span>
+        <strong>${product?.name || e.productId}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--ink-dim);">Miktar:</span>
+        <strong>${e.qty.toLocaleString('tr-TR')} ${product?.unit || ''}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--ink-dim);">Birim fiyat (müşteri teklifi):</span>
+        <strong style="color: var(--accent);">${fmt(e.unitPrice)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--ink-dim);">Piyasa fiyatı:</span>
+        <strong>${fmt(e.marketPrice)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--ink-dim);">Üretim maliyeti / birim:</span>
+        <strong>${fmt(e.prodCost)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--ink-dim);">Teslim süresi:</span>
+        <strong>Gün ${e.deadline} (${e.deadline - state.day} gün)</strong>
+      </div>
+    </div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 12px 0 8px;">💰 KÂR ANALİZİ</h3>
+    <div style="padding: 14px 16px; background: var(--panel-2); border-left: 3px solid ${e.estProfit > 0 ? 'var(--green)' : 'var(--red)'};">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span>Toplam ciro:</span>
+        <strong style="color: var(--accent); font-size: 18px;">${fmt(e.estTotal)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span style="color: var(--ink-dim);">Tahmini üretim maliyeti:</span>
+        <strong>-${fmt(e.prodCost * e.qty)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px dashed var(--border);">
+        <span style="color: ${e.estProfit > 0 ? 'var(--green)' : 'var(--red)'};">Tahmini brüt kâr (%${e.profitPct}):</span>
+        <strong style="color: ${e.estProfit > 0 ? 'var(--green)' : 'var(--red)'};">${e.estProfit > 0 ? '+' : ''}${fmt(e.estProfit)}</strong>
+      </div>
+    </div>
+
+    ${rawIds.length > 0 ? `<div style="margin-top: 12px; padding: 10px 12px; background: var(--panel-2); border-left: 3px solid ${sufficientRaw ? 'var(--green)' : '#f59e0b'}; font-size: 11px;">
+      📦 <strong>Hammadde durumu:</strong> ${canProduce === Infinity ? 'Yeterli' : canProduce.toLocaleString('tr-TR')} ${product?.unit || ''} üretebilirsin
+      ${sufficientRaw ? '<span style="color: var(--green);"> ✓ Yeterli</span>' : `<span style="color: #f59e0b;"> ⚠️ Eksik (${(e.qty - canProduce).toLocaleString('tr-TR')} ${product?.unit || ''} daha hammadde lazım)</span>`}
+    </div>` : ''}
+
+    ${e.answered ? `<div style="margin-top: 14px; padding: 12px; background: var(--panel-2); border-left: 3px solid var(--ink-dim);">
+      ✓ Bu teklif zaten cevaplandı.
+    </div>` : expired ? `<div style="margin-top: 14px; padding: 12px; background: var(--panel-2); border-left: 3px solid var(--red); color: var(--red);">
+      ⚠️ Teklifin süresi geçti.
+    </div>` : `<div style="display: flex; gap: 10px; margin-top: 14px;">
+      <button class="btn primary" style="flex: 1; padding: 12px; background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 700;" onclick="acceptFactoryCustomerTender(${e.id})">✅ KABUL ET (sözleşme aç)</button>
+      <button class="btn danger" style="padding: 12px;" onclick="declineFactoryCustomerTender(${e.id})">REDDET</button>
+    </div>
+    ${!sufficientRaw && rawIds.length > 0 ? '<div style="text-align: center; color: #f59e0b; font-size: 11px; margin-top: 8px;">💡 Hammadde eksik — kabul edersin ama üretimi tamamlamak için hammadde almalısın.</div>' : ''}`}
+  </div>`;
+}
+
 // Tedarikçi sipariş maili detay sayfası (biz satıcıyız)
 function renderSupplierOrderDetail(e) {
   const c = $('center');
@@ -11225,6 +11478,12 @@ function renderEmailDetail() {
   // Tedarikçi siparişi (biz satıcıyız)
   if (e.type === 'supplier-order') {
     renderSupplierOrderDetail(e);
+    return;
+  }
+
+  // Fabrika müşteri ihalesi (satış uzmanı çekti)
+  if (e.type === 'factory-customer-tender') {
+    renderFactoryTenderDetail(e);
     return;
   }
 
@@ -18782,6 +19041,17 @@ function _nextDayInner() {
       continue;
     }
 
+    // Fabrika müşteri ihalesi (factory-customer-tender)
+    if (e.type === 'factory-customer-tender') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-factory-tender' });
+        state.agenda.push(`🏭 Fabrika ihalesi süresi doldu: ${e.customerName || 'Müşteri'} (+${fmt(e.estTotal || 0)} kaçırıldı)`);
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
     // Şantiye kadro uyarı maili
     if (e.type === 'construction-staff-alert') {
       if (e.expiresDay < state.day) {
@@ -19257,29 +19527,17 @@ function _nextDayInner() {
     }
   }
 
-  // 7a-2) Hammadde tedarikçilerinden fabrikaya teklif maili — sadece fabrika varsa, %5 şans (seyrek)
-  if ((state.factories || []).length > 0 && Math.random() < 0.05) {
-    try {
-      const offer = generateRawMaterialOffer();
-      if (offer) {
-        state.inbox.push(offer);
-        toast(`📧 ${offer.supplierName} fabrikana özel teklif gönderdi`, 'info');
-      }
-    } catch (e) {
-      console.warn('Hammadde teklif maili hatası (atlandı):', e);
-    }
-  }
+  // 7a-2) Hammadde tedarikçilerinden fabrikaya teklif maili — KALDIRILDI
+  // (Artık tedarikçi siparişi sistemine yer açtık; fabrika hammaddesini doğrudan tedarikçilerden alır)
 
   // 7a-2b) Tedarikçi siparişi — bir tedarikçi bizden toplu mal almak istiyor (%40 şans + 1-2 sipariş)
   if (Math.random() < 0.40) {
     try {
-      // İlk sipariş
       const order1 = generateSupplierOrder();
       if (order1) {
         state.inbox.push(order1);
         toast(`🤝 ${order1.supplierName} bizden ${order1.items.length} kalem sipariş istiyor (+${fmt(order1.totalDeal)})`, 'info');
       }
-      // %30 şansla ikinci sipariş daha (farklı tedarikçiden)
       if (Math.random() < 0.30) {
         const order2 = generateSupplierOrder();
         if (order2 && (!order1 || order2.supplierId !== order1.supplierId)) {
@@ -19289,6 +19547,28 @@ function _nextDayInner() {
       }
     } catch (e) {
       console.warn('Tedarikçi sipariş maili hatası (atlandı):', e);
+    }
+  }
+
+  // 7a-2c) Fabrika müşteri ihalesi — fabrikası olan + satış uzmanı olan kullanıcıya gelen direkt ihale (%25 şans/fabrika)
+  if ((state.factories || []).length > 0) {
+    try {
+      (state.factories || []).forEach(factory => {
+        // Sadece satış uzmanı olan fabrikalar müşteri çeker
+        if (!factory.staff || !factory.staff.salesRep || factory.staff.salesRep < 1) return;
+        // Satış uzmanı sayısına göre şans: 1 uzman → %25, 2 → %42, 3 → %55
+        const repCount = factory.staff.salesRep || 0;
+        const chance = 1 - Math.pow(0.75, repCount);
+        if (Math.random() < chance) {
+          const factoryTender = generateFactoryCustomerTender(factory);
+          if (factoryTender) {
+            state.inbox.push(factoryTender);
+            toast(`🏭 ${factoryTender.customerName} fabrikana müşteri ihalesi yolladı: ${fmt(factoryTender.estTotal)}`, 'info');
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('Fabrika müşteri ihalesi hatası (atlandı):', e);
     }
   }
 
@@ -20391,10 +20671,27 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v2.00';
+const CURRENT_VERSION = 'v2.01';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v2.01',
+    date: '24 Mayıs 2026',
+    title: 'FABRİKA SATIŞ UZMANI MÜŞTERİ ÇEKİYOR — HAMMADDE TEKLİFİ KAPATILDI',
+    items: [
+      { cat: 'major', text: '❌ <strong>Hammadde toplu alım teklifleri TAMAMEN KAPATILDI</strong>' },
+      { cat: 'feature', text: 'Hammadde için tedarikçilere doğrudan git (Fabrika sayfası → HAMMADDE butonu)' },
+      { cat: 'major', text: '🏭 <strong>YENİ: Fabrika satış uzmanı kendi başına müşteri çekiyor!</strong>' },
+      { cat: 'feature', text: 'Satış uzmanı olan her fabrika günde %25-55 şansla müşteri ihalesi getirir' },
+      { cat: 'feature', text: 'Şans formülü: 1 uzman → %25, 2 → %42, 3 → %55' },
+      { cat: 'feature', text: 'Mavi border\'lı 🏭 maili Fabrika filtresinde görünür' },
+      { cat: 'feature', text: 'Detay sayfasında: ürün, miktar, fiyat, üretim maliyeti, kâr analizi, hammadde durumu' },
+      { cat: 'feature', text: 'Şubeli ilçelerden %40 şansla müşteri seçilir (şube avantajı fabrikalara da yansır)' },
+      { cat: 'feature', text: 'Kabul edersen factory branch sözleşmesi açılır — Üretim Sözleşmeleri sayfasında görünür' },
+      { cat: 'info', text: '💡 Strateji: Fabrikana satış uzmanı işe al, kendi başına müşteri çeksin' }
+    ]
+  },
   {
     version: 'v2.00',
     date: '24 Mayıs 2026',

@@ -8564,6 +8564,7 @@ const CATEGORY_BRANCH = {
   'uretim-iscilik': 'factory',
   // 🏪 Mağaza (varsayılan)
   'malzeme': 'store',
+  'malzeme-satis': 'store',
   'dis-nakliye': 'store',
   'tahsilat': 'store',
   'bayilik-teminat': 'store',
@@ -8827,6 +8828,154 @@ function declineRawMaterialOffer(emailId) {
   state.inbox.splice(idx, 1);
   state.selectedEmail = null;
   toast('Hammadde teklifi reddedildi', 'info');
+  render();
+}
+
+// ============================================================
+// 🤝 TEDARİKÇİ SİPARİŞİ — Tedarikçiler bizden toplu malzeme alır
+// ============================================================
+
+function generateSupplierOrder() {
+  // Rastgele tedarikçi seç (hammadde tedarikçileri hariç — onlar zaten hammadde satıyor)
+  const eligible = SUPPLIERS.filter(s => {
+    // Sadece bitmiş ürün satan tedarikçiler (hammadde değil)
+    const products = s.products.filter(pid => {
+      const p = PRODUCTS[pid];
+      return p && !PRODUCT_RECIPES[pid] === false; // bitmiş ürünleri al
+    });
+    return products.length > 0;
+  });
+
+  // Daha basit yaklaşım: tedarikçinin katalogunda BASE_PRICE'ı olan ürünler (bitmiş ürünler)
+  const supplier = choice(SUPPLIERS.filter(s => {
+    return s.products.some(pid => BASE_PRICE[pid] && PRODUCTS[pid] && !isRawMaterial(pid));
+  }));
+  if (!supplier) return null;
+
+  // Tedarikçinin kataloğundan bizim STOKUMUZDA da olan ürünleri filtrele
+  const candidates = supplier.products.filter(pid => {
+    if (!BASE_PRICE[pid] || !PRODUCTS[pid]) return false;
+    if (isRawMaterial(pid)) return false;
+    // Stokta yeterli var mı? (minimum ölçüt: 1 birim)
+    return (state.inventory[pid] || 0) >= 1;
+  });
+
+  if (candidates.length === 0) return null; // Hiç stoğumuz yoksa teklif gelmez
+
+  // 1-3 ürün seç
+  const numItems = Math.min(candidates.length, 1 + Math.floor(Math.random() * 3));
+  const shuffled = candidates.slice().sort(() => Math.random() - 0.5).slice(0, numItems);
+
+  const items = [];
+  shuffled.forEach(pid => {
+    const p = PRODUCTS[pid];
+    const ourStock = state.inventory[pid] || 0;
+    const marketPrice = BASE_PRICE[pid];
+    // Talep edilen miktar: stoğumuzun %20-60'ı (büyük sipariş ama hep tüketmesin)
+    const requestedPct = 0.20 + Math.random() * 0.40;
+    const requestedQty = Math.max(1, Math.floor(ourStock * requestedPct));
+    if (requestedQty < 1) return;
+    // Tedarikçinin önerdiği fiyat: piyasanın %5-15 fazlası (bizi cazip kılmak için)
+    const premiumPct = 0.05 + Math.random() * 0.10;
+    const offerPrice = Math.round(marketPrice * (1 + premiumPct));
+    items.push({
+      productId: pid,
+      name: p.name,
+      unit: p.unit,
+      qty: requestedQty,
+      marketPrice,
+      offerPrice,
+      premiumPct: Math.round(premiumPct * 100),
+      total: offerPrice * requestedQty
+    });
+  });
+
+  if (items.length === 0) return null;
+
+  const totalDeal = items.reduce((s, i) => s + i.total, 0);
+  const totalMarket = items.reduce((s, i) => s + i.marketPrice * i.qty, 0);
+  const profit = totalDeal - totalMarket;
+  const expDays = 2 + Math.floor(Math.random() * 4); // 2-5 gün geçerli
+
+  return {
+    id: ++_emailIdCounter,
+    type: 'supplier-order',
+    branch: 'store',     // 🏪 mağaza maili
+    supplierId: supplier.id,
+    supplierName: supplier.name,
+    items,
+    totalDeal,
+    totalMarket,
+    profit,
+    receivedDay: state.day,
+    expiresDay: state.day + expDays,
+    subject: `🤝 ${supplier.name} — Bizden Toplu Sipariş Talebi`,
+    body: `Sayın yetkili,\n\n${supplier.name} olarak müşterilerimize tedarik etmek üzere stoğunuzdan satın almak istiyoruz:\n\n${items.map(it => `• ${it.name}: ${it.qty.toLocaleString('tr-TR')} ${it.unit} × ${fmt(it.offerPrice)}/${it.unit} (piyasa: ${fmt(it.marketPrice)}, %${it.premiumPct} fazlası) = ${fmt(it.total)}`).join('\n')}\n\nToplam teklif: ${fmt(totalDeal)}\nPiyasa değeri: ${fmt(totalMarket)}\nEkstra kâr: +${fmt(profit)}\nGeçerlilik: ${expDays} gün\n\nKabul ederseniz stoktan anında düşülür, ödeme hesabınıza yatırılır.`,
+    unread: true,
+    answered: false
+  };
+}
+
+// Bir ürün hammadde mi? (recipe'i olmayan veya sadece hammaddelerden yapılan)
+function isRawMaterial(productId) {
+  // Hammadde listesi: PRODUCT_RECIPES içinde başkalarının kullandığı ham girdiler
+  const rawIds = new Set();
+  Object.values(PRODUCT_RECIPES || {}).forEach(recipe => {
+    Object.keys(recipe).forEach(k => rawIds.add(k));
+  });
+  return rawIds.has(productId);
+}
+
+function acceptSupplierOrder(emailId) {
+  const e = state.inbox.find(x => x.id === emailId);
+  if (!e || e.answered) { toast('Sipariş bulunamadı veya zaten cevaplandı', 'error'); return; }
+  if (e.type !== 'supplier-order') return;
+  if (state.day > e.expiresDay) { toast('Siparişin süresi dolmuş', 'error'); return; }
+
+  // Stok yeterli mi kontrol et
+  for (const it of e.items) {
+    const have = state.inventory[it.productId] || 0;
+    if (have < it.qty) {
+      toast(`Yetersiz stok: ${it.name} (mevcut ${have}, gerekli ${it.qty})`, 'error');
+      return;
+    }
+  }
+
+  // Stoktan düş + parayı al
+  e.items.forEach(it => {
+    state.inventory[it.productId] -= it.qty;
+  });
+  earn(e.totalDeal, 'malzeme-satis');
+
+  // Tedarikçi sadakat puanı
+  if (!state.supplierLoyalty) state.supplierLoyalty = {};
+  state.supplierLoyalty[e.supplierId] = Math.min(100, (state.supplierLoyalty[e.supplierId] || 0) + 8);
+
+  e.answered = true;
+  e.acceptedDay = state.day;
+
+  // Arşive geçir
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx >= 0) {
+    state.archive.push({ ...e, status: 'supplier-order-fulfilled' });
+    state.inbox.splice(idx, 1);
+  }
+
+  toast(`✅ ${e.supplierName} siparişi karşılandı: +${fmt(e.totalDeal)} (kâr: +${fmt(e.profit)})`, 'success');
+  state.agenda.push(`🤝 ${e.supplierName} siparişi: +${fmt(e.totalDeal)} (${e.items.length} ürün)`);
+  addXP(15 + Math.round(e.profit / 5000), 'tedarikçi siparişi');
+  state.selectedEmail = null;
+  render();
+}
+
+function declineSupplierOrder(emailId) {
+  const idx = state.inbox.findIndex(x => x.id === emailId);
+  if (idx < 0) return;
+  const e = state.inbox[idx];
+  state.archive.push({ ...e, status: 'declined' });
+  state.inbox.splice(idx, 1);
+  state.selectedEmail = null;
+  toast('Tedarikçi siparişi reddedildi', 'info');
   render();
 }
 
@@ -9922,6 +10071,21 @@ function renderInbox() {
             </div>`;
           }
 
+          if (e.type === 'supplier-order') {
+            // Tedarikçi bizden toplu sipariş
+            const itemNames = (e.items || []).slice(0, 2).map(it => it.name).join(', ');
+            const more = (e.items || []).length > 2 ? ` +${e.items.length - 2}` : '';
+            return `<div class="email ${e.unread ? 'unread' : ''}" onclick="openEmail(${e.id})" style="border-left: 3px solid var(--green);">
+              <div class="top">
+                <span class="from">🤝 ${e.supplierName || 'Tedarikçi'} <span style="font-size: 10px; color: var(--ink-dim); font-weight: normal;">Bizden Sipariş</span></span>
+                <span class="date">Gün ${e.receivedDay}</span>
+              </div>
+              <div class="subject">${e.subject || 'Toplu Sipariş'}</div>
+              <div class="preview">${itemNames}${more} · <strong style="color: var(--green);">+${fmt(e.totalDeal || 0)}</strong> (kâr: +${fmt(e.profit || 0)})</div>
+              <div class="deadline">${expIn <= 0 ? 'BUGÜN SON GÜN!' : 'Cevap: ' + expIn + ' gün'}</div>
+            </div>`;
+          }
+
           if (e.type === 'construction-staff-alert') {
             // Şantiye kadro uyarısı
             const sites = e.sitesNeedingStaff || [];
@@ -10848,6 +11012,96 @@ function renderConstructionStaffAlertDetail(e) {
   </div>`;
 }
 
+// Tedarikçi sipariş maili detay sayfası (biz satıcıyız)
+function renderSupplierOrderDetail(e) {
+  const c = $('center');
+  const expIn = e.expiresDay - state.day;
+  const expired = expIn < 0;
+
+  // Mevcut stok kontrolü
+  const stockStatus = e.items.map(it => {
+    const have = state.inventory[it.productId] || 0;
+    return { ...it, have, sufficient: have >= it.qty };
+  });
+  const allSufficient = stockStatus.every(it => it.sufficient);
+
+  c.innerHTML = `<div style="max-width: 880px;">
+    <button class="btn" style="margin-bottom: 14px;" onclick="state.selectedEmail=null; render()">← Geri</button>
+
+    <div style="padding: 16px 18px; background: linear-gradient(180deg, rgba(34,197,94,0.06), transparent); border-left: 4px solid var(--green);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h2 style="margin: 0; color: var(--green); font-family: 'Bebas Neue'; letter-spacing: 2px;">🤝 ${(e.supplierName || 'Tedarikçi').toUpperCase()}</h2>
+          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 4px;">Bizden toplu sipariş talebi · ${e.items.length} kalem</div>
+        </div>
+        <div style="text-align: right; font-size: 11px;">
+          <div style="color: var(--ink-dim);">Geliş: Gün ${e.receivedDay}</div>
+          <div style="color: ${expIn <= 1 ? 'var(--red)' : 'var(--ink-dim)'};">Son: Gün ${e.expiresDay} ${expired ? '(SÜRESİ GEÇTİ)' : `(${expIn} gün)`}</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 18px;">${e.subject}</h3>
+    <div style="white-space: pre-line; padding: 12px; background: var(--panel-2); font-size: 12px; line-height: 1.7; margin: 8px 0 16px;">${e.body}</div>
+
+    <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 12px 0 8px;">📦 SİPARİŞ KALEMLERİ</h3>
+    <table class="data-table" style="width: 100%;">
+      <thead>
+        <tr>
+          <th>Ürün</th>
+          <th class="num">Talep</th>
+          <th class="num">Stoğum</th>
+          <th class="num">Piyasa</th>
+          <th class="num">Teklif Fiyat</th>
+          <th class="num">Fazlalık</th>
+          <th class="num">Toplam</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${stockStatus.map(it => `<tr style="${!it.sufficient ? 'background: rgba(239,68,68,0.08);' : ''}">
+          <td><strong>${it.name}</strong> <span style="color: var(--ink-dim); font-size: 10px;">(${it.unit})</span></td>
+          <td class="num">${it.qty.toLocaleString('tr-TR')}</td>
+          <td class="num" style="color: ${it.sufficient ? 'var(--green)' : 'var(--red)'}; font-weight: 700;">${it.have.toLocaleString('tr-TR')} ${it.sufficient ? '✓' : '⚠️'}</td>
+          <td class="num" style="color: var(--ink-dim);">${fmt(it.marketPrice)}</td>
+          <td class="num" style="color: var(--green); font-weight: 700;">${fmt(it.offerPrice)}</td>
+          <td class="num" style="color: var(--accent);">+%${it.premiumPct}</td>
+          <td class="num" style="font-weight: 700;">${fmt(it.total)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <div style="margin-top: 14px; padding: 14px 16px; background: var(--panel-2); border-left: 3px solid var(--green);">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span>Piyasa değerinden toplam:</span>
+        <strong style="color: var(--ink-dim);">${fmt(e.totalMarket)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span>Sipariş tutarı:</span>
+        <strong style="color: var(--accent); font-size: 18px;">${fmt(e.totalDeal)}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px dashed var(--border);">
+        <span style="color: var(--green);">Ekstra kâr:</span>
+        <strong style="color: var(--green);">+${fmt(e.profit)}</strong>
+      </div>
+    </div>
+
+    ${e.answered ? `<div style="margin-top: 14px; padding: 12px; background: var(--panel-2); border-left: 3px solid var(--ink-dim);">
+      ✓ Bu sipariş zaten karşılandı.
+    </div>` : expired ? `<div style="margin-top: 14px; padding: 12px; background: var(--panel-2); border-left: 3px solid var(--red); color: var(--red);">
+      ⚠️ Siparişin süresi geçti.
+    </div>` : !allSufficient ? `<div style="margin-top: 14px; padding: 12px; background: var(--panel-2); border-left: 3px solid var(--red);">
+      <strong style="color: var(--red);">⚠️ Yetersiz stok!</strong><br>
+      <span style="font-size: 11px;">Bazı ürünlerden talep edilen miktar yok. Önce malzeme alıp stokunu tamamla.</span>
+      <br><br>
+      <button class="btn" onclick="setView('market')">🛒 MALZEME PİYASASINA GİT</button>
+      <button class="btn danger" onclick="declineSupplierOrder(${e.id})">❌ REDDET</button>
+    </div>` : `<div style="display: flex; gap: 10px; margin-top: 14px;">
+      <button class="btn primary" style="flex: 1; padding: 12px; background: var(--green); border-color: var(--green); color: #fff; font-weight: 700;" onclick="acceptSupplierOrder(${e.id})">✅ KABUL ET (+${fmt(e.totalDeal)})</button>
+      <button class="btn danger" style="padding: 12px;" onclick="declineSupplierOrder(${e.id})">REDDET</button>
+    </div>`}
+  </div>`;
+}
+
 // Hammadde teklifi maili detay sayfası
 function renderRawOfferDetail(e) {
   const c = $('center');
@@ -10961,6 +11215,12 @@ function renderEmailDetail() {
   // Hammadde teklifi için ayrı sayfa
   if (e.type === 'raw-offer') {
     renderRawOfferDetail(e);
+    return;
+  }
+
+  // Tedarikçi siparişi (biz satıcıyız)
+  if (e.type === 'supplier-order') {
+    renderSupplierOrderDetail(e);
     return;
   }
 
@@ -18507,6 +18767,17 @@ function _nextDayInner() {
       continue;
     }
 
+    // Tedarikçi siparişi (supplier-order)
+    if (e.type === 'supplier-order') {
+      if (e.expiresDay < state.day) {
+        state.archive.push({ ...e, status: 'expired-supplier-order' });
+        state.agenda.push(`🤝 Tedarikçi siparişi süresi doldu: ${e.supplierName || 'Tedarikçi'} (+${fmt(e.totalDeal || 0)} kaçırıldı)`);
+      } else {
+        stillInbox.push(e);
+      }
+      continue;
+    }
+
     // Şantiye kadro uyarı maili
     if (e.type === 'construction-staff-alert') {
       if (e.expiresDay < state.day) {
@@ -18992,6 +19263,19 @@ function _nextDayInner() {
       }
     } catch (e) {
       console.warn('Hammadde teklif maili hatası (atlandı):', e);
+    }
+  }
+
+  // 7a-2b) Tedarikçi siparişi — bir tedarikçi bizden toplu mal almak istiyor (%15 şans)
+  if (Math.random() < 0.15) {
+    try {
+      const order = generateSupplierOrder();
+      if (order) {
+        state.inbox.push(order);
+        toast(`🤝 ${order.supplierName} bizden ${order.items.length} kalem sipariş istiyor`, 'info');
+      }
+    } catch (e) {
+      console.warn('Tedarikçi sipariş maili hatası (atlandı):', e);
     }
   }
 
@@ -20094,10 +20378,27 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.98';
+const CURRENT_VERSION = 'v1.99';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.99',
+    date: '24 Mayıs 2026',
+    title: 'TEDARİKÇİ SİPARİŞLERİ — BİZ SATICIYIZ!',
+    items: [
+      { cat: 'major', text: '🤝 <strong>Tedarikçiler bizden toplu sipariş veriyor</strong> — yeni mail türü' },
+      { cat: 'feature', text: 'Sistem her gün %15 şansla tedarikçi siparişi maili oluşturur' },
+      { cat: 'feature', text: 'Tedarikçinin katalogundan SADECE BİZİM STOKUMUZDA OLAN ürünler talep edilir' },
+      { cat: 'feature', text: '1-3 farklı ürün, stoğumuzun %20-60\'ı kadar miktar' },
+      { cat: 'feature', text: 'Tedarikçinin teklif fiyatı: <strong>piyasa fiyatının %5-15 fazlası</strong> (ekstra kâr)' },
+      { cat: 'feature', text: 'Detay sayfasında: ürün listesi, stok durumu (✓/⚠️), piyasa vs teklif karşılaştırma' },
+      { cat: 'feature', text: 'Yetersiz stok varsa kabul edilemez — piyasaya yönlendirme butonu' },
+      { cat: 'feature', text: 'Kabul edilince stoktan düşer, kasaya para girer, tedarikçi sadakat puanı +8' },
+      { cat: 'feature', text: 'Süre dolarsa otomatik arşive geçer (2-5 gün geçerlilik)' },
+      { cat: 'info', text: 'Strateji: stokunu fazla tut → daha çok sipariş gel → ekstra kâr' }
+    ]
+  },
   {
     version: 'v1.98',
     date: '24 Mayıs 2026',

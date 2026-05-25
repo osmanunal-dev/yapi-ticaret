@@ -16687,10 +16687,11 @@ function renderConstructionProjects() {
   }
 
   // Aktif projeleri listele
-  let body = '';
+  let activeHtml = '';
+  let completedHtml = '';
 
   if (activeProjects.length > 0) {
-    body += `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 8px 0; color: #a855f7;">🏗 AKTİF PROJELER (${activeProjects.length})</h3>
+    activeHtml += `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 8px 0; color: #a855f7;">🏗 AKTİF PROJELER (${activeProjects.length})</h3>
     <div class="grid-2">`;
 
     activeProjects.forEach(l => {
@@ -16707,7 +16708,7 @@ function renderConstructionProjects() {
       const bonuses = (typeof getConstructionBonuses === 'function') ? getConstructionBonuses(l.id) : { chiefBonus: 0, masterBonus: 0, engineerBonus: 0 };
       const hasStaff = bonuses.chief || bonuses.masters.length > 0 || bonuses.engineer || bonuses.manager;
 
-      body += `<div class="card" style="border-left: 3px solid #a855f7;">
+      activeHtml += `<div class="card" style="border-left: 3px solid #a855f7;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
           <div>
             <h3 style="margin: 0;">${ilce.name} · ${t.name}</h3>
@@ -16748,12 +16749,12 @@ function renderConstructionProjects() {
       </div>`;
     });
 
-    body += `</div>`;
+    activeHtml += `</div>`;
   }
 
   // Tamamlanmış ama satılan/kiralanan daireler olan binalar
   if (completedNotArchived.length > 0) {
-    body += `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 18px 0 8px; color: var(--green);">✅ TAMAMLANAN — SATIŞA ÇIKAN (${completedNotArchived.length})</h3>
+    completedHtml += `<h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 8px 0; color: var(--green);">✅ TAMAMLANAN — SATIŞA ÇIKAN (${completedNotArchived.length})</h3>
     <div class="grid-2">`;
 
     completedNotArchived.forEach(l => {
@@ -16765,7 +16766,7 @@ function renderConstructionProjects() {
       const sold = apts.filter(a => a.status === 'sold').length;
       const rented = apts.filter(a => a.status === 'rented').length;
 
-      body += `<div class="card" style="border-left: 3px solid var(--green);">
+      completedHtml += `<div class="card" style="border-left: 3px solid var(--green);">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
           <div>
             <h3 style="margin: 0;">${ilce.name} · ${t.name}</h3>
@@ -16777,10 +16778,15 @@ function renderConstructionProjects() {
       </div>`;
     });
 
-    body += '</div>';
+    completedHtml += '</div>';
   }
 
-  c.innerHTML += body;
+  // Önce TAMAMLANANLAR (öncelikli — daire satışı için aksiyon gerekir), sonra AKTİF projeler
+  // Aralarına margin ekle
+  if (completedHtml && activeHtml) {
+    activeHtml = `<div style="margin-top: 18px;">${activeHtml}</div>`;
+  }
+  c.innerHTML += completedHtml + activeHtml;
 }
 
 function renderConstructionContracts() {
@@ -20088,10 +20094,20 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.97';
+const CURRENT_VERSION = 'v1.98';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.98',
+    date: '24 Mayıs 2026',
+    title: 'TAMAMLANAN PROJELER ÜSTTE',
+    items: [
+      { cat: 'major', text: '🔝 <strong>Devam Eden Projeler sayfasında "Tamamlanan – Satışa Çıkan" projeler en üste alındı</strong>' },
+      { cat: 'feature', text: 'Aksiyon gerektiren tamamlanmış projeler (daire satışı, kiralama) ilk önce görünür' },
+      { cat: 'feature', text: 'Devam eden inşaatlar altta (zaten otomatik ilerliyor)' }
+    ]
+  },
   {
     version: 'v1.97',
     date: '24 Mayıs 2026',

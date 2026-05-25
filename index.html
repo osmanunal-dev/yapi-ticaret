@@ -8836,31 +8836,20 @@ function declineRawMaterialOffer(emailId) {
 // ============================================================
 
 function generateSupplierOrder() {
-  // Rastgele tedarikçi seç (hammadde tedarikçileri hariç — onlar zaten hammadde satıyor)
-  const eligible = SUPPLIERS.filter(s => {
-    // Sadece bitmiş ürün satan tedarikçiler (hammadde değil)
-    const products = s.products.filter(pid => {
-      const p = PRODUCTS[pid];
-      return p && !PRODUCT_RECIPES[pid] === false; // bitmiş ürünleri al
-    });
-    return products.length > 0;
-  });
-
-  // Daha basit yaklaşım: tedarikçinin katalogunda BASE_PRICE'ı olan ürünler (bitmiş ürünler)
+  // Tedarikçi seç: katalogunda bitmiş ürün (hammadde olmayan) satan
   const supplier = choice(SUPPLIERS.filter(s => {
     return s.products.some(pid => BASE_PRICE[pid] && PRODUCTS[pid] && !isRawMaterial(pid));
   }));
   if (!supplier) return null;
 
-  // Tedarikçinin kataloğundan bizim STOKUMUZDA da olan ürünleri filtrele
+  // Tedarikçinin kataloğundan bitmiş ürünleri filtrele (stok gerekmiyor — yetersizse uyarır)
   const candidates = supplier.products.filter(pid => {
     if (!BASE_PRICE[pid] || !PRODUCTS[pid]) return false;
     if (isRawMaterial(pid)) return false;
-    // Stokta yeterli var mı? (minimum ölçüt: 1 birim)
-    return (state.inventory[pid] || 0) >= 1;
+    return true;
   });
 
-  if (candidates.length === 0) return null; // Hiç stoğumuz yoksa teklif gelmez
+  if (candidates.length === 0) return null;
 
   // 1-3 ürün seç
   const numItems = Math.min(candidates.length, 1 + Math.floor(Math.random() * 3));
@@ -8871,11 +8860,26 @@ function generateSupplierOrder() {
     const p = PRODUCTS[pid];
     const ourStock = state.inventory[pid] || 0;
     const marketPrice = BASE_PRICE[pid];
-    // Talep edilen miktar: stoğumuzun %20-60'ı (büyük sipariş ama hep tüketmesin)
-    const requestedPct = 0.20 + Math.random() * 0.40;
-    const requestedQty = Math.max(1, Math.floor(ourStock * requestedPct));
+
+    // Talep edilen miktar:
+    // - Stoğumuz varsa: stoğun %20-60'ı (mevcut stoktan satabileceğimiz miktar)
+    // - Stoğumuz yoksa: piyasadan alabilecek mantıklı bir toplu miktar (ürüne göre)
+    let requestedQty;
+    if (ourStock >= 10) {
+      const requestedPct = 0.20 + Math.random() * 0.40;
+      requestedQty = Math.max(10, Math.floor(ourStock * requestedPct));
+    } else {
+      // Stoğumuz yok ya da çok az → mantıklı bir miktar
+      // Birim fiyatı düşük olanlardan daha çok (çuval/m³/adet)
+      // Pahalı olanlardan az (ton/kova vb)
+      if (marketPrice < 100) requestedQty = 500 + Math.floor(Math.random() * 5000); // çuval, adet
+      else if (marketPrice < 1000) requestedQty = 50 + Math.floor(Math.random() * 500); // m³, kova
+      else if (marketPrice < 10000) requestedQty = 20 + Math.floor(Math.random() * 100); // metre, m²
+      else requestedQty = 5 + Math.floor(Math.random() * 50); // ton
+    }
+
     if (requestedQty < 1) return;
-    // Tedarikçinin önerdiği fiyat: piyasanın %5-15 fazlası (bizi cazip kılmak için)
+    // Tedarikçinin önerdiği fiyat: piyasanın %5-15 fazlası
     const premiumPct = 0.05 + Math.random() * 0.10;
     const offerPrice = Math.round(marketPrice * (1 + premiumPct));
     items.push({
@@ -8895,12 +8899,12 @@ function generateSupplierOrder() {
   const totalDeal = items.reduce((s, i) => s + i.total, 0);
   const totalMarket = items.reduce((s, i) => s + i.marketPrice * i.qty, 0);
   const profit = totalDeal - totalMarket;
-  const expDays = 2 + Math.floor(Math.random() * 4); // 2-5 gün geçerli
+  const expDays = 2 + Math.floor(Math.random() * 4);
 
   return {
     id: ++_emailIdCounter,
     type: 'supplier-order',
-    branch: 'store',     // 🏪 mağaza maili
+    branch: 'store',
     supplierId: supplier.id,
     supplierName: supplier.name,
     items,
@@ -8910,7 +8914,7 @@ function generateSupplierOrder() {
     receivedDay: state.day,
     expiresDay: state.day + expDays,
     subject: `🤝 ${supplier.name} — Bizden Toplu Sipariş Talebi`,
-    body: `Sayın yetkili,\n\n${supplier.name} olarak müşterilerimize tedarik etmek üzere stoğunuzdan satın almak istiyoruz:\n\n${items.map(it => `• ${it.name}: ${it.qty.toLocaleString('tr-TR')} ${it.unit} × ${fmt(it.offerPrice)}/${it.unit} (piyasa: ${fmt(it.marketPrice)}, %${it.premiumPct} fazlası) = ${fmt(it.total)}`).join('\n')}\n\nToplam teklif: ${fmt(totalDeal)}\nPiyasa değeri: ${fmt(totalMarket)}\nEkstra kâr: +${fmt(profit)}\nGeçerlilik: ${expDays} gün\n\nKabul ederseniz stoktan anında düşülür, ödeme hesabınıza yatırılır.`,
+    body: `Sayın yetkili,\n\n${supplier.name} olarak müşterilerimize tedarik etmek üzere şu ürünleri satın almak istiyoruz:\n\n${items.map(it => `• ${it.name}: ${it.qty.toLocaleString('tr-TR')} ${it.unit} × ${fmt(it.offerPrice)}/${it.unit} (piyasa: ${fmt(it.marketPrice)}, %${it.premiumPct} fazlası) = ${fmt(it.total)}`).join('\n')}\n\nToplam teklif: ${fmt(totalDeal)}\nPiyasa değeri: ${fmt(totalMarket)}\nEkstra kâr: +${fmt(profit)}\nGeçerlilik: ${expDays} gün\n\nKabul ederseniz stoktan anında düşülür, ödeme hesabınıza yatırılır.`,
     unread: true,
     answered: false
   };
@@ -19253,8 +19257,8 @@ function _nextDayInner() {
     }
   }
 
-  // 7a-2) Hammadde tedarikçilerinden fabrikaya teklif maili — fabrika varsa, %12 şans
-  if ((state.factories || []).length > 0 && Math.random() < 0.12) {
+  // 7a-2) Hammadde tedarikçilerinden fabrikaya teklif maili — sadece fabrika varsa, %5 şans (seyrek)
+  if ((state.factories || []).length > 0 && Math.random() < 0.05) {
     try {
       const offer = generateRawMaterialOffer();
       if (offer) {
@@ -19266,13 +19270,22 @@ function _nextDayInner() {
     }
   }
 
-  // 7a-2b) Tedarikçi siparişi — bir tedarikçi bizden toplu mal almak istiyor (%15 şans)
-  if (Math.random() < 0.15) {
+  // 7a-2b) Tedarikçi siparişi — bir tedarikçi bizden toplu mal almak istiyor (%40 şans + 1-2 sipariş)
+  if (Math.random() < 0.40) {
     try {
-      const order = generateSupplierOrder();
-      if (order) {
-        state.inbox.push(order);
-        toast(`🤝 ${order.supplierName} bizden ${order.items.length} kalem sipariş istiyor`, 'info');
+      // İlk sipariş
+      const order1 = generateSupplierOrder();
+      if (order1) {
+        state.inbox.push(order1);
+        toast(`🤝 ${order1.supplierName} bizden ${order1.items.length} kalem sipariş istiyor (+${fmt(order1.totalDeal)})`, 'info');
+      }
+      // %30 şansla ikinci sipariş daha (farklı tedarikçiden)
+      if (Math.random() < 0.30) {
+        const order2 = generateSupplierOrder();
+        if (order2 && (!order1 || order2.supplierId !== order1.supplierId)) {
+          state.inbox.push(order2);
+          toast(`🤝 ${order2.supplierName} de bizden sipariş istiyor (+${fmt(order2.totalDeal)})`, 'info');
+        }
       }
     } catch (e) {
       console.warn('Tedarikçi sipariş maili hatası (atlandı):', e);
@@ -20378,10 +20391,26 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.99';
+const CURRENT_VERSION = 'v2.00';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v2.00',
+    date: '24 Mayıs 2026',
+    title: 'TEDARİKÇİ SİPARİŞLERİ ARTIRILDI 🎉 v2.00',
+    items: [
+      { cat: 'major', text: '📈 <strong>Tedarikçi siparişi şansı %15 → %40\'a yükseltildi</strong>' },
+      { cat: 'feature', text: '%30 ek şansla <strong>günde 2 sipariş</strong> birden gelebilir (farklı tedarikçilerden)' },
+      { cat: 'major', text: '🔻 <strong>Hammadde teklif şansı %12 → %5</strong>: artık seyrek gelir (sadece fabrikalılar için)' },
+      { cat: 'feature', text: 'Tedarikçi siparişi artık <strong>stoğumuz olmasa da gelir</strong> — piyasaya gidip alıp kabul edebilirsin' },
+      { cat: 'feature', text: 'Stoğumuz yoksa mantıklı toplu miktar talep edilir (ürünün birim fiyatına göre)' },
+      { cat: 'feature', text: 'Düşük fiyatlı ürün (çuval): 500-5.500 adet talep' },
+      { cat: 'feature', text: 'Orta fiyatlı (m³, kova): 50-550 talep' },
+      { cat: 'feature', text: 'Yüksek fiyatlı (ton): 5-55 talep' },
+      { cat: 'feature', text: 'Yetersiz stokta sipariş gelirse: detay sayfasında ⚠️ kırmızı + "Piyasaya git" butonu' }
+    ]
+  },
   {
     version: 'v1.99',
     date: '24 Mayıs 2026',

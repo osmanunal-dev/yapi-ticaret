@@ -14495,8 +14495,9 @@ function branchDailyRetailSale(br) {
   const ilce = ILCELER[br.ilce];
   if (!ilce) return 0;
 
-  // Base günlük talep: m²Price'a göre
-  const baseDaily = 200 + Math.round(ilce.m2Price * 0.005); // ₺290-₺800
+  // Base günlük talep: ilçenin m²Price'ına göre (yoğun, varlıklı ilçelerde daha çok müşteri)
+  // Esenyurt (₺18K m²): ₺2.4K/gün · Beşiktaş (₺120K m²): ₺7.5K/gün · Maslak (₺220K m²): ₺12.5K/gün
+  const baseDaily = 1500 + Math.round(ilce.m2Price * 0.05);
   // Müdür bonus
   const mgr = br.staff.manager;
   const mgrBonus = BRANCH_ROLES.manager.bonusPerLevel[mgr.level - 1] || 0;
@@ -14505,7 +14506,7 @@ function branchDailyRetailSale(br) {
   (br.staff.cashiers || []).forEach(c => {
     cashierBonus += BRANCH_ROLES.cashier.bonusPerLevel[c.level - 1] || 0;
   });
-  // Hesap
+  // Hesap: base × (1 + müdür) × (1 + birikmiş kasiyer)
   const expected = Math.round(baseDaily * (1 + mgrBonus) * (1 + cashierBonus));
   // ±%20 dalgalanma
   return Math.round(expected * (0.8 + Math.random() * 0.4));
@@ -14537,19 +14538,20 @@ function processDailyBranchRetail() {
       // Stokta olan ürünleri bul
       const stockItems = Object.entries(br.inventory).filter(([_, q]) => q > 0);
       if (stockItems.length > 0) {
-        // Depo görevlisi başına: günde 1-3 ürün, %1-3 stoktan satış
+        // Depo görevlisi başına: günde 2-4 ürün, %2-5 stoktan satış
         warehousers.forEach(w => {
           const bonus = BRANCH_ROLES.warehouser.bonusPerLevel[w.level - 1] || 0;
-          const numProds = 1 + Math.floor(Math.random() * 2); // 1-2 ürün/gün
+          const numProds = 2 + Math.floor(Math.random() * 3); // 2-4 ürün/gün
           for (let i = 0; i < numProds && stockItems.length > 0; i++) {
             const [pid, qty] = stockItems[Math.floor(Math.random() * stockItems.length)];
             const p = PRODUCTS[pid];
             if (!p) continue;
-            // Sat: stoğun %0.5 - %2'si
-            const sellPct = 0.005 + Math.random() * 0.015 + bonus * 0.5;
+            // Sat: stoğun %2 - %5'i + bonus
+            const sellPct = 0.02 + Math.random() * 0.03 + bonus * 0.4;
             const sellQty = Math.max(1, Math.floor(qty * sellPct));
             if (sellQty > qty || sellQty <= 0) continue;
-            const price = BASE_PRICE[pid] || 0;
+            // Şubede satış: piyasa fiyatından %10-20 fazla (perakende mark-up)
+            const price = Math.round((BASE_PRICE[pid] || 0) * (1.10 + Math.random() * 0.10));
             const saleAmt = sellQty * price;
             if (saleAmt <= 0) continue;
             br.inventory[pid] = qty - sellQty;
@@ -14592,7 +14594,95 @@ function openBranch(ilceId) {
     toast(`Yetersiz para. Açılış için ${fmt(cost)} gerekli.`, 'error');
     return;
   }
-  if (!confirm(`${ilce.name}'de yeni şube açılsın mı?\n\nAçılış: ${fmt(cost)}\nAylık kira: ${fmt(branchMonthlyRent(ilceId))}\nAylık opex: ${fmt(branchMonthlyOpex(ilceId))}`)) return;
+  // Onay modalı aç
+  _openBranchConfirmModal(ilceId);
+}
+
+function _openBranchConfirmModal(ilceId) {
+  const ilce = ILCELER[ilceId];
+  const cost = branchOpenCost(ilceId);
+  const rent = branchMonthlyRent(ilceId);
+  const opex = branchMonthlyOpex(ilceId);
+  const monthlyCost = rent + opex;
+  const tier = ilce.m2Price < 30000 ? '🟢 Ucuz Bölge' : ilce.m2Price < 80000 ? '🟡 Orta Bölge' : '🔴 Premium Bölge';
+  const tierColor = ilce.m2Price < 30000 ? 'var(--green)' : ilce.m2Price < 80000 ? '#f59e0b' : 'var(--red)';
+  // Beklenen aylık ciro (Sv1 müdür ile)
+  const baseDailyRev = 1500 + Math.round(ilce.m2Price * 0.05);
+  const monthlyExpected = Math.round(baseDailyRev * 1.20 * 30); // Sv1 müdür: +%20
+  const netExpected = monthlyExpected - monthlyCost;
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 560px;">
+      <h2 style="margin: 0 0 4px; color: var(--accent);">🏪 YENİ ŞUBE AÇ</h2>
+      <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 16px;">${ilce.name} ilçesinde mağaza şubesi açılışı</div>
+
+      <div style="padding: 14px 16px; background: var(--panel-2); border-left: 3px solid ${tierColor}; margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 14px; font-weight: 700;">${ilce.name}</div>
+            <div style="font-size: 10px; color: var(--ink-dim);">${ilce.side === 'A' ? 'Anadolu' : 'Avrupa'} yakası · ${ilce.km} km uzaklık</div>
+          </div>
+          <div style="font-size: 11px; padding: 4px 10px; background: var(--bg); border-radius: 3px; color: ${tierColor}; font-weight: 700;">${tier}</div>
+        </div>
+        <div style="margin-top: 10px; font-size: 11px; color: var(--ink-dim);">
+          m² fiyatı: <strong style="color: var(--ink);">${fmt(ilce.m2Price)}</strong>
+        </div>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 14px 0 8px; font-size: 14px;">💰 MALİYETLER</h3>
+      <div style="padding: 12px 14px; background: var(--panel-2); font-size: 12px; line-height: 2;">
+        <div style="display: flex; justify-content: space-between;">
+          <span>Tek seferlik açılış:</span>
+          <strong style="color: var(--accent); font-size: 14px;">${fmt(cost)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 6px;">
+          <span style="color: var(--ink-dim);">Aylık kira:</span>
+          <span>${fmt(rent)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Aylık opex (elektrik, su, bakım):</span>
+          <span>${fmt(opex)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px;">
+          <span><strong>Aylık toplam gider:</strong></span>
+          <strong style="color: var(--red);">-${fmt(monthlyCost)}</strong>
+        </div>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 14px 0 8px; font-size: 14px;">📊 TAHMİN</h3>
+      <div style="padding: 12px 14px; background: var(--panel-2); font-size: 12px; line-height: 1.8;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Beklenen aylık ciro (Sv1 müdür ile):</span>
+          <strong style="color: var(--green);">+${fmt(monthlyExpected)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Tahmini aylık net (yalın kadro):</span>
+          <strong style="color: ${netExpected >= 0 ? 'var(--green)' : 'var(--red)'};">${netExpected >= 0 ? '+' : ''}${fmt(netExpected)}</strong>
+        </div>
+        <div style="font-size: 10px; color: var(--ink-dim); margin-top: 6px; line-height: 1.6;">
+          💡 Tahmin sadece müdür kadrosuna göre. Kasiyer + depo görevlisi eklerseniz ciro 2-4 kata çıkar. Ayrıca <strong>${ilce.name}</strong> müşterilerinden +%30 ihale şansı kazanırsınız.
+        </div>
+      </div>
+
+      <div style="margin-top: 12px; padding: 10px 12px; background: var(--bg); font-size: 11px; color: var(--ink-dim);">
+        💰 Kasa: <strong style="color: var(--ink);">${fmt(state.cash)}</strong> · Açılıştan sonra kalacak: <strong style="color: ${state.cash - cost > 0 ? 'var(--green)' : 'var(--red)'};">${fmt(state.cash - cost)}</strong>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button class="btn" style="flex: 1;" onclick="closeModal()">İPTAL</button>
+        <button class="btn primary" style="flex: 2; background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700;" onclick="_confirmOpenBranch('${ilceId}')">🏪 ŞUBE AÇ (${fmt(cost)})</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function _confirmOpenBranch(ilceId) {
+  const ilce = ILCELER[ilceId];
+  if (!ilce) return;
+  const cost = branchOpenCost(ilceId);
+  if (state.cash < cost) { toast('Kasada yeterli para yok', 'error'); closeModal(); return; }
 
   spend(cost, 'sube-acilis');
   if (!Array.isArray(state.branches)) state.branches = [];
@@ -14620,15 +14710,95 @@ function openBranch(ilceId) {
   addXP(50 + Math.round(cost / 100000), 'şube açtın');
   toast(`🏪 ${ilce.name} Şubesi açıldı!`, 'success');
   state.agenda.push(`🏪 Yeni şube: ${ilce.name} (${fmt(cost)})`);
+  closeModal();
+  // ŞUBELERİM sekmesine geç (kullanıcı yeni şubeyi görsün)
+  _branchesTab = 'list';
   render();
 }
 
 function closeBranch(branchId) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br) return;
+  _openCloseBranchConfirmModal(branchId);
+}
+
+function _openCloseBranchConfirmModal(branchId) {
+  const br = (state.branches || []).find(b => b.id === branchId);
+  if (!br) return;
+  const ilce = ILCELER[br.ilce];
+  const sellPrice = Math.round(br.purchasePrice * 0.6);
+  const loss = br.purchasePrice - sellPrice;
+
+  // Kadro & envanter durumu
+  const staff = br.staff || { manager: null, cashiers: [], warehousers: [] };
+  const staffCount = (staff.manager ? 1 : 0) + (staff.cashiers?.length || 0) + (staff.warehousers?.length || 0);
+  const inv = br.inventory || {};
+  const stockItems = Object.entries(inv).filter(([_, q]) => q > 0);
+  let stockValue = 0;
+  let totalStockQty = 0;
+  stockItems.forEach(([pid, qty]) => {
+    stockValue += (BASE_PRICE[pid] || 0) * qty;
+    totalStockQty += qty;
+  });
+
+  const monthsOpen = Math.max(1, Math.floor((state.day - br.openedDay) / 30));
+
+  const html = `<div class="modal-bg" onclick="if(event.target===this) closeModal()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 540px;">
+      <h2 style="margin: 0 0 4px; color: var(--red);">⚠️ ŞUBE KAPAT</h2>
+      <div style="font-size: 11px; color: var(--ink-dim); margin-bottom: 14px;">${br.name} kalıcı olarak kapatılacak</div>
+
+      <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 14px; font-weight: 700;">🏪 ${br.name}</div>
+            <div style="font-size: 10px; color: var(--ink-dim);">📍 ${ilce?.name || br.ilce} · ${monthsOpen} ay aktif</div>
+          </div>
+          <div style="text-align: right; font-size: 10px;">
+            <div style="color: var(--ink-dim);">Toplam ciro</div>
+            <div style="color: var(--green); font-weight: 700;">${fmt(br.totalRevenue || 0)}</div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 14px 0 8px; font-size: 14px;">💰 GERİ KAZANÇ</h3>
+      <div style="padding: 12px 14px; background: var(--panel-2); font-size: 12px; line-height: 1.8;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Açılış maliyeti:</span>
+          <span style="text-decoration: line-through; color: var(--ink-dim);">${fmt(br.purchasePrice)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span>Geri kazanç (%60):</span>
+          <strong style="color: var(--accent); font-size: 14px;">${fmt(sellPrice)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 6px;">
+          <span style="color: var(--red);">Zarar:</span>
+          <strong style="color: var(--red);">-${fmt(loss)}</strong>
+        </div>
+      </div>
+
+      <h3 style="font-family: 'Bebas Neue'; letter-spacing: 2px; margin: 14px 0 8px; font-size: 14px;">📦 KAYIPLAR & TRANSFER</h3>
+      <div style="padding: 12px 14px; background: var(--panel-2); font-size: 11px; line-height: 1.7;">
+        <div>👥 <strong>${staffCount} personel</strong> ${staffCount > 0 ? 'işten çıkarılacak' : '— kadroda kimse yok'}</div>
+        ${stockItems.length > 0 ? `<div>📦 <strong>${stockItems.length} üründen ${totalStockQty.toLocaleString('tr-TR')} adet</strong> ana depoya transfer edilecek <span style="color: var(--green);">(değer: ${fmt(stockValue)})</span></div>` : '<div>📦 Envanter boş</div>'}
+        <div>🔒 Bu işlem <strong style="color: var(--red);">geri alınamaz</strong></div>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button class="btn" style="flex: 1;" onclick="closeModal()">İPTAL</button>
+        <button class="btn danger" style="flex: 2;" onclick="_confirmCloseBranch('${branchId}')">⚠️ KAPATMAYI ONAYLA</button>
+      </div>
+    </div>
+  </div>`;
+
+  $('modals').innerHTML = html;
+}
+
+function _confirmCloseBranch(branchId) {
   const idx = (state.branches || []).findIndex(b => b.id === branchId);
-  if (idx < 0) return;
+  if (idx < 0) { closeModal(); return; }
   const br = state.branches[idx];
-  const sellPrice = Math.round(br.purchasePrice * 0.6); // %60 geri al
-  if (!confirm(`${br.name} kapatılsın mı?\n\nGeri kazanç: ${fmt(sellPrice)} (%60 değer)\nKadrodaki personel işten çıkarılır.\nEnvanter ana depoya transfer edilir.`)) return;
+  const sellPrice = Math.round(br.purchasePrice * 0.6);
 
   // Envanteri ana depoya transfer et
   let transferred = 0;
@@ -14643,8 +14813,9 @@ function closeBranch(branchId) {
 
   earn(sellPrice, 'sube-satis');
   state.branches.splice(idx, 1);
-  toast(`🏪 ${br.name} kapatıldı (${fmt(sellPrice)} alındı, ${transferred} adet ürün ana depoya geçti)`, 'info');
+  toast(`🏪 ${br.name} kapatıldı (${fmt(sellPrice)} alındı${transferred > 0 ? `, ${transferred} adet ürün ana depoya geçti` : ''})`, 'info');
   state.agenda.push(`🏪 ${br.name} kapatıldı: ${fmt(sellPrice)}`);
+  closeModal();
   render();
 }
 
@@ -19917,10 +20088,41 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.95';
+const CURRENT_VERSION = 'v1.97';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.97',
+    date: '24 Mayıs 2026',
+    title: 'ŞUBE GELİRLERİ ARTIRILDI — KÂRA GEÇİŞ',
+    items: [
+      { cat: 'major', text: '💰 <strong>Şube günlük perakende geliri 10x artırıldı</strong> — artık premium şubeler kâr ediyor' },
+      { cat: 'feature', text: 'Yeni formül: <code>1500 + m²Price × 0.05</code> (eskiden: 200 + m²Price × 0.005)' },
+      { cat: 'feature', text: 'Esenyurt (₺18K m²): ₺2.400/gün base · Beşiktaş (₺120K): ₺7.500 · Maslak (₺220K): ₺12.500' },
+      { cat: 'major', text: '📦 <strong>Depo görevlisi stok satışı 4-5x artırıldı</strong>' },
+      { cat: 'feature', text: 'Stok satış oranı: %0.5-2 → %2-5 + bonus' },
+      { cat: 'feature', text: 'Şube perakende fiyatı: piyasa fiyatı + %10-20 mark-up (perakende kârı)' },
+      { cat: 'feature', text: 'Günlük ürün sayısı: 1-2 → 2-4' },
+      { cat: 'info', text: 'Maslak premium şube örnek (full kadro): ~₺2.5M ciro · ₺1.3M gider · <strong>+₺1.2M net/ay</strong>' },
+      { cat: 'info', text: 'Esenyurt ucuz şube: Sv1 müdür ile zarar bile etse, Sv2+kasiyer ile kâra geçer' }
+    ]
+  },
+  {
+    version: 'v1.96',
+    date: '24 Mayıs 2026',
+    title: 'ŞUBE AÇMA VE KAPATMA MODAL FORMLARI',
+    items: [
+      { cat: 'major', text: '🎨 <strong>Şube açma onayı modal forma çevrildi</strong> — çirkin browser popup yerine şık panel' },
+      { cat: 'feature', text: 'Şube açma modalı: ilçe bilgisi (tier rozeti), maliyetler tablosu, beklenen aylık ciro tahmini' },
+      { cat: 'feature', text: 'Açılıştan sonra kasada kalacak para gösterimi (yeşil/kırmızı)' },
+      { cat: 'feature', text: 'Beklenen aylık net ciro hesabı (Sv1 müdür ile)' },
+      { cat: 'major', text: '🎨 <strong>Şube kapatma onayı modal forma çevrildi</strong>' },
+      { cat: 'feature', text: 'Kapatma modalı: geri kazanç tablosu, zarar, personel + envanter kayıpları' },
+      { cat: 'feature', text: 'Stok değer hesabı: kapanırken ana depoya transfer edilecek envanter' },
+      { cat: 'feature', text: 'Şube açıldıktan sonra otomatik ŞUBELERİM sekmesine dön' }
+    ]
+  },
   {
     version: 'v1.95',
     date: '24 Mayıs 2026',

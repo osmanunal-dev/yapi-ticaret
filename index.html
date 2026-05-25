@@ -2721,6 +2721,9 @@
         <div class="nav-item" data-view="fleet" onclick="setView('fleet')">
           <span>🚛 Filo & Sevkiyat</span><span class="badge info" id="badge-fleet" style="display:none">0</span>
         </div>
+        <div class="nav-item" data-view="branches" onclick="setView('branches')">
+          <span>🏪 Şubelerim</span><span class="badge info" id="badge-branches" style="display:none">0</span>
+        </div>
       </div>
 
       <!-- 🏗 İNŞAAT İŞ KOLU -->
@@ -8231,6 +8234,8 @@ const state = {
   dispatchers: [],    // Sevkiyat Sorumlusu: { id, name, salary, level, xp, hireDay, busyUntil, totalDispatches }
   accountants: [],    // Muhasebeci: { id, name, salary, level, xp, hireDay, totalCollected, totalCollectionCount }
   constructionStaff: [], // 🏗 Şantiye personeli: { id, role:'chief'|'master'|'engineer'|'manager', name, salary, level, xp, hireDay, assignedLandId, branch:'construction' }
+  branches: [], // 🏪 Mağaza şubeleri: { id, ilce, name, openedDay, purchasePrice, monthlyRent, monthlyOpex, inventory:{}, staff:{manager,cashiers:[],warehousers:[]}, totalRevenue, monthlySales, branch:'store' }
+  lastBranchPayment: 0, // Şubelerin son aylık ödeme günü
 
   // Günlük muhasebe defteri (income/expense kayıtları)
   // { day, type: 'income'|'expense', category, amount, description }
@@ -8562,6 +8567,10 @@ const CATEGORY_BRANCH = {
   'dis-nakliye': 'store',
   'tahsilat': 'store',
   'bayilik-teminat': 'store',
+  'sube-acilis': 'store',
+  'sube-kira': 'store',
+  'sube-satis': 'store',
+  'sube-opex': 'store',
   // 💰 Genel (banka, kredi, kart, vergi, ceza, maaş, araç vs.) → store'a koyalım çünkü ana iş yeri
   // (gelecek: özellikle genel olabilir — şimdilik store)
 };
@@ -9645,6 +9654,7 @@ function _renderInner() {
   else if (state.view === 'suppliers') renderSuppliers();
   else if (state.view === 'contracts') renderContractsView();
   else if (state.view === 'fleet') renderFleet();
+  else if (state.view === 'branches') renderBranches();
   else if (state.view === 'hr') renderHR();
   else if (state.view === 'customers') renderCustomers();
   else if (state.view === 'visits') renderVisits();
@@ -12383,6 +12393,167 @@ function closeReceipt() {
 // Filo görünümü için aktif sekme state'i (sadece UI)
 let _fleetTab = 'mine';
 
+// 🏪 Şubelerim sayfası
+let _branchesTab = 'list'; // 'list' veya 'open'
+
+function renderBranches() {
+  const c = $('center');
+  const branches = state.branches || [];
+
+  // Stat hesapları
+  const totalMonthlyRent = branches.reduce((s, b) => s + (b.monthlyRent || 0), 0);
+  const totalMonthlyOpex = branches.reduce((s, b) => s + (b.monthlyOpex || 0), 0);
+  const totalRevenue = branches.reduce((s, b) => s + (b.totalRevenue || 0), 0);
+  const totalAyMonthSales = branches.reduce((s, b) => s + (b.monthlyRevenue || 0), 0);
+  const nextPayDay = (state.lastBranchPayment || state.day) + 30;
+  const daysToPay = nextPayDay - state.day;
+
+  c.innerHTML = `<h2>🏪 ŞUBELERİM</h2>
+    <div class="subtitle">İlçelerde mağaza şubesi aç · ${branches.length} aktif şube</div>
+
+    <div class="stat-grid" style="margin-bottom: 14px;">
+      <div class="stat-tile"><div class="stat-label">Aktif Şube</div><div class="stat-val" style="color: var(--accent);">${branches.length}</div></div>
+      <div class="stat-tile"><div class="stat-label">Aylık Gider</div><div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(totalMonthlyRent + totalMonthlyOpex)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Toplam Ciro</div><div class="stat-val" style="color: var(--green); font-size: 14px;">${fmt(totalRevenue)}</div></div>
+      <div class="stat-tile"><div class="stat-label">Bu Ay Satış</div><div class="stat-val" style="color: var(--blue); font-size: 14px;">${fmt(totalAyMonthSales)}</div></div>
+    </div>
+
+    ${branches.length > 0 ? `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'}; font-size: 11px;">
+      <strong style="color: ${daysToPay <= 5 ? 'var(--red)' : 'var(--accent)'};">📅 Sonraki şube ödemesi:</strong>
+      Gün ${nextPayDay} · ${daysToPay > 0 ? daysToPay + ' gün kaldı' : 'BUGÜN!'} · Tutar: <strong>${fmt(totalMonthlyRent + totalMonthlyOpex)}</strong>
+    </div>` : ''}
+
+    <div class="tabs" style="margin-bottom: 14px;">
+      <div class="tab ${_branchesTab === 'list' ? 'active' : ''}" onclick="_branchesTab='list'; render()">📋 ŞUBELERİM (${branches.length})</div>
+      <div class="tab ${_branchesTab === 'open' ? 'active' : ''}" onclick="_branchesTab='open'; render()">➕ YENİ ŞUBE AÇ</div>
+    </div>
+  `;
+
+  if (_branchesTab === 'open') {
+    // İlçe seçim listesi
+    const availableIlces = Object.entries(ILCELER).filter(([id]) => !branches.some(b => b.ilce === id));
+    if (availableIlces.length === 0) {
+      c.innerHTML += `<div class="empty">Tüm ilçelerde şubeniz var! 🏆</div>`;
+      return;
+    }
+    c.innerHTML += `<div style="padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--blue); font-size: 11px; margin-bottom: 14px;">
+      💡 Şube açtığında o ilçedeki müşterilere <strong>daha yakın</strong> olursun. Hem perakende satış (kasiyer), hem yakın sevkiyat noktası, hem o ilçeden daha fazla ihale alırsın.
+    </div>
+    <div class="grid-2">
+      ${availableIlces.sort((a,b) => a[1].m2Price - b[1].m2Price).map(([id, ilce]) => {
+        const cost = branchOpenCost(id);
+        const rent = branchMonthlyRent(id);
+        const opex = branchMonthlyOpex(id);
+        const monthlyTotal = rent + opex;
+        const canAfford = state.cash >= cost;
+        const tier = ilce.m2Price < 30000 ? '🟢 Ucuz' : ilce.m2Price < 80000 ? '🟡 Orta' : '🔴 Premium';
+        return `<div class="card" style="border-left: 3px solid var(--accent);">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <h3 style="margin: 0;">${ilce.name}</h3>
+              <div style="font-size: 10px; color: var(--ink-dim);">${tier} · ${ilce.side === 'A' ? 'Anadolu' : 'Avrupa'} yakası · ${ilce.km} km</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 10px; color: var(--ink-dim);">m² fiyatı</div>
+              <div style="font-size: 13px; font-weight: 700;">${fmt(ilce.m2Price)}</div>
+            </div>
+          </div>
+          <div style="margin-top: 10px; padding: 8px 10px; background: var(--panel-2); font-size: 11px; line-height: 1.7;">
+            <div style="display: flex; justify-content: space-between;">
+              <span>Açılış:</span><strong style="color: var(--accent);">${fmt(cost)}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>Aylık kira:</span><strong>${fmt(rent)}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>Aylık opex:</span><strong>${fmt(opex)}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 4px; margin-top: 4px; border-top: 1px dashed var(--border);">
+              <span>Aylık toplam gider:</span><strong style="color: var(--red);">${fmt(monthlyTotal)}</strong>
+            </div>
+          </div>
+          <button class="btn primary" style="width: 100%; margin-top: 10px; ${!canAfford ? 'opacity:0.4;' : ''}" onclick="openBranch('${id}')" ${!canAfford ? 'disabled' : ''}>${canAfford ? `🏪 AÇ (${fmt(cost)})` : `Yetersiz para (-${fmt(cost - state.cash)})`}</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+    return;
+  }
+
+  // ŞUBELERİM listesi
+  if (branches.length === 0) {
+    c.innerHTML += `<div style="padding: 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.7;">
+      🏪 <strong>Henüz şuben yok.</strong>
+      <br><br>
+      Şube açarsan:
+      <ul style="margin: 6px 0 0 18px;">
+        <li>O ilçenin müşterilerinden <strong>daha sık ihale</strong> alırsın</li>
+        <li>Şube envanteri ile <strong>yakın sevkiyat</strong> noktası kurarsın</li>
+        <li>Şube kasiyeri <strong>günlük perakende satış</strong> yapar (pasif gelir)</li>
+        <li>Her şube kendi P&L'iyle muhasebede yer alır</li>
+      </ul>
+      <br>
+      <button class="btn primary" onclick="_branchesTab='open'; render()">➕ İLK ŞUBENİ AÇ</button>
+    </div>`;
+    return;
+  }
+
+  // Aktif şubeleri listele
+  c.innerHTML += `<div class="grid-2">
+    ${branches.map(br => {
+      const ilce = ILCELER[br.ilce];
+      const stockCount = Object.values(br.inventory || {}).filter(q => q > 0).length;
+      const totalStockQty = Object.values(br.inventory || {}).reduce((s, q) => s + q, 0);
+      const monthsOpen = Math.max(1, Math.floor((state.day - br.openedDay) / 30));
+      const avgMonthlyRev = Math.round((br.totalRevenue || 0) / monthsOpen);
+      const monthlyCost = (br.monthlyRent || 0) + (br.monthlyOpex || 0);
+      const netMonthly = avgMonthlyRev - monthlyCost;
+      const profitColor = netMonthly >= 0 ? 'var(--green)' : 'var(--red)';
+
+      const staff = br.staff || { manager: null, cashiers: [], warehousers: [] };
+      const staffCount = (staff.manager ? 1 : 0) + (staff.cashiers?.length || 0) + (staff.warehousers?.length || 0);
+
+      return `<div class="card" style="border-left: 3px solid var(--accent);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <h3 style="margin: 0;">🏪 ${br.name}</h3>
+            <div style="font-size: 10px; color: var(--ink-dim);">📍 ${ilce?.name || br.ilce} · Açılış: Gün ${br.openedDay} (${state.day - br.openedDay} gün önce)</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 10px; color: var(--ink-dim);">Aylık net</div>
+            <div style="font-size: 13px; font-weight: 700; color: ${profitColor};">${netMonthly >= 0 ? '+' : ''}${fmt(netMonthly)}</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 10px; padding: 8px 10px; background: var(--panel-2); font-size: 11px; line-height: 1.7;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">Toplam ciro:</span>
+            <strong style="color: var(--green);">${fmt(br.totalRevenue || 0)}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">Aylık kira+opex:</span>
+            <strong style="color: var(--red);">-${fmt(monthlyCost)}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">Envanter:</span>
+            <strong>${stockCount} ürün · ${totalStockQty.toLocaleString('tr-TR')} adet</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">Personel:</span>
+            <strong>${staffCount > 0 ? `${staffCount} kişi` : '<span style="color: var(--ink-dim);">Boş — yakında kadro açılır</span>'}</strong>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
+          <button class="btn small" style="flex: 1; opacity: 0.6;" disabled title="Aşama B'de açılacak">📦 ENVANTER</button>
+          <button class="btn small" style="flex: 1; opacity: 0.6;" disabled title="Aşama B'de açılacak">👥 KADRO</button>
+          <button class="btn small" style="flex: 1; opacity: 0.6;" disabled title="Aşama C'de açılacak">🔄 TRANSFER</button>
+          <button class="btn small danger" onclick="closeBranch('${br.id}')" title="Şubeyi kapat (%60 geri al)">KAPAT</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderFleet() {
   const c = $('center');
   // İlk ziyarette piyasa boşsa hemen doldur
@@ -13826,6 +13997,112 @@ function hireAccountant(lvl) {
 // ============================================================
 // 🏗 ŞANTİYE PERSONELİ — Özel inşaat rolleri (Aşama 7)
 // ============================================================
+// ============================================================
+// 🏪 MAĞAZA ŞUBELERİ — Yeni iş kolu
+// ============================================================
+
+// Şube açma maliyeti — ilçenin m2Price'ına göre değişir (100 m² mağaza)
+function branchOpenCost(ilceId) {
+  const ilce = ILCELER[ilceId];
+  if (!ilce) return 0;
+  return ilce.m2Price * 100;
+}
+
+function branchMonthlyRent(ilceId) {
+  const ilce = ILCELER[ilceId];
+  if (!ilce) return 0;
+  return ilce.m2Price * 3; // %3 aylık kira
+}
+
+function branchMonthlyOpex(ilceId) {
+  const ilce = ILCELER[ilceId];
+  if (!ilce) return 50000;
+  // Pahalı bölgelerde daha yüksek opex
+  return Math.round(40000 + ilce.m2Price * 0.5);
+}
+
+function openBranch(ilceId) {
+  const ilce = ILCELER[ilceId];
+  if (!ilce) { toast('Geçersiz ilçe', 'error'); return; }
+  // Aynı ilçede şube var mı?
+  if ((state.branches || []).some(b => b.ilce === ilceId)) {
+    toast(`${ilce.name}'de zaten bir şuben var`, 'error');
+    return;
+  }
+  const cost = branchOpenCost(ilceId);
+  if (state.cash < cost) {
+    toast(`Yetersiz para. Açılış için ${fmt(cost)} gerekli.`, 'error');
+    return;
+  }
+  if (!confirm(`${ilce.name}'de yeni şube açılsın mı?\n\nAçılış: ${fmt(cost)}\nAylık kira: ${fmt(branchMonthlyRent(ilceId))}\nAylık opex: ${fmt(branchMonthlyOpex(ilceId))}`)) return;
+
+  spend(cost, 'sube-acilis');
+  if (!Array.isArray(state.branches)) state.branches = [];
+
+  state.branches.push({
+    id: 'br' + uid(),
+    ilce: ilceId,
+    name: `${ilce.name} Şubesi`,
+    openedDay: state.day,
+    purchasePrice: cost,
+    monthlyRent: branchMonthlyRent(ilceId),
+    monthlyOpex: branchMonthlyOpex(ilceId),
+    inventory: {},
+    staff: {
+      manager: null,
+      cashiers: [],
+      warehousers: []
+    },
+    totalRevenue: 0,
+    totalSales: 0,
+    monthlyRevenue: 0,
+    branch: 'store'
+  });
+
+  addXP(50 + Math.round(cost / 100000), 'şube açtın');
+  toast(`🏪 ${ilce.name} Şubesi açıldı!`, 'success');
+  state.agenda.push(`🏪 Yeni şube: ${ilce.name} (${fmt(cost)})`);
+  render();
+}
+
+function closeBranch(branchId) {
+  const idx = (state.branches || []).findIndex(b => b.id === branchId);
+  if (idx < 0) return;
+  const br = state.branches[idx];
+  const sellPrice = Math.round(br.purchasePrice * 0.6); // %60 geri al
+  if (!confirm(`${br.name} kapatılsın mı?\n\nGeri kazanç: ${fmt(sellPrice)} (%60 değer)\nKadrodaki personel işten çıkarılır.\nEnvanter ana depoya transfer edilir.`)) return;
+
+  // Envanteri ana depoya transfer et
+  let transferred = 0;
+  if (br.inventory) {
+    Object.entries(br.inventory).forEach(([pid, qty]) => {
+      if (qty > 0) {
+        state.inventory[pid] = (state.inventory[pid] || 0) + qty;
+        transferred += qty;
+      }
+    });
+  }
+
+  earn(sellPrice, 'sube-satis');
+  state.branches.splice(idx, 1);
+  toast(`🏪 ${br.name} kapatıldı (${fmt(sellPrice)} alındı, ${transferred} adet ürün ana depoya geçti)`, 'info');
+  state.agenda.push(`🏪 ${br.name} kapatıldı: ${fmt(sellPrice)}`);
+  render();
+}
+
+// Aylık şube ödemeleri — kira + opex
+function payBranchMonthlyExpenses() {
+  if (!Array.isArray(state.branches) || state.branches.length === 0) return;
+  let total = 0;
+  state.branches.forEach(br => {
+    total += (br.monthlyRent || 0) + (br.monthlyOpex || 0);
+  });
+  if (total > 0) {
+    spend(total, 'sube-kira');
+    state.agenda.push(`🏪 Şube kira+opex: ${fmt(total)} (${state.branches.length} şube)`);
+  }
+}
+
 const CONSTRUCTION_ROLES = {
   chief: {
     label: '🦺 Şantiye Şefi',
@@ -17395,6 +17672,15 @@ function _nextDayInner() {
     }
   });
 
+  // 🏪 Aylık şube ödemesi — 30 günde bir kira + opex
+  if ((state.branches || []).length > 0) {
+    if (!state.lastBranchPayment) state.lastBranchPayment = state.day;
+    if (state.day - state.lastBranchPayment >= 30) {
+      payBranchMonthlyExpenses();
+      state.lastBranchPayment = state.day;
+    }
+  }
+
   // Aylık kira tahsilatı — kiracılı dairelerden
   let monthlyRentTotal = 0;
   let rentCount = 0;
@@ -19047,10 +19333,30 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v1.92';
+const CURRENT_VERSION = 'v1.93';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v1.93',
+    date: '24 Mayıs 2026',
+    title: 'MAĞAZA ŞUBELERİ (AŞAMA A — TEMELLER)',
+    items: [
+      { cat: 'major', text: '🏪 <strong>Mağaza Şubesi sistemi açıldı</strong> — istediğin ilçede şube aç' },
+      { cat: 'feature', text: '🏪 Sol menüye <strong>Şubelerim</strong> sekmesi eklendi' },
+      { cat: 'feature', text: 'İlçe seçim ekranında her ilçenin <strong>açılış maliyeti, kira ve opex</strong> görünür' },
+      { cat: 'feature', text: 'Açılış maliyeti: <code>m²Price × 100</code> (Esenyurt ₺1.8M, Beşiktaş ₺12M)' },
+      { cat: 'feature', text: 'Aylık kira: <code>m²Price × 3</code> · Aylık opex: <code>₺40K + m²Price × 0.5</code>' },
+      { cat: 'feature', text: 'Şube tier rozetleri: 🟢 Ucuz · 🟡 Orta · 🔴 Premium' },
+      { cat: 'feature', text: '<strong>Aylık otomatik ödeme</strong>: kira+opex 30 günde bir kasadan düşülür' },
+      { cat: 'feature', text: 'Sayfa stat\'ları: aktif şube, aylık gider, toplam ciro, bu ay satış' },
+      { cat: 'feature', text: 'Sonraki ödeme uyarı banner\'ı (kırmızı/yeşil)' },
+      { cat: 'feature', text: 'Şube kapatma: %60 değer geri alınır + envanter ana depoya transfer' },
+      { cat: 'feature', text: 'Muhasebede yeni kategoriler: <code>sube-acilis</code>, <code>sube-kira</code>, <code>sube-satis</code>' },
+      { cat: 'info', text: '🔜 Aşama B: Şube personeli (müdür, kasiyer, depo) + günlük perakende satış' },
+      { cat: 'info', text: '🔜 Aşama C: Envanter transfer + ilçeye özel müşteri ağı' }
+    ]
+  },
   {
     version: 'v1.92',
     date: '24 Mayıs 2026',

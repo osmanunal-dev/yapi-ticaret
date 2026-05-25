@@ -2787,6 +2787,9 @@
         <div class="nav-item" data-view="luxury" onclick="setView('luxury')">
           <span>🎩 Lüks Koleksiyon</span>
         </div>
+        <div class="nav-item" data-view="taxes" onclick="setView('taxes')">
+          <span>🏛 Vergiler</span>
+        </div>
         <div class="nav-item" data-view="dealerships" onclick="setView('dealerships')">
           <span>🏭 Bayilik</span>
         </div>
@@ -8240,9 +8243,20 @@ const state = {
   branches: [], // 🏪 Mağaza şubeleri: { id, ilce, name, openedDay, purchasePrice, monthlyRent, monthlyOpex, inventory:{}, staff:{manager,cashiers:[],warehousers:[]}, totalRevenue, monthlySales, branch:'store' }
   lastBranchPayment: 0, // Şubelerin son aylık ödeme günü
   luxuryCollection: [], // 🎩 Lüks koleksiyon: { id, itemId, purchasePrice, currentValue, purchaseDay, lastValueUpdateDay }
-  lastWealthTax: 0, // Son servet vergisi ödeme günü (365 günde bir)
+  lastWealthTax: 0, // (eskiyen alan — kullanılmıyor)
   lastLuxuryMaintenance: 0, // Lüks ürünler bakım ödemesi (30 günde bir)
   totalLuxurySpent: 0, // İstatistik: lüks ürünlere toplam harcanan
+  // 🏛 Türkiye Vergi Sistemi
+  vatCollected: 0,            // Tahsil edilen KDV (satışlardan)
+  vatPaid: 0,                 // Ödenen KDV (alımlarda — indirim)
+  lastVatPayment: 0,          // Son KDV mahsubu (30 günde bir)
+  quarterStartDay: 0,         // Çeyrek başlangıç günü (90 günde bir)
+  quarterRevenue: 0,          // Çeyrek toplam gelir
+  quarterExpense: 0,          // Çeyrek toplam gider
+  annualNetProfit: 0,         // Yıl boyunca birikmiş net kâr (4 çeyrek toplamı)
+  lastCorporateTax: 0,        // Son yıllık kurumlar vergisi (365 günde bir)
+  totalPrepaidTax: 0,         // Yıl boyu ödenmiş geçici vergi (yıl sonu mahsup)
+  taxYear: 0,                 // Vergi yılı sayacı
 
   // Günlük muhasebe defteri (income/expense kayıtları)
   // { day, type: 'income'|'expense', category, amount, description }
@@ -8582,7 +8596,17 @@ const CATEGORY_BRANCH = {
   'luks-alim': 'store',
   'luks-satis': 'store',
   'luks-bakim': 'store',
-  'servet-vergisi': 'store',
+  // 🏛 Türkiye vergi sistemi
+  'kdv': 'store',
+  'kurumlar-vergisi': 'store',
+  'gecici-vergi': 'store',
+  'damga-vergisi': 'store',
+  'stopaj': 'store',
+  'vergi-iadesi': 'store',
+  // 🏥 SGK
+  'sgk-prim': 'store',
+  'sgk-prim-insaat': 'construction',
+  'sgk-prim-fabrika': 'factory',
   // 💰 Genel (banka, kredi, kart, vergi, ceza, maaş, araç vs.) → store'a koyalım çünkü ana iş yeri
   // (gelecek: özellikle genel olabilir — şimdilik store)
 };
@@ -8590,9 +8614,22 @@ function _categoryBranch(category) {
   return CATEGORY_BRANCH[category] || 'store';
 }
 
+// Vergi takibinden hariç tutulacak kategoriler (sermaye hareketleri, vergi ödemeleri vs)
+const TAX_EXEMPT_CATEGORIES = new Set([
+  'kdv', 'kurumlar-vergisi', 'gecici-vergi', 'damga-vergisi', 'stopaj', 'vergi-iadesi',
+  'sgk-prim', 'sgk-prim-insaat', 'sgk-prim-fabrika',
+  'noop', 'depo-alim', 'krediden-cekilen', 'krediye-yatirilan',
+  'kredi-anapara', 'kredi-faiz', 'mevduat-yatirim', 'mevduat-cekim', 'kart-borc',
+  'transfer', 'yakit'
+]);
+
 function spend(amount, category) {
   state.cash -= amount;
   if (category !== 'noop') state.monthlyExpenses += amount;
+  // 🏛 Vergi takibi: alımlardan KDV indirimi + çeyrek giderine ekle
+  if (!TAX_EXEMPT_CATEGORIES.has(category) && amount > 0) {
+    try { recordTaxableExpense(amount); } catch (e) {}
+  }
   // Günlük defter kaydı
   if (category !== 'noop' && amount > 0) {
     if (!state.dailyLedger) state.dailyLedger = [];
@@ -8604,7 +8641,6 @@ function spend(amount, category) {
       amount,
       timestamp: Date.now()
     });
-    // En fazla 500 kayıt tut (daha yenisi)
     if (state.dailyLedger.length > 500) {
       state.dailyLedger = state.dailyLedger.slice(-500);
     }
@@ -8613,7 +8649,10 @@ function spend(amount, category) {
 function earn(amount, category) {
   state.cash += amount;
   if (category !== 'noop') state.monthlyRevenue += amount;
-  // Günlük defter kaydı
+  // 🏛 Vergi takibi: gelirlerden KDV ayrıştır + çeyrek gelirine ekle
+  if (!TAX_EXEMPT_CATEGORIES.has(category) && amount > 0) {
+    try { recordTaxableRevenue(amount, 0); } catch (e) {}
+  }
   if (category !== 'noop' && amount > 0) {
     if (!state.dailyLedger) state.dailyLedger = [];
     state.dailyLedger.push({
@@ -9098,6 +9137,10 @@ function acceptFactoryCustomerTender(emailId) {
     branch: 'factory'
   };
   state.contracts.push(contract);
+
+  // 📝 Damga Vergisi (%0.948)
+  const stamp = payStampDuty(contract.total, 'fabrika sözleşmesi');
+  if (stamp > 0) state.agenda.push(`📝 Damga Vergisi: -${fmt(stamp)} (${e.customerName} fabrika sözleşmesi)`);
 
   // Müşteri güveni
   customer.trust = Math.min(100, customer.trust + 2);
@@ -9968,6 +10011,7 @@ function _renderInner() {
   else if (state.view === 'fleet') renderFleet();
   else if (state.view === 'branches') renderBranches();
   else if (state.view === 'luxury') renderLuxury();
+  else if (state.view === 'taxes') renderTaxes();
   else if (state.view === 'hr') renderHR();
   else if (state.view === 'customers') renderCustomers();
   else if (state.view === 'visits') renderVisits();
@@ -10426,6 +10470,10 @@ function approveFSProposal(emailId) {
   };
 
   state.contracts.push(contract);
+
+  // 📝 Damga Vergisi (%0.948)
+  const stampFS = payStampDuty(contract.total, 'saha satış sözleşmesi');
+  if (stampFS > 0) state.agenda.push(`📝 Damga Vergisi: -${fmt(stampFS)} (saha satış sözleşmesi)`);
 
   // Personel istatistikleri güncelle
   if (rep) {
@@ -12233,6 +12281,9 @@ function confirmFactoryOffer(emailId) {
         f.totalRevenue = (f.totalRevenue || 0) + (x.unitPrice * x.qty);
       }
     });
+    // 📝 Damga Vergisi (%0.948)
+    const stampFO = payStampDuty(totalPrice, 'fabrika teklif sözleşmesi');
+    if (stampFO > 0) state.agenda.push(`📝 Damga Vergisi: -${fmt(stampFO)} (fabrika teklif sözleşmesi)`);
     toast(`✅ ${cust.name} fabrika teklifini KABUL ETTİ! Sözleşme oluşturuldu (${fmt(totalPrice)})`, 'success');
     state.agenda.push(`🏭 ${cust.name}: Fabrika teklifi kabul edildi · ${fmt(totalPrice)}`);
     addXP(50, 'fabrika teklifi kabul');
@@ -13259,6 +13310,202 @@ function _renderBranchRosterTab(br) {
   </div>`;
 }
 
+// 🏛 Vergi Sayfası — Türkiye vergi sisteminin tam durumu
+function renderTaxes() {
+  initTaxState();
+  const c = $('center');
+
+  // KDV durumu
+  const vatNet = (state.vatCollected || 0) - (state.vatPaid || 0);
+  const daysToVat = 30 - (state.day - (state.lastVatPayment || state.day));
+
+  // Çeyreklik vergi
+  const qProfit = (state.quarterRevenue || 0) - (state.quarterExpense || 0);
+  const qTax = qProfit > 0 ? Math.round(qProfit * TAX_RATES.corporate) : 0;
+  const daysToQuarter = 90 - (state.day - (state.quarterStartDay || state.day));
+
+  // Yıllık kurumlar
+  const annualProfit = state.annualNetProfit || 0;
+  const annualTotalTax = annualProfit > 0 ? Math.round(annualProfit * TAX_RATES.corporate) : 0;
+  const prepaid = state.totalPrepaidTax || 0;
+  const finalTax = Math.max(0, annualTotalTax - prepaid);
+  const daysToCorporate = 365 - (state.day - (state.lastCorporateTax || state.day));
+
+  c.innerHTML = `<h2>🏛 VERGİLER</h2>
+    <div class="subtitle">Türkiye 2026 vergi sistemi · Tüm vergiler otomatik tahsil edilir</div>
+
+    <!-- Vergi oranları rehberi -->
+    <div style="padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--accent); font-size: 11px; line-height: 1.7; margin-bottom: 14px;">
+      💡 <strong>Türkiye Vergi & SGK Oranları:</strong><br>
+      • <strong>KDV</strong>: %20 (her satışta fiyata dahil, ay sonunda mahsup edilir)<br>
+      • <strong>Kurumlar Vergisi</strong>: %25 (yıllık net kâr üzerinden, çeyreklik peşin)<br>
+      • <strong>Geçici Vergi</strong>: %25 (çeyreklik kâra göre, yıl sonunda mahsup)<br>
+      • <strong>Damga Vergisi</strong>: %0.948 (her sözleşmede anında)<br>
+      • <strong>SGK İşveren Primi</strong>: %21.75 (genel) · %16.75 (imalat — 5p indirim)<br>
+      • <strong>SGK İşçi Payı</strong>: %15 (brüt maaşa zaten dahil)
+    </div>
+
+    <!-- 💰 KDV -->
+    <div style="padding: 14px 16px; background: var(--panel-2); border-left: 3px solid ${vatNet > 0 ? '#f59e0b' : 'var(--green)'}; margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h3 style="margin: 0; color: ${vatNet > 0 ? '#f59e0b' : 'var(--green)'}; font-family: 'Bebas Neue'; letter-spacing: 2px;">💰 KATMA DEĞER VERGİSİ (KDV)</h3>
+          <div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">Aylık mahsup · ${daysToVat > 0 ? daysToVat + ' gün sonra ödenecek' : 'BUGÜN ÖDENECEK!'}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 10px; color: var(--ink-dim);">Bu ay net</div>
+          <div style="font-size: 18px; font-weight: 700; color: ${vatNet > 0 ? '#f59e0b' : 'var(--green)'};">${vatNet > 0 ? '-' : '+'}${fmt(Math.abs(vatNet))}</div>
+        </div>
+      </div>
+      <div style="margin-top: 10px; padding: 8px 10px; background: var(--bg); font-size: 11px; line-height: 1.7;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Tahsil Edilen KDV (satışlardan):</span>
+          <strong style="color: var(--blue);">${fmt(state.vatCollected || 0)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">İndirilecek KDV (alımlarda ödenen):</span>
+          <strong style="color: var(--green);">${fmt(state.vatPaid || 0)}</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⏱ Çeyreklik Geçici Vergi -->
+    <div style="padding: 14px 16px; background: var(--panel-2); border-left: 3px solid ${qTax > 0 ? 'var(--blue)' : 'var(--green)'}; margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h3 style="margin: 0; color: var(--blue); font-family: 'Bebas Neue'; letter-spacing: 2px;">⏱ ÇEYREKLİK GEÇİCİ VERGİ</h3>
+          <div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">3 ayda bir peşin · ${daysToQuarter > 0 ? daysToQuarter + ' gün sonra' : 'BUGÜN!'}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 10px; color: var(--ink-dim);">Bu çeyrek tahmini</div>
+          <div style="font-size: 18px; font-weight: 700; color: ${qTax > 0 ? '#f59e0b' : 'var(--green)'};">${qTax > 0 ? '-' : ''}${fmt(qTax)}</div>
+        </div>
+      </div>
+      <div style="margin-top: 10px; padding: 8px 10px; background: var(--bg); font-size: 11px; line-height: 1.7;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Çeyrek Geliri:</span>
+          <strong style="color: var(--blue);">${fmt(state.quarterRevenue || 0)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Çeyrek Giderleri:</span>
+          <strong style="color: var(--red);">${fmt(state.quarterExpense || 0)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 4px;">
+          <span>Çeyrek Net Kâr:</span>
+          <strong style="color: ${qProfit > 0 ? 'var(--green)' : 'var(--red)'};">${qProfit > 0 ? '+' : ''}${fmt(qProfit)}</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🏛 Yıllık Kurumlar Vergisi -->
+    <div style="padding: 14px 16px; background: var(--panel-2); border-left: 3px solid var(--red); margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h3 style="margin: 0; color: var(--red); font-family: 'Bebas Neue'; letter-spacing: 2px;">🏛 YILLIK KURUMLAR VERGİSİ</h3>
+          <div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">365 günde bir · ${daysToCorporate > 0 ? daysToCorporate + ' gün sonra' : 'BUGÜN!'}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 10px; color: var(--ink-dim);">Yıl sonu mahsup (final)</div>
+          <div style="font-size: 18px; font-weight: 700; color: ${finalTax > 0 ? 'var(--red)' : 'var(--green)'};">${finalTax > 0 ? '-' : ''}${fmt(finalTax)}</div>
+        </div>
+      </div>
+      <div style="margin-top: 10px; padding: 8px 10px; background: var(--bg); font-size: 11px; line-height: 1.7;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Yıllık Net Kâr (birikmiş):</span>
+          <strong style="color: var(--blue);">${fmt(annualProfit)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Toplam Vergi (%25):</span>
+          <strong style="color: var(--red);">${fmt(annualTotalTax)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--ink-dim);">Geçici Vergi Mahsubu:</span>
+          <strong style="color: var(--green);">-${fmt(prepaid)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 4px;">
+          <span><strong>Yıl Sonu Kalan Vergi:</strong></span>
+          <strong style="color: var(--red);">${fmt(finalTax)}</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🏥 SGK Prim Durumu -->
+    ${(() => {
+      // Tüm personeli topla
+      const allEmployees = [];
+      (state.drivers || []).forEach(d => allEmployees.push({ name: d.name, role: 'Şoför', salary: d.salary, type: 'general' }));
+      (state.salesReps || []).forEach(r => allEmployees.push({ name: r.name, role: 'Pazarlamacı', salary: r.salary, type: 'general' }));
+      (state.fieldSalesReps || []).forEach(r => allEmployees.push({ name: r.name, role: 'Saha Satış', salary: r.salary, type: 'general' }));
+      (state.purchasers || []).forEach(r => allEmployees.push({ name: r.name, role: 'Satın Alma', salary: r.salary, type: 'general' }));
+      (state.dispatchers || []).forEach(r => allEmployees.push({ name: r.name, role: 'Sevkiyat', salary: r.salary, type: 'general' }));
+      (state.accountants || []).forEach(r => allEmployees.push({ name: r.name, role: 'Muhasebe', salary: r.salary, type: 'general' }));
+      (state.constructionStaff || []).forEach(r => allEmployees.push({ name: r.name, role: 'Şantiye', salary: r.salary, type: 'general' }));
+      (state.branches || []).forEach(br => {
+        if (!br.staff) return;
+        if (br.staff.manager) allEmployees.push({ name: br.staff.manager.name, role: 'Mağaza Müdürü', salary: br.staff.manager.salary, type: 'general' });
+        (br.staff.cashiers || []).forEach(c => allEmployees.push({ name: c.name, role: 'Kasiyer', salary: c.salary, type: 'general' }));
+        (br.staff.warehousers || []).forEach(w => allEmployees.push({ name: w.name, role: 'Depo', salary: w.salary, type: 'general' }));
+      });
+      let factoryWorkers = 0;
+      let factorySalary = 0;
+      (state.factories || []).forEach(f => {
+        const workers = (f.staff?.workers || 0);
+        const purchaser = (f.staff?.purchaser || 0);
+        const salesRep = (f.staff?.salesRep || 0);
+        factoryWorkers += workers + purchaser + salesRep;
+        factorySalary += workers * 25000 + purchaser * 50000 + salesRep * 60000;
+      });
+
+      const generalSalaryTotal = allEmployees.reduce((s, e) => s + e.salary, 0);
+      const generalSgk = Math.round(generalSalaryTotal * SGK_RATES.employer);
+      const factorySgk = Math.round(factorySalary * SGK_RATES.employerManufacturing);
+      const totalSgk = generalSgk + factorySgk;
+      const totalEmployees = allEmployees.length + factoryWorkers;
+
+      return `<div style="padding: 14px 16px; background: var(--panel-2); border-left: 3px solid var(--purple); margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <h3 style="margin: 0; color: var(--purple); font-family: 'Bebas Neue'; letter-spacing: 2px;">🏥 SGK İŞVEREN PRİMİ</h3>
+            <div style="font-size: 10px; color: var(--ink-dim); margin-top: 2px;">Aylık maaşla birlikte otomatik · ${totalEmployees} personel</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 10px; color: var(--ink-dim);">Aylık SGK toplamı</div>
+            <div style="font-size: 18px; font-weight: 700; color: var(--red);">${totalSgk > 0 ? '-' : ''}${fmt(totalSgk)}</div>
+          </div>
+        </div>
+        <div style="margin-top: 10px; padding: 8px 10px; background: var(--bg); font-size: 11px; line-height: 1.7;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">Genel personel (${allEmployees.length} kişi) %21.75:</span>
+            <strong>${fmt(generalSgk)}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--ink-dim);">🏭 Fabrika işçileri (${factoryWorkers} kişi) %16.75 (imalat indirimi):</span>
+            <strong style="color: var(--green);">${fmt(factorySgk)}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 4px;">
+            <span>Toplam Aylık SGK Yükü:</span>
+            <strong style="color: var(--red);">${fmt(totalSgk)}</strong>
+          </div>
+        </div>
+        <div style="margin-top: 8px; padding: 6px 10px; background: rgba(124, 58, 237, 0.08); font-size: 10px; line-height: 1.5;">
+          💡 <strong>Prim oranları:</strong> İşçi payı %15 (zaten brüt maaşın içinde) + İşveren payı %21.75 (ek ödenir).
+          İmalat sektöründe (fabrika) işveren payı %16.75'e iner (5 puan indirim).
+        </div>
+      </div>`;
+    })()}
+
+    <!-- Bilgi -->
+    <div style="margin-top: 16px; padding: 12px 14px; background: var(--panel-2); border-left: 3px solid var(--ink-dim); font-size: 11px; line-height: 1.7;">
+      ℹ️ <strong>Vergi muhasebesi:</strong><br>
+      • Müşteri sözleşmesi bittiğinde gelir kaydedilir, KDV %20 ayrıştırılır<br>
+      • Malzeme alındığında ödenen KDV indirim olarak kaydedilir<br>
+      • Çeyrek başında <strong>geçici vergi</strong> otomatik ödenir<br>
+      • Yıl sonunda <strong>kurumlar vergisi</strong> hesaplanır, geçici vergi mahsup edilir<br>
+      • Tüm vergi hareketleri Muhasebe sayfasında görünür
+    </div>
+  `;
+}
+
 // 🎩 Lüks Koleksiyon sayfası
 let _luxuryTab = 'collection'; // 'collection' veya 'shop'
 let _luxuryShopCat = 'mega'; // 'mega' | 'art' | 'car'
@@ -13274,15 +13521,6 @@ function renderLuxury() {
     return s + (item?.monthlyMaint || 0);
   }, 0);
 
-  // Servet vergi durumu
-  const wealth = calculateWealth();
-  const luxValue = totalValue;
-  const taxable = Math.max(0, wealth - luxValue);
-  const rate = wealthTaxRate(wealth);
-  const annualTax = Math.round(taxable * rate);
-  const nextTaxDay = (state.lastWealthTax || state.day) + 365;
-  const daysToTax = nextTaxDay - state.day;
-
   c.innerHTML = `<h2>🎩 LÜKS KOLEKSİYON</h2>
     <div class="subtitle">Statü, prestij ve sanat eseri yatırımları · ${collection.length} ürün</div>
 
@@ -13292,25 +13530,6 @@ function renderLuxury() {
       <div class="stat-tile"><div class="stat-label">Toplam Harcama</div><div class="stat-val" style="color: var(--blue); font-size: 14px;">${fmt(totalSpent)}</div></div>
       <div class="stat-tile"><div class="stat-label">Aylık Bakım</div><div class="stat-val" style="color: var(--red); font-size: 14px;">${fmt(monthlyMaint)}</div></div>
     </div>
-
-    <!-- 💸 Servet vergisi uyarısı -->
-    ${rate > 0 ? `<div style="margin-bottom: 14px; padding: 12px 14px; background: var(--panel-2); border-left: 3px solid ${daysToTax <= 30 ? 'var(--red)' : '#f59e0b'}; font-size: 12px; line-height: 1.6;">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-          <strong style="color: ${daysToTax <= 30 ? 'var(--red)' : '#f59e0b'};">💸 SERVET VERGİSİ UYARISI</strong>
-          <div style="font-size: 11px; color: var(--ink-dim); margin-top: 2px;">${daysToTax > 0 ? daysToTax + ' gün sonra' : 'BUGÜN!'} · Vergilendirilebilir servet: <strong>${fmt(taxable)}</strong> · Oran: <strong>%${(rate * 100).toFixed(0)}</strong></div>
-        </div>
-        <div style="text-align: right;">
-          <div style="font-size: 11px; color: var(--ink-dim);">Tahmini vergi</div>
-          <div style="color: var(--red); font-weight: 700; font-size: 16px;">${fmt(annualTax)}</div>
-        </div>
-      </div>
-      <div style="margin-top: 8px; padding: 8px; background: var(--bg); font-size: 11px; line-height: 1.5;">
-        💡 <strong>Lüks koleksiyonun ${fmt(luxValue)}</strong> servet vergisinden <strong>MUAFTIR</strong>. Sanat eserleri ve lüks ürünler kültürel miras olarak değerlendirilir. Servet vergisinden kaçınmak için lüks alımları artırabilirsin.
-      </div>
-    </div>` : `<div style="margin-bottom: 14px; padding: 10px 14px; background: var(--panel-2); border-left: 3px solid var(--green); font-size: 11px;">
-      ✓ Servet vergisi eşiğinin altındasın (${fmt(taxable)} / ₺500M). Servet 500M\'i aşınca yıllık vergi başlar.
-    </div>`}
 
     <div class="tabs" style="margin-bottom: 14px;">
       <div class="tab ${_luxuryTab === 'collection' ? 'active' : ''}" onclick="_luxuryTab='collection'; render()">📋 KOLEKSİYONUM (${collection.length})</div>
@@ -15183,66 +15402,184 @@ function luxuryCollectionValue() {
 }
 
 // ============================================================
-// 💸 SERVET VERGİSİ — Yıllık zorunlu vergi (Lüks vergi muafiyeti yapar)
+// 🏛 TÜRKİYE VERGİ SİSTEMİ
+// KDV (%20), Kurumlar Vergisi (%25), Geçici Vergi, Damga Vergisi (%0.948)
 // ============================================================
 
+const TAX_RATES = {
+  vat: 0.20,                  // KDV %20 (genel oran)
+  corporate: 0.25,            // Kurumlar Vergisi %25
+  stamp: 0.00948,             // Damga Vergisi %0.948
+  stoppage: 0.20,             // Stopaj %20 (özel ödemeler)
+};
+
+// 🏥 SGK Prim Oranları (Türkiye 2026)
+const SGK_RATES = {
+  employee: 0.15,             // İşçi payı %15 (brüt maaştan kesilir → işçinin eline net geçer)
+  employer: 0.2175,           // İşveren payı %21.75 (işverenden ek alınır)
+  employerManufacturing: 0.1675, // İmalat sektörü %5 indirim → %16.75
+  unemployment: 0.02,         // İşsizlik sigortası işveren payı %2
+  unemploymentEmployee: 0.01  // İşsizlik işçi payı %1
+};
+
+// VAT (KDV) takibi state alanları
+function initTaxState() {
+  if (typeof state.vatCollected !== 'number') state.vatCollected = 0;  // satışlardan tahsil edilen KDV
+  if (typeof state.vatPaid !== 'number') state.vatPaid = 0;            // alımlarda ödenen KDV
+  if (typeof state.lastVatPayment !== 'number') state.lastVatPayment = state.day || 0;
+  if (typeof state.quarterStartDay !== 'number') state.quarterStartDay = state.day || 0;
+  if (typeof state.quarterRevenue !== 'number') state.quarterRevenue = 0;
+  if (typeof state.quarterExpense !== 'number') state.quarterExpense = 0;
+  if (typeof state.annualNetProfit !== 'number') state.annualNetProfit = 0;
+  if (typeof state.lastCorporateTax !== 'number') state.lastCorporateTax = state.day || 0;
+  if (typeof state.totalPrepaidTax !== 'number') state.totalPrepaidTax = 0; // çeyreklik geçici vergi toplamı (yıl sonunda mahsup)
+  if (typeof state.taxYear !== 'number') state.taxYear = 0; // başlangıçtan kaç vergi yılı geçti
+}
+
+// KDV (Aylık beyan & ödeme — 30 günde bir mahsup)
+function payMonthlyVAT() {
+  initTaxState();
+  // Toplanan KDV - ödenen KDV
+  const net = (state.vatCollected || 0) - (state.vatPaid || 0);
+  if (net > 0) {
+    if (state.cash >= net) {
+      spend(net, 'kdv');
+      state.agenda.push(`💰 Aylık KDV ödendi: -${fmt(net)} (Tahsil: ${fmt(state.vatCollected)} - İndirim: ${fmt(state.vatPaid)})`);
+      toast(`💰 KDV ödendi: ${fmt(net)}`, 'info');
+    } else {
+      state.cash -= net;
+      state.agenda.push(`⚠️ KDV ödemesi kasayı eksiltti: -${fmt(net)}`);
+    }
+  } else if (net < 0) {
+    // İade alacağı (devlete alacak)
+    state.agenda.push(`💰 KDV iadesi alacağın oluştu: ${fmt(-net)} (bir sonraki aya devredilir)`);
+    state.vatPaid = -net; // alacak, ertelenir
+    state.vatCollected = 0;
+    return;
+  }
+  // Sıfırla
+  state.vatCollected = 0;
+  state.vatPaid = 0;
+}
+
+// Kurumlar Vergisi (Yıllık — 365 günde bir) %25
+function payCorporateTax() {
+  initTaxState();
+  const profit = state.annualNetProfit || 0;
+  if (profit <= 0) {
+    state.agenda.push(`🏛 Yıllık Kurumlar Vergisi: Zarar/sıfır kâr, vergi yok (Net: ${fmt(profit)})`);
+    state.annualNetProfit = 0;
+    state.totalPrepaidTax = 0;
+    state.taxYear = (state.taxYear || 0) + 1;
+    return;
+  }
+  const totalTax = Math.round(profit * TAX_RATES.corporate);
+  // Geçici vergiler düş
+  const prepaid = state.totalPrepaidTax || 0;
+  const finalTax = Math.max(0, totalTax - prepaid);
+
+  if (finalTax > 0) {
+    if (state.cash >= finalTax) {
+      spend(finalTax, 'kurumlar-vergisi');
+      state.agenda.push(`🏛 Yıllık Kurumlar Vergisi (%25): -${fmt(finalTax)} (Net kâr: ${fmt(profit)}, Geçici vergi mahsubu: ${fmt(prepaid)})`);
+      toast(`🏛 Kurumlar Vergisi ödendi: ${fmt(finalTax)}`, 'info');
+    } else {
+      state.cash -= finalTax;
+      state.agenda.push(`⚠️ Kurumlar Vergisi kasayı eksiltti: -${fmt(finalTax)}`);
+    }
+  } else if (prepaid > totalTax) {
+    // Geçici vergi fazla ödenmiş — iade
+    const refund = prepaid - totalTax;
+    earn(refund, 'vergi-iadesi');
+    state.agenda.push(`🏛 Vergi iadesi alındı: +${fmt(refund)} (geçici vergi fazlası)`);
+  }
+  // Reset
+  state.annualNetProfit = 0;
+  state.totalPrepaidTax = 0;
+  state.taxYear = (state.taxYear || 0) + 1;
+}
+
+// Geçici Vergi (Çeyreklik — 90 günde bir) Kurumlar vergisinin %25/4 = %6.25 eşdeğeri olarak peşin
+function payQuarterlyTax() {
+  initTaxState();
+  const revenue = state.quarterRevenue || 0;
+  const expense = state.quarterExpense || 0;
+  const profit = revenue - expense;
+  if (profit <= 0) {
+    state.agenda.push(`⏱ Çeyreklik Geçici Vergi: Zarar (${fmt(profit)}), vergi yok`);
+    state.quarterRevenue = 0;
+    state.quarterExpense = 0;
+    return;
+  }
+  // Çeyreğin kârının %25'i
+  const tax = Math.round(profit * TAX_RATES.corporate);
+  if (state.cash >= tax) {
+    spend(tax, 'gecici-vergi');
+    state.totalPrepaidTax = (state.totalPrepaidTax || 0) + tax;
+    state.annualNetProfit = (state.annualNetProfit || 0) + profit;
+    state.agenda.push(`⏱ Çeyreklik Geçici Vergi (%25): -${fmt(tax)} (Çeyrek kâr: ${fmt(profit)}, Yıl sonu mahsubu)`);
+    toast(`⏱ Geçici Vergi ödendi: ${fmt(tax)}`, 'info');
+  } else {
+    state.cash -= tax;
+    state.totalPrepaidTax = (state.totalPrepaidTax || 0) + tax;
+    state.annualNetProfit = (state.annualNetProfit || 0) + profit;
+    state.agenda.push(`⚠️ Geçici Vergi kasayı eksiltti: -${fmt(tax)}`);
+  }
+  state.quarterRevenue = 0;
+  state.quarterExpense = 0;
+}
+
+// Damga Vergisi: bir sözleşme tutarı üzerinden %0.948 anında alınır
+function payStampDuty(amount, contractDesc) {
+  if (!amount || amount <= 0) return 0;
+  const duty = Math.round(amount * TAX_RATES.stamp);
+  if (duty <= 0) return 0;
+  spend(duty, 'damga-vergisi');
+  return duty;
+}
+
+// Sözleşmeden tahsil edilen para → KDV ve kâr hesabını güncelle
+function recordTaxableRevenue(amount, costBasis) {
+  initTaxState();
+  if (!amount || amount <= 0) return;
+  // KDV: amount'un %20'si KDV olarak işaretlenir (zaten fiyata dahil sayılır)
+  const vatPart = Math.round(amount * (TAX_RATES.vat / (1 + TAX_RATES.vat)));
+  const netAmount = amount - vatPart;
+  state.vatCollected = (state.vatCollected || 0) + vatPart;
+  state.quarterRevenue = (state.quarterRevenue || 0) + netAmount;
+  // Maliyet de varsa düş
+  if (costBasis && costBasis > 0) {
+    const vatBuy = Math.round(costBasis * (TAX_RATES.vat / (1 + TAX_RATES.vat)));
+    state.vatPaid = (state.vatPaid || 0) + vatBuy;
+    state.quarterExpense = (state.quarterExpense || 0) + (costBasis - vatBuy);
+  }
+}
+
+// Alımlarda ödenen KDV (girdi)
+function recordTaxableExpense(amount) {
+  initTaxState();
+  if (!amount || amount <= 0) return;
+  const vatPart = Math.round(amount * (TAX_RATES.vat / (1 + TAX_RATES.vat)));
+  state.vatPaid = (state.vatPaid || 0) + vatPart;
+  state.quarterExpense = (state.quarterExpense || 0) + (amount - vatPart);
+}
+
+// Lüks koleksiyon değeri — basit yardımcı (çeşitli yerlerde kullanılıyor)
 function calculateWealth() {
-  // Kasa + envanter değeri + arsa+bina + fabrika + sözleşme alacakları
   let total = state.cash || 0;
-  // Envanter
   Object.entries(state.inventory || {}).forEach(([pid, qty]) => {
     total += (BASE_PRICE[pid] || 0) * qty;
   });
-  // Arsalar
   (state.lands || []).forEach(l => {
     total += l.price || 0;
     if (l.building) total += l.building.totalCost || 0;
   });
-  // Fabrikalar
   (state.factories || []).forEach(f => total += f.purchasePrice || 0);
-  // Şubeler
   (state.branches || []).forEach(br => total += br.purchasePrice || 0);
-  // Cari alacaklar (paid olmayan sözleşmeler)
-  (state.contracts || []).forEach(ct => {
-    if (!ct.paid) total += ct.total || 0;
-  });
-  // Müşteri carileri
+  (state.contracts || []).forEach(ct => { if (!ct.paid) total += ct.total || 0; });
   (state.customers || []).forEach(c => total += Math.max(0, c.balance || 0));
-  // Banka mevduatı
   (state.deposits || []).forEach(d => total += (d.principal || 0) + (d.interestAccrued || 0));
   return total;
-}
-
-function wealthTaxRate(wealth) {
-  // Lüks koleksiyon değeri muaf (vergi avantajı)
-  const luxValue = luxuryCollectionValue();
-  const taxable = Math.max(0, wealth - luxValue);
-  if (taxable < 500000000) return 0;  // 500M altı muaf
-  if (taxable < 1000000000) return 0.01; // 500M-1B: %1
-  if (taxable < 5000000000) return 0.02; // 1B-5B: %2
-  if (taxable < 20000000000) return 0.03; // 5B-20B: %3
-  return 0.05; // 20B+: %5
-}
-
-function payWealthTax() {
-  const wealth = calculateWealth();
-  const rate = wealthTaxRate(wealth);
-  if (rate === 0) return;
-  const luxValue = luxuryCollectionValue();
-  const taxable = Math.max(0, wealth - luxValue);
-  const tax = Math.round(taxable * rate);
-  if (tax <= 0) return;
-
-  if (state.cash >= tax) {
-    spend(tax, 'servet-vergisi');
-    state.agenda.push(`💸 Yıllık Servet Vergisi: -${fmt(tax)} (%${(rate * 100).toFixed(0)} oranında, lüks koleksiyon ${fmt(luxValue)} muaf)`);
-    toast(`💸 Servet Vergisi ödendi: ${fmt(tax)} (Koleksiyon ${fmt(luxValue)} vergiden muaf)`, 'info');
-  } else {
-    // Kasada para yetmezse: ceza + sonradan ödenir
-    state.cash -= tax;
-    state.agenda.push(`⚠️ Servet Vergisi kasayı eksiltti: -${fmt(tax)} (kasa açıkta kaldı)`);
-    toast(`⚠️ Servet Vergisi ödendi ama kasa eksi düştü!`, 'error');
-  }
 }
 
 const BRANCH_ROLES = {
@@ -19314,13 +19651,28 @@ function _nextDayInner() {
     }
   }
 
-  // 💸 Yıllık servet vergisi (365 günde bir)
-  if (!state.lastWealthTax) state.lastWealthTax = state.day;
-  if (state.day - state.lastWealthTax >= 365) {
+  // 🏛 TÜRKİYE VERGİ SİSTEMİ
+  initTaxState();
+  // 💰 Aylık KDV ödemesi (30 günde bir)
+  if (state.day - (state.lastVatPayment || state.day) >= 30) {
     try {
-      payWealthTax();
-      state.lastWealthTax = state.day;
-    } catch (e) { console.warn('Servet vergisi hatası:', e); }
+      payMonthlyVAT();
+      state.lastVatPayment = state.day;
+    } catch (e) { console.warn('KDV ödeme hatası:', e); }
+  }
+  // ⏱ Çeyreklik Geçici Vergi (90 günde bir)
+  if (state.day - (state.quarterStartDay || state.day) >= 90) {
+    try {
+      payQuarterlyTax();
+      state.quarterStartDay = state.day;
+    } catch (e) { console.warn('Geçici vergi hatası:', e); }
+  }
+  // 🏛 Yıllık Kurumlar Vergisi (365 günde bir)
+  if (state.day - (state.lastCorporateTax || state.day) >= 365) {
+    try {
+      payCorporateTax();
+      state.lastCorporateTax = state.day;
+    } catch (e) { console.warn('Kurumlar vergisi hatası:', e); }
   }
 
   // 🏪 Günlük şube perakende satışı (müdürü olan şubelerde)
@@ -19720,9 +20072,21 @@ function _nextDayInner() {
       const storeSalary = totalPayroll - constSalary;
       if (storeSalary > 0) spend(storeSalary, 'maas');
       if (constSalary > 0) spend(constSalary, 'maas-insaat');
+
+      // 🏥 SGK İşveren Primi — Brüt maaşın %21.75'i (genel) veya %16.75 (imalat)
+      // İşçi payı (%15) zaten brüt maaşın içinden çıkar, sadece UI'da gösterir
+      // Bu oyunda maaşı brüt olarak takip ediyoruz; SGK işveren primi EK ödenir
+      const sgkEmployerRate = SGK_RATES.employer;
+      // Genel SGK (mağaza, şantiye, ofis personeli)
+      const generalSgk = Math.round(storeSalary * sgkEmployerRate);
+      const constSgk = Math.round(constSalary * sgkEmployerRate);
+      if (generalSgk > 0) spend(generalSgk, 'sgk-prim');
+      if (constSgk > 0) spend(constSgk, 'sgk-prim-insaat');
+      const totalSgk = generalSgk + constSgk;
+
       state.lastPayrollDay = state.day;
-      state.agenda.push(`💼 AYLIK MAAŞLAR ÖDENDİ: ${fmt(totalPayroll)}${constSalary > 0 ? ` (Şantiye: ${fmt(constSalary)})` : ''}`);
-      toast(`💼 Aylık maaşlar ödendi: ${fmt(totalPayroll)} (${breakdown.length} kişi)`, 'info');
+      state.agenda.push(`💼 AYLIK MAAŞLAR ÖDENDİ: ${fmt(totalPayroll)} + SGK Prim ${fmt(totalSgk)} (Toplam: ${fmt(totalPayroll + totalSgk)})`);
+      toast(`💼 Maaş: ${fmt(totalPayroll)} + SGK: ${fmt(totalSgk)} (${breakdown.length} kişi)`, 'info');
 
       if (state.cash < 0) {
         toast(`⚠️ Maaş ödemesi için kasa açıkta kaldı! Krediye veya tahsilata bak.`, 'error');
@@ -19745,15 +20109,21 @@ function _nextDayInner() {
         const workerSalary = (f.staff.workers || 0) * 25_000;     // ₺25K/işçi/ay
         const purchaserSalary = (f.staff.purchaser || 0) * 50_000;// ₺50K/sorumlu/ay
         const salesRepSalary = (f.staff.salesRep || 0) * 60_000;  // ₺60K/satış uzmanı/ay
-        const totalOpex = baseOpex + workerSalary + purchaserSalary + salesRepSalary;
+        const totalSalary = workerSalary + purchaserSalary + salesRepSalary;
+        const totalOpex = baseOpex + totalSalary;
         spend(totalOpex, 'fabrika-isletme');
+
+        // 🏥 SGK İşveren Primi — Fabrika imalat indirimi (%16.75)
+        const sgkFactory = Math.round(totalSalary * SGK_RATES.employerManufacturing);
+        if (sgkFactory > 0) spend(sgkFactory, 'sgk-prim-fabrika');
+
         f.lastOpexDay = state.day;
         // Üretim sayacı ay başına sıfırlanır
         f.currentProduction = 0;
         f.productionMonthStartDay = state.day;
         const b = BRANDS[f.brandId];
-        const breakdown = `(opex ${fmt(baseOpex)} + maaş ${fmt(workerSalary + purchaserSalary + salesRepSalary)})`;
-        state.agenda.push(`🏭 ${b?.name || 'Fabrika'} aylık: -${fmt(totalOpex)} ${breakdown}`);
+        const breakdown = `(opex ${fmt(baseOpex)} + maaş ${fmt(totalSalary)} + SGK ${fmt(sgkFactory)})`;
+        state.agenda.push(`🏭 ${b?.name || 'Fabrika'} aylık: -${fmt(totalOpex + sgkFactory)} ${breakdown}`);
       }
 
       // --- Otomatik hammadde alımı (satın alma sorumlusu varsa) ---
@@ -21054,10 +21424,48 @@ function avatarHTML(avatarId, fallbackLetter, googlePhotoURL) {
 // CHANGELOG / GÜNCELLEMELER
 // ============================================================
 
-const CURRENT_VERSION = 'v2.03';
+const CURRENT_VERSION = 'v2.05';
 
 // Sürümler — en yenisi en üstte
 const CHANGELOG_DATA = [
+  {
+    version: 'v2.05',
+    date: '25 Mayıs 2026',
+    title: '🏥 SGK SİGORTA SİSTEMİ',
+    items: [
+      { cat: 'major', text: '🏥 <strong>Türkiye SGK işveren primi sistemi eklendi</strong>' },
+      { cat: 'feature', text: '<strong>%21.75</strong> genel sektör (mağaza, şantiye, ofis personeli)' },
+      { cat: 'feature', text: '<strong>%16.75</strong> imalat sektörü (fabrika işçileri — 5 puan indirim)' },
+      { cat: 'feature', text: '<strong>%15</strong> işçi payı (brüt maaşın içinde, ek alınmaz)' },
+      { cat: 'feature', text: 'Maaş ödenir ödenmez SGK işveren primi otomatik kesilir' },
+      { cat: 'feature', text: 'Şantiye personeli için ayrı muhasebe (<code>sgk-prim-insaat</code>)' },
+      { cat: 'feature', text: 'Fabrika işçileri için ayrı muhasebe (<code>sgk-prim-fabrika</code>)' },
+      { cat: 'feature', text: 'Mağaza/Ofis personeli için <code>sgk-prim</code> kategorisi' },
+      { cat: 'feature', text: '🏛 Vergiler sayfasında <strong>🏥 SGK kartı</strong> — personel sayısı + aylık prim yükü' },
+      { cat: 'feature', text: 'Genel personel ve fabrika işçisi ayrı satırlarda gösterilir' },
+      { cat: 'info', text: 'Aylık maaş bildirimi: "Maaş: ₺X + SGK: ₺Y (Z kişi)" şeklinde toast' },
+      { cat: 'info', text: '💡 Strateji: Fabrika işçisi (₺25K maaş) imalat indirimiyle daha ucuz SGK' }
+    ]
+  },
+  {
+    version: 'v2.04',
+    date: '25 Mayıs 2026',
+    title: '🏛 TÜRKİYE VERGİ SİSTEMİ',
+    items: [
+      { cat: 'major', text: '🏛 <strong>Türkiye gerçek vergi sistemi eklendi</strong> — Servet vergisi kaldırıldı, gerçek vergiler geldi' },
+      { cat: 'major', text: '💰 <strong>KDV (%20)</strong> — Aylık otomatik mahsup: satışlardaki KDV - alımlardaki KDV' },
+      { cat: 'major', text: '🏛 <strong>Kurumlar Vergisi (%25)</strong> — Yıllık net kâr üzerinden, 365 günde bir ödenir' },
+      { cat: 'major', text: '⏱ <strong>Geçici Vergi (%25 çeyreklik)</strong> — 90 günde bir peşin, yıl sonu mahsup edilir' },
+      { cat: 'major', text: '📝 <strong>Damga Vergisi (%0.948)</strong> — Her sözleşmede anında kesilir' },
+      { cat: 'feature', text: 'İç şantiye sözleşmeleri damga vergisinden muaf (kendinle sözleşme)' },
+      { cat: 'feature', text: '<strong>🏛 VERGİLER</strong> sayfası: 💰 Finans & Yatırım → 🏛 Vergiler' },
+      { cat: 'feature', text: 'Sayfada: KDV durumu, çeyrek vergi tahmini, yıllık kurumlar vergisi mahsubu' },
+      { cat: 'feature', text: 'earn() ve spend() fonksiyonları otomatik KDV ayrıştırma yapıyor' },
+      { cat: 'feature', text: 'Çeyrek gelir/gider birikiyor, yıllık mahsupla geçici vergi düşülüyor' },
+      { cat: 'feature', text: 'Muhasebede yeni kategoriler: <code>kdv</code>, <code>kurumlar-vergisi</code>, <code>gecici-vergi</code>, <code>damga-vergisi</code>, <code>vergi-iadesi</code>' },
+      { cat: 'info', text: '💡 Vergi ödemeleri kendileri vergiden muaf (transfer, kredi, mevduat, yakıt da öyle)' }
+    ]
+  },
   {
     version: 'v2.03',
     date: '24 Mayıs 2026',
